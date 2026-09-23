@@ -1,0 +1,436 @@
+openapi: 3.1.0
+info:
+  title: Cortexbase API
+  description: The self-hosted AI application backend API for mobile, web, and client applications.
+  version: 0.1.0
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+paths:
+  /healthz:
+    get:
+      summary: Liveness probe
+      description: Returns 200 OK if the process is running.
+      responses:
+        "200":
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                required:
+                  - status
+
+  /readyz:
+    get:
+      summary: Readiness probe
+      description: Returns 200 OK if snapshot and dependencies are ready.
+      responses:
+        "200":
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ready
+                  role:
+                    type: string
+                    example: all
+        "503":
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: not_ready
+
+  /v1/apps/{ai_app_id}:
+    get:
+      summary: Get AI App metadata
+      description: Retrieves public metadata for the specified AI App.
+      parameters:
+        - name: ai_app_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/ProjectIDHeader"
+        - $ref: "#/components/parameters/EnvironmentHeader"
+      responses:
+        "200":
+          description: AI App metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIAppMetadata"
+        "401":
+          $ref: "#/components/responses/401Error"
+        "404":
+          $ref: "#/components/responses/404Error"
+
+  /v1/apps/{ai_app_id}/chat:
+    post:
+      summary: Unary Chat Completion
+      description: Executes a synchronous, non-streaming chat request against the specified AI App.
+      parameters:
+        - name: ai_app_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/ProjectIDHeader"
+        - $ref: "#/components/parameters/EnvironmentHeader"
+        - $ref: "#/components/parameters/RequestIDHeader"
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+      responses:
+        "200":
+          description: Chat completion response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+        "400":
+          $ref: "#/components/responses/400Error"
+        "401":
+          $ref: "#/components/responses/401Error"
+        "403":
+          $ref: "#/components/responses/403Error"
+        "429":
+          $ref: "#/components/responses/429Error"
+        "502":
+          $ref: "#/components/responses/502Error"
+
+  /v1/apps/{ai_app_id}/stream:
+    post:
+      summary: Streaming Chat Completion (SSE)
+      description: Establishes a Server-Sent Events stream for low-latency token delivery.
+      parameters:
+        - name: ai_app_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/ProjectIDHeader"
+        - $ref: "#/components/parameters/EnvironmentHeader"
+        - $ref: "#/components/parameters/RequestIDHeader"
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChatRequest"
+      responses:
+        "200":
+          description: Server-Sent Events stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/401Error"
+        "403":
+          $ref: "#/components/responses/403Error"
+        "429":
+          $ref: "#/components/responses/429Error"
+
+  /v1/apps/{ai_app_id}/confirm:
+    post:
+      summary: Confirm Suspended Tool Execution
+      description: Resumes a request paused awaiting explicit human confirmation.
+      parameters:
+        - name: ai_app_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/ProjectIDHeader"
+        - $ref: "#/components/parameters/EnvironmentHeader"
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                confirmation_token:
+                  type: string
+                approved:
+                  type: boolean
+              required:
+                - confirmation_token
+                - approved
+      responses:
+        "200":
+          description: Continued chat response or stream
+        "401":
+          $ref: "#/components/responses/401Error"
+        "403":
+          $ref: "#/components/responses/403Error"
+
+  /v1/apps/{ai_app_id}/tool-results:
+    post:
+      summary: Submit Client-Side Tool Results
+      description: Submits results of client-side executed tools back to the agent loop.
+      parameters:
+        - name: ai_app_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/ProjectIDHeader"
+        - $ref: "#/components/parameters/EnvironmentHeader"
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                continuation_token:
+                  type: string
+                call_id:
+                  type: string
+                result:
+                  type: object
+              required:
+                - continuation_token
+                - call_id
+                - result
+      responses:
+        "200":
+          description: Continued chat response or stream
+
+  /v1/apps/{ai_app_id}/cancel:
+    post:
+      summary: Cancel active request
+      parameters:
+        - name: ai_app_id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                request_id:
+                  type: string
+              required:
+                - request_id
+      responses:
+        "200":
+          description: Request cancellation recorded
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    ProjectIDHeader:
+      name: X-Project-ID
+      in: header
+      required: true
+      schema:
+        type: string
+      example: proj_ecommerce
+    EnvironmentHeader:
+      name: X-Environment
+      in: header
+      required: true
+      schema:
+        type: string
+        enum: [development, staging, production]
+      example: development
+    RequestIDHeader:
+      name: X-Request-Id
+      in: header
+      required: false
+      schema:
+        type: string
+      example: req_01HP3KX7Z
+
+  responses:
+    400Error:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    401Error:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    403Error:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    404Error:
+      description: Not Found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    422Error:
+      description: Guardrail blocked request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    429Error:
+      description: Rate limited
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    502Error:
+      description: Upstream provider error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    503Error:
+      description: Service unavailable
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    504Error:
+      description: Tool execution timeout
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    ChatMessage:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant, tool]
+        content:
+          type: string
+      required:
+        - role
+        - content
+
+    ChatRequest:
+      type: object
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+      required:
+        - messages
+
+    UsageStats:
+      type: object
+      properties:
+        input_tokens:
+          type: integer
+        output_tokens:
+          type: integer
+        total_tokens:
+          type: integer
+        cost_usd:
+          type: number
+      required:
+        - input_tokens
+        - output_tokens
+        - total_tokens
+
+    ChatResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        request_id:
+          type: string
+        ai_app_id:
+          type: string
+        created_at:
+          type: integer
+        message:
+          $ref: "#/components/schemas/ChatMessage"
+        finish_reason:
+          type: string
+        usage:
+          $ref: "#/components/schemas/UsageStats"
+      required:
+        - id
+        - request_id
+        - ai_app_id
+        - created_at
+        - message
+        - finish_reason
+        - usage
+
+    AIAppMetadata:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+      required:
+        - id
+        - name
+
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        request_id:
+          type: string
+        retry_after:
+          type: integer
+        details:
+          type: object
+      required:
+        - code
+        - message

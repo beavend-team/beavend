@@ -1,0 +1,35 @@
+run:
+  timeout: 5m
+  go: "1.22"
+
+linters:
+  enable:
+    - depguard
+    - govet
+    - staticcheck
+    - revive
+    - gofmt
+    - ineffassign
+    - misspell
+    - unconvert
+    - errcheck
+
+linters-settings:
+  depguard:
+    rules:
+      prevent_control_runtime:
+        list-mode: lax
+        files:
+          - "!**/cmd/**"
+        deny:
+          - pkg: "github.com/cortexbase/cortexbase/internal/control"
+            desc: "Only cmd may import internal/control"
+          - pkg: "github.com/cortexbase/cortexbase/internal/runtime"
+            desc: "Only cmd may import internal/runtime"
+      core_isolation:
+        list-mode: lax
+        files:
+          - "**/internal/core/**"
+        deny:
+          - pkg: "github.com/cortexbase/cortexbase/internal/**"
+            desc: "internal/core must not import other internal packages"
