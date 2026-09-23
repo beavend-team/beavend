@@ -9,6 +9,7 @@ type Snapshot struct {
 	Environment      string                       `json:"environment"`
 	Revision         int64                        `json:"revision"`
 	CompiledAt       time.Time                    `json:"compiled_at"`
+	AuthConfig       *AuthConfig                  `json:"auth_config,omitempty"`
 	Apps             map[string]*AIApp            `json:"apps"`
 	Prompts          map[string]*PromptVersion    `json:"prompts"`
 	Models           map[string]*ModelRouting     `json:"models"`
@@ -78,4 +79,12 @@ func (s *Snapshot) Prompt(id string) (*PromptVersion, bool) {
 	}
 	p, ok := s.Prompts[id]
 	return p, ok
+}
+
+// Auth returns the AuthConfig if present.
+func (s *Snapshot) Auth() (*AuthConfig, bool) {
+	if s == nil || s.AuthConfig == nil {
+		return nil, false
+	}
+	return s.AuthConfig, true
 }

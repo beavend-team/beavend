@@ -7,14 +7,14 @@ This roadmap translates the Cortexbase PRD, Architecture, and Tech Stack into ac
 ## Phase Overview
 
 ```text
-Phase 1: Repository Foundation & Core Types
+Phase 1: Repository Foundation & Core Types [Done]
    │
    ▼
-Phase 2: Persistent Storage & Config Snapshots
+Phase 2: Persistent Storage & Config Snapshots [Done]
    │
    ├──────────────────────────────┬──────────────────────────────┐
    ▼                              ▼                              ▼
-Phase 3: Identity & Auth     Phase 5: Rate Limiting      Phase 6: Provider Layer
+Phase 3: Identity & Auth [Done] Phase 5: Rate Limiting      Phase 6: Provider Layer
    │                              │                              │
    ▼                              │                              │
 Phase 4: Policy Engine (CEL)      │                              │
@@ -63,8 +63,8 @@ Phase 4: Policy Engine (CEL)      │                              │
 
 ---
 
-## Phase 3: Identity & Authentication [Next]
-* **Status:** Ready / Next
+## Phase 3: Identity & Authentication [Completed]
+* **Status:** Completed
 * **Goal:** Build the runtime identity validation pipeline supporting generic OIDC, Firebase Auth, and Supabase Auth JWTs.
 * **Major Deliverables:**
   * `identity.Verifier` using `lestrrat-go/jwx` with in-memory JWKS caching and background rotation.
@@ -77,7 +77,8 @@ Phase 4: Policy Engine (CEL)      │                              │
 
 ---
 
-## Phase 4: Authorization & Policy Engine
+## Phase 4: Authorization & Policy Engine [Next]
+* **Status:** Ready / Next
 * **Goal:** Implement the Google CEL (Common Expression Language) policy evaluation engine to authorize AI App and Tool access based on identity claims.
 * **Major Deliverables:**
   * CEL program compiler integrated into snapshot compilation (`internal/policy`).

@@ -1,4 +1,6 @@
-# T012 — Ingress Authentication Middleware and Error Mapping
+# T012 — Ingress Authentication Middleware and Error Mapping [Completed]
+
+* **Status:** Completed
 
 ## Goal
 Implement the HTTP authentication middleware extracting Bearer tokens, performing verification, injecting `core.Identity` into `context.Context`, and returning RFC 7807 compliant `401 unauthenticated` errors on failure.
@@ -24,9 +26,9 @@ Implement the HTTP authentication middleware extracting Bearer tokens, performin
 - Do not log token contents or authorization headers.
 
 ## Acceptance Criteria
-- [ ] Requests without Authorization header return `401 unauthenticated`.
-- [ ] Requests with invalid or expired tokens return `401 unauthenticated`.
-- [ ] Requests with valid token pass downstream with `core.Identity` accessible in context.
+- [x] Requests without Authorization header return `401 unauthenticated`.
+- [x] Requests with invalid or expired tokens return `401 unauthenticated`.
+- [x] Requests with valid token pass downstream with `core.Identity` accessible in context.
 
 ## Verification
 ```bash

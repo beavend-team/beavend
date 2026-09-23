@@ -83,6 +83,23 @@ func TestIdentity_Keys(t *testing.T) {
 	if ok {
 		t.Fatalf("expected nonexistent claim to return false")
 	}
+
+	if !id.HasAudience("my-app") {
+		t.Fatalf("expected HasAudience('my-app') to be true")
+	}
+	if id.HasAudience("other-app") {
+		t.Fatalf("expected HasAudience('other-app') to be false")
+	}
+
+	idMulti := Identity{
+		Audience: "app1,app2",
+		Claims: map[string]any{
+			"aud": []string{"app1", "app2"},
+		},
+	}
+	if !idMulti.HasAudience("app1") || !idMulti.HasAudience("app2") {
+		t.Fatalf("expected HasAudience for slice to return true")
+	}
 }
 
 func TestSnapshot_Accessors(t *testing.T) {

@@ -1,4 +1,6 @@
-# T011 — Identity Normalization and Claims Extraction
+# T011 — Identity Normalization and Claims Extraction [Completed]
+
+* **Status:** Completed
 
 ## Goal
 Transform validated provider-specific JWT tokens into the normalized `core.Identity` structure in `internal/identity`.
@@ -32,8 +34,8 @@ Transform validated provider-specific JWT tokens into the normalized `core.Ident
 - Claims map must be immutable once created.
 
 ## Acceptance Criteria
-- [ ] Table-driven tests verify correct normalization across Firebase, Supabase, and generic OIDC sample tokens.
-- [ ] Dot-notation claim extraction verified.
+- [x] Table-driven tests verify correct normalization across Firebase, Supabase, and generic OIDC sample tokens.
+- [x] Dot-notation claim extraction verified.
 
 ## Verification
 ```bash

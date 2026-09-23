@@ -1,6 +1,20 @@
 package core
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
+
+// AuthConfig defines identity provider and JWT verification parameters for a project environment.
+type AuthConfig struct {
+	Provider          string        `json:"provider" yaml:"provider"` // "oidc", "firebase", "supabase", "jwt"
+	Issuer            string        `json:"issuer" yaml:"issuer"`
+	Audience          []string      `json:"audience" yaml:"audience"`
+	JWKSURL           string        `json:"jwks_url" yaml:"jwks_url"`
+	AllowedAlgorithms []string      `json:"allowed_algorithms,omitempty" yaml:"allowed_algorithms,omitempty"`
+	ProjectID         string        `json:"project_id,omitempty" yaml:"project_id,omitempty"` // Provider project ID (e.g. Firebase project_id)
+	ClockSkew         time.Duration `json:"clock_skew,omitempty" yaml:"clock_skew,omitempty"`
+}
 
 // Identity represents the normalized end-user identity derived from a validated token.
 type Identity struct {
@@ -49,4 +63,30 @@ func (i Identity) ClaimBool(key string) (bool, bool) {
 	}
 	b, ok := val.(bool)
 	return b, ok
+}
+
+// HasAudience checks if target audience matches either the Audience field or any entry in the "aud" claim.
+func (i Identity) HasAudience(target string) bool {
+	if i.Audience == target {
+		return true
+	}
+	if audVal, ok := i.Claims["aud"]; ok {
+		switch a := audVal.(type) {
+		case string:
+			return a == target
+		case []string:
+			for _, aud := range a {
+				if aud == target {
+					return true
+				}
+			}
+		case []any:
+			for _, item := range a {
+				if str, isStr := item.(string); isStr && str == target {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

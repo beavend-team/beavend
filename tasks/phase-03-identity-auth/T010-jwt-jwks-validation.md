@@ -1,4 +1,6 @@
-# T010 — JWT Validation and Cached JWKS Verifier
+# T010 — JWT Validation and Cached JWKS Verifier [Completed]
+
+* **Status:** Completed
 
 ## Goal
 Implement local, zero-network-on-hot-path JWT validation using `lestrrat-go/jwx` with in-memory cached JWKS in `internal/identity`.
@@ -24,9 +26,9 @@ Implement local, zero-network-on-hot-path JWT validation using `lestrrat-go/jwx`
 - Do not implement token revocation lists or database session checks (per ADR-003).
 
 ## Acceptance Criteria
-- [ ] Valid tokens pass signature and claims verification.
-- [ ] Expired tokens, tokens with wrong issuer/audience, or tokens with `alg: "none"` fail with specific typed errors.
-- [ ] Unknown `kid` triggers controlled single-flight JWKS refresh.
+- [x] Valid tokens pass signature and claims verification.
+- [x] Expired tokens, tokens with wrong issuer/audience, or tokens with `alg: "none"` fail with specific typed errors.
+- [x] Unknown `kid` triggers controlled single-flight JWKS refresh.
 
 ## Verification
 ```bash
