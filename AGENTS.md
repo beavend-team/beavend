@@ -1,12 +1,12 @@
-# AGENTS.md — Cortexbase Backend Contributor & AI Agent Guide
+# AGENTS.md — Beavend Backend Contributor & AI Agent Guide
 
-Welcome to the **Cortexbase** backend repository. This document provides practical, non-generic instructions for AI coding agents and human engineers contributing to the server, control plane, and administrative dashboard.
+Welcome to the **Beavend** backend repository. This document provides practical, non-generic instructions for AI coding agents and human engineers contributing to the server, control plane, and administrative dashboard.
 
 ---
 
 ## 1. Project Purpose & Scope
 
-**Cortexbase** is an open-source, self-hosted AI application backend designed for mobile, web, and client applications. It serves as an application-facing AI runtime—analogous to Firebase AI Logic—while remaining:
+**Beavend** is an open-source, self-hosted AI application backend designed for mobile, web, and client applications. It serves as an application-facing AI runtime—analogous to Firebase AI Logic—while remaining:
 * **Self-hostable & Open-Source:** Deployed as a single binary via Docker Compose or Kubernetes.
 * **Provider-Agnostic:** Mediates between client applications and AI model providers via LiteLLM and native adapters.
 * **Data-Agnostic:** Stores **zero** implementor business data. Live application data is fetched at request-time via custom Tools on behalf of authenticated end users.
@@ -26,7 +26,7 @@ Welcome to the **Cortexbase** backend repository. This document provides practic
 
 ## 2. High-Level Architecture & Planes
 
-Cortexbase is architected as a **modular monolith** running a single compiled Go binary with a strict split between two operational planes:
+Beavend is architected as a **modular monolith** running a single compiled Go binary with a strict split between two operational planes:
 
 1. **Runtime Plane (Data Plane):**
    * Serves public client AI requests (`POST /v1/apps/{id}/chat`, `POST /v1/apps/{id}/stream`).
@@ -46,11 +46,11 @@ The binary accepts `--role=runtime`, `--role=control`, or `--role=all` (default 
 ## 3. Repository Structure
 
 ```text
-cortexbase/
+beavend/
 ├── api/
 │   └── openapi.yaml           # Single source of truth for runtime & management APIs
 ├── cmd/
-│   └── cortexbase/            # Application entrypoint: flags, role wiring, graceful shutdown
+│   └── beavend/            # Application entrypoint: flags, role wiring, graceful shutdown
 ├── internal/
 │   ├── core/                  # Pure domain entities, types, and interfaces (zero outward dependencies)
 │   ├── runtime/               # Request pipeline stages, agent loop, SSE stream writer
@@ -93,13 +93,13 @@ Every agent and contributor must uphold these non-negotiable rules:
 2. **Strict Inward Dependency Flow:**
    * Domain interfaces live in `internal/core`. Leaf packages (e.g. `internal/providers`, `internal/tools`) depend on `internal/core`.
    * `internal/core` must **never** import leaf packages.
-   * No package may import `internal/control` or `internal/runtime` except `cmd/cortexbase`.
+   * No package may import `internal/control` or `internal/runtime` except `cmd/beavend`.
    * Enforced via `depguard` in `golangci-lint`.
 3. **No ORM Magic:**
    * All database interactions must use raw `.sql` files processed by `sqlc` to generate type-safe Go code.
    * Migrations must be versioned SQL managed by `goose`.
 4. **Token Revocation Out-of-Scope:**
-   * Cortexbase **validates and forwards** tokens. It does not track token revocation lists, active sessions, or user state. Token revocation belongs strictly to the implementor's identity provider.
+   * Beavend **validates and forwards** tokens. It does not track token revocation lists, active sessions, or user state. Token revocation belongs strictly to the implementor's identity provider.
 5. **No Provider Credentials in Clients or Responses:**
    * AI provider API keys and LiteLLM keys must never be exposed to clients, returned in API payloads, or written into logs.
 6. **Stateless Scalability:**
@@ -111,7 +111,7 @@ Every agent and contributor must uphold these non-negotiable rules:
 
 * **Language & Standard Library First:** Use Go standard library idioms where possible. Use `net/http` combined with `chi` router for routing.
 * **Structured Logging:** Use `log/slog` exclusively. Always include `request_id`, `project_id`, and `env` attributes. Never use `fmt.Print` or untyped logging.
-* **Error Handling:** Return wrapped errors (`fmt.Errorf("...: %w", err)`). Map internal errors to the Cortexbase error taxonomy at the HTTP ingress stage. Never return raw internal error messages or stack traces to end users.
+* **Error Handling:** Return wrapped errors (`fmt.Errorf("...: %w", err)`). Map internal errors to the Beavend error taxonomy at the HTTP ingress stage. Never return raw internal error messages or stack traces to end users.
 * **Context Propagation:** Pass `context.Context` as the first parameter in all blocking/network operations. Propagate client cancellation through `context.Context` to abort upstream LLM calls and tool executions immediately.
 * **Concurrency Discipline:** SSE streams run on dedicated goroutines. Ensure explicit cleanup, avoid goroutine leaks, and use bounded channels for asynchronous usage and logging pipelines.
 

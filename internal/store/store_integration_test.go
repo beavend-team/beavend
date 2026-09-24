@@ -11,14 +11,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 
-	"github.com/cortexbase/cortexbase/internal/store"
-	"github.com/cortexbase/cortexbase/internal/store/db"
+	"github.com/beavend/beavend/internal/store"
+	"github.com/beavend/beavend/internal/store/db"
 )
 
 func TestStore_Integration(t *testing.T) {
-	dbURL := os.Getenv("CORTEXBASE_DATABASE_URL")
+	dbURL := os.Getenv("BEAVEND_DATABASE_URL")
 	if dbURL == "" {
-		t.Skip("Skipping store integration test: CORTEXBASE_DATABASE_URL not set")
+		t.Skip("Skipping store integration test: BEAVEND_DATABASE_URL not set")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

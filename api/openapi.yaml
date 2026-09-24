@@ -1,6 +1,6 @@
 openapi: 3.1.0
 info:
-  title: Cortexbase API
+  title: Beavend API
   description: The self-hosted AI application backend API for mobile, web, and client applications.
   version: 0.1.0
 servers:

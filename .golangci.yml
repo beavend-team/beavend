@@ -22,14 +22,14 @@ linters-settings:
         files:
           - "!**/cmd/**"
         deny:
-          - pkg: "github.com/cortexbase/cortexbase/internal/control"
+          - pkg: "github.com/beavend/beavend/internal/control"
             desc: "Only cmd may import internal/control"
-          - pkg: "github.com/cortexbase/cortexbase/internal/runtime"
+          - pkg: "github.com/beavend/beavend/internal/runtime"
             desc: "Only cmd may import internal/runtime"
       core_isolation:
         list-mode: lax
         files:
           - "**/internal/core/**"
         deny:
-          - pkg: "github.com/cortexbase/cortexbase/internal/**"
+          - pkg: "github.com/beavend/beavend/internal/**"
             desc: "internal/core must not import other internal packages"

@@ -32,6 +32,6 @@ Create SQL migrations for:
 
 ## Verification
 ```bash
-goose -dir internal/store/migrations postgres "$CORTEXBASE_DATABASE_URL" up
-goose -dir internal/store/migrations postgres "$CORTEXBASE_DATABASE_URL" down
+goose -dir internal/store/migrations postgres "$BEAVEND_DATABASE_URL" up
+goose -dir internal/store/migrations postgres "$BEAVEND_DATABASE_URL" down
 ```

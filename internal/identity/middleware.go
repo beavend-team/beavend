@@ -9,15 +9,15 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/cortexbase/cortexbase/internal/core"
-	"github.com/cortexbase/cortexbase/internal/telemetry"
+	"github.com/beavend/beavend/internal/core"
+	"github.com/beavend/beavend/internal/telemetry"
 )
 
 type contextKey string
 
 const (
-	identityContextKey contextKey = "cortexbase_identity"
-	rawTokenContextKey contextKey = "cortexbase_raw_token"
+	identityContextKey contextKey = "beavend_identity"
+	rawTokenContextKey contextKey = "beavend_raw_token"
 )
 
 // SnapshotResolver retrieves a Snapshot for a given project and environment.

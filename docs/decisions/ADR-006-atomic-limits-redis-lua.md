@@ -4,9 +4,9 @@
 Accepted
 
 ## Context
-AI backend requests incur significant financial cost and compute load. Cortexbase must enforce per-user rate limits and quotas across multiple sliding or fixed time windows simultaneously (e.g. 5 requests/minute AND 30 requests/day AND 100,000 tokens/day).
+AI backend requests incur significant financial cost and compute load. Beavend must enforce per-user rate limits and quotas across multiple sliding or fixed time windows simultaneously (e.g. 5 requests/minute AND 30 requests/day AND 100,000 tokens/day).
 
-Checking and incrementing multiple counters across distributed server instances cannot suffer from race conditions or require multiple network round trips. Additionally, small hobbyist self-hosters should ideally have the option to run Cortexbase without deploying Redis.
+Checking and incrementing multiple counters across distributed server instances cannot suffer from race conditions or require multiple network round trips. Additionally, small hobbyist self-hosters should ideally have the option to run Beavend without deploying Redis.
 
 ## Decision
 We decided to implement the `LimitStore` interface with two strategies:

@@ -1,22 +1,22 @@
-# Cortexbase — The Self-Hosted AI Backend for Your Apps
+# Beavend — The Self-Hosted AI Backend for Your Apps
 
 > **Bring your users, your data, your models.**  
 > An open-source, provider-agnostic, application-facing AI backend.
 
 ---
 
-## What is Cortexbase?
+## What is Beavend?
 
-**Cortexbase** provides a managed AI application runtime for mobile, web, and client applications—delivering an experience similar to Firebase AI Logic while remaining 100% open-source, self-hostable, and independent of any single model provider or identity vendor.
+**Beavend** provides a managed AI application runtime for mobile, web, and client applications—delivering an experience similar to Firebase AI Logic while remaining 100% open-source, self-hostable, and independent of any single model provider or identity vendor.
 
-Cortexbase sits between client applications and AI model providers, mediating live data access to your own APIs:
+Beavend sits between client applications and AI model providers, mediating live data access to your own APIs:
 
 ```text
 Android / iOS / KMP / Web
             │
             │ User Identity Token (JWT)
             ▼
-     Cortexbase Runtime
+     Beavend Runtime
             │
             ├── Token Validation & Identity Normalization
             ├── Authorization Policies (CEL)
@@ -55,7 +55,7 @@ docker compose -f deploy/docker/docker-compose.yml up -d
 Run the server in all-in-one mode:
 
 ```bash
-go run ./cmd/cortexbase --role=all
+go run ./cmd/beavend --role=all
 ```
 
 * **Runtime API:** `http://localhost:8080/v1`
@@ -68,16 +68,16 @@ go run ./cmd/cortexbase --role=all
 
 | Document | Purpose |
 |---|---|
-| [**`docs/PRD.md`**](file:///Users/macbookpro/ongoing-project/cortexbase/cortexbase/docs/PRD.md) | Product Requirements Document: What and why |
-| [**`docs/architecture.md`**](file:///Users/macbookpro/ongoing-project/cortexbase/cortexbase/docs/architecture.md) | Modular monolith architecture, planes, and pipeline |
-| [**`docs/techstack.md`**](file:///Users/macbookpro/ongoing-project/cortexbase/cortexbase/docs/techstack.md) | Go, Postgres, Valkey/Redis, LiteLLM, React specifications |
-| [**`AGENTS.md`**](file:///Users/macbookpro/ongoing-project/cortexbase/cortexbase/AGENTS.md) | Contributor and AI coding agent guidelines |
-| [**`docs/api.md`**](file:///Users/macbookpro/ongoing-project/cortexbase/cortexbase/docs/api.md) | Human-readable REST & SSE API contracts |
-| [**`docs/security.md`**](file:///Users/macbookpro/ongoing-project/cortexbase/cortexbase/docs/security.md) | Security boundaries, SSRF prevention, and envelope encryption |
-| [**`docs/development.md`**](file:///Users/macbookpro/ongoing-project/cortexbase/cortexbase/docs/development.md) | Local development, testing, and contribution instructions |
-| [**`docs/decisions/`**](file:///Users/macbookpro/ongoing-project/cortexbase/cortexbase/docs/decisions/) | Architectural Decision Records (ADRs) |
-| [**`tasks/roadmap.md`**](file:///Users/macbookpro/ongoing-project/cortexbase/cortexbase/tasks/roadmap.md) | Multi-phase engineering roadmap |
-| [**`tasks/`**](file:///Users/macbookpro/ongoing-project/cortexbase/cortexbase/tasks/) | Granular implementation tasks with dependencies and verification |
+| [**`docs/PRD.md`**](docs/PRD.md) | Product Requirements Document: What and why |
+| [**`docs/architecture.md`**](docs/architecture.md) | Modular monolith architecture, planes, and pipeline |
+| [**`docs/techstack.md`**](docs/techstack.md) | Go, Postgres, Valkey/Redis, LiteLLM, React specifications |
+| [**`AGENTS.md`**](AGENTS.md) | Contributor and AI coding agent guidelines |
+| [**`docs/api.md`**](docs/api.md) | Human-readable REST & SSE API contracts |
+| [**`docs/security.md`**](docs/security.md) | Security boundaries, SSRF prevention, and envelope encryption |
+| [**`docs/development.md`**](docs/development.md) | Local development, testing, and contribution instructions |
+| [**`docs/decisions/`**](docs/decisions/) | Architectural Decision Records (ADRs) |
+| [**`tasks/roadmap.md`**](tasks/roadmap.md) | Multi-phase engineering roadmap |
+| [**`tasks/`**](tasks/) | Granular implementation tasks with dependencies and verification |
 
 ---
 

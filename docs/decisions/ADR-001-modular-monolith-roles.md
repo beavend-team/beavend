@@ -4,9 +4,9 @@
 Accepted
 
 ## Context
-Cortexbase must serve high-throughput, low-latency AI requests from end users while simultaneously offering a management API and dashboard for administrators. The system must be simple to self-host for small teams (`docker compose up`) while scaling horizontally to handle millions of daily requests in large cloud environments.
+Beavend must serve high-throughput, low-latency AI requests from end users while simultaneously offering a management API and dashboard for administrators. The system must be simple to self-host for small teams (`docker compose up`) while scaling horizontally to handle millions of daily requests in large cloud environments.
 
-We evaluated whether to divide Cortexbase into microservices, maintain a single undifferentiated monolith, or adopt a modular monolith capable of assuming distinct runtime roles.
+We evaluated whether to divide Beavend into microservices, maintain a single undifferentiated monolith, or adopt a modular monolith capable of assuming distinct runtime roles.
 
 ## Decision
 We chose a **modular monolith built in Go**, packaged as a single deployable binary and container image. The binary supports three operational roles via the `--role` command-line flag:

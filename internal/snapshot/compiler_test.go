@@ -8,8 +8,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 
-	"github.com/cortexbase/cortexbase/internal/snapshot"
-	"github.com/cortexbase/cortexbase/internal/store/db"
+	"github.com/beavend/beavend/internal/snapshot"
+	"github.com/beavend/beavend/internal/store/db"
 )
 
 type mockQuerySource struct {

@@ -1,4 +1,4 @@
-# Cortexbase — Product Requirements Document
+# Beavend — Product Requirements Document
 
 > **Version:** 0.2 (revised draft)
 > **Tagline:** The self-hosted AI backend for your apps. Bring your users, your data, your models.
@@ -7,7 +7,7 @@
 
 ## 1. Product Overview
 
-Cortexbase is an open-source, self-hosted AI application backend for mobile, web, and other client applications.
+Beavend is an open-source, self-hosted AI application backend for mobile, web, and other client applications.
 
 It provides an application-facing AI runtime, similar in developer experience to Firebase AI Logic, while remaining:
 
@@ -20,14 +20,14 @@ It provides an application-facing AI runtime, similar in developer experience to
 * Client SDK friendly
 * Configurable through a web dashboard and config-as-code
 
-Cortexbase sits between an application and AI model providers, and between the AI and the implementor's own data.
+Beavend sits between an application and AI model providers, and between the AI and the implementor's own data.
 
 ```text
 Android / iOS / KMP / Web
             │
             │ User Identity Token (JWT)
             ▼
-     Cortexbase Runtime
+     Beavend Runtime
             │
             ├── Token Validation / Identity
             ├── Authorization / Policies
@@ -51,35 +51,35 @@ Android / iOS / KMP / Web
             └── Other Providers
 ```
 
-Cortexbase does not replace LiteLLM as a provider gateway.
+Beavend does not replace LiteLLM as a provider gateway.
 
 ```text
-Cortexbase     → Application-facing AI runtime
+Beavend     → Application-facing AI runtime
      ↓
 LiteLLM        → Provider abstraction / gateway
      ↓
 AI Providers
 ```
 
-The primary abstraction in Cortexbase is the **AI App**: a configured AI capability that an application can invoke (e.g. `assistant`, `document-analyzer`, `support-agent`).
+The primary abstraction in Beavend is the **AI App**: a configured AI capability that an application can invoke (e.g. `assistant`, `document-analyzer`, `support-agent`).
 
 The client never needs to know which provider, model, prompt, or tool set is being used:
 
 ```kotlin
-cortexbase.ai("assistant").chat { message("Hello") }
+beavend.ai("assistant").chat { message("Hello") }
 ```
 
 ---
 
 ## 2. Terminology
 
-The word "app" is overloaded. Cortexbase uses these terms strictly:
+The word "app" is overloaded. Beavend uses these terms strictly:
 
 | Term | Meaning |
 |---|---|
-| **Implementor** | The developer/team who deploys Cortexbase and builds an application on it |
+| **Implementor** | The developer/team who deploys Beavend and builds an application on it |
 | **End user** | A person using the implementor's application |
-| **Project** | A tenant in Cortexbase: one implementor application with its own config, auth settings, and environments |
+| **Project** | A tenant in Beavend: one implementor application with its own config, auth settings, and environments |
 | **Environment** | `development`, `staging`, `production` within a Project |
 | **AI App** | A runnable AI capability inside a Project (e.g. `assistant`) |
 | **Tool** | A named, schema-typed capability the model may call |
@@ -95,7 +95,7 @@ Never use "app" alone in documentation or UI.
 
 ### 3.1 Primary Goals
 
-Cortexbase should:
+Beavend should:
 
 1. Let implementors connect their existing authentication provider.
 2. Validate end-user identity tokens and derive a normalized identity.
@@ -122,7 +122,7 @@ Cortexbase should:
 
 ## 4. Non-Goals
 
-Cortexbase should NOT:
+Beavend should NOT:
 
 * Become an authentication provider or issue tokens.
 * Replace Firebase Auth, Supabase Auth, Auth0, Clerk, Keycloak, etc.
@@ -142,9 +142,9 @@ Cortexbase should NOT:
 
 ## 5. Data Principles
 
-Cortexbase is **stateless with respect to application data**. It does not own, replicate, or require the implementor's user data.
+Beavend is **stateless with respect to application data**. It does not own, replicate, or require the implementor's user data.
 
-Cortexbase stores only:
+Beavend stores only:
 
 1. **Configuration:** Projects, AI Apps, prompts, policies, tools, models, guardrails.
 2. **Operational data:** usage counters, request logs (metadata only by default).
@@ -156,14 +156,14 @@ Rules:
 * Fetched data is **not persisted** by default.
 * Tool inputs/outputs and prompt/response bodies are **excluded from logs** unless explicitly enabled per AI App, with redaction rules.
 * Conversation history is **client-supplied by default** (stateless mode). Server-side threads are optional.
-* The implementor's data remains under the implementor's access control. Cortexbase never widens it.
+* The implementor's data remains under the implementor's access control. Beavend never widens it.
 
 ### 5.1 Three context mechanisms
 
-| Mechanism | Source of truth | Persisted by Cortexbase? |
+| Mechanism | Source of truth | Persisted by Beavend? |
 |---|---|---|
 | Conversation state | Client (default) or server-side thread (opt-in) | Only if opt-in, with TTL |
-| Memory | Cortexbase `MemoryProvider` (opt-in), or implementor's store | Only if opt-in |
+| Memory | Beavend `MemoryProvider` (opt-in), or implementor's store | Only if opt-in |
 | Live data access | Implementor APIs/databases via Tools | No |
 
 ---
@@ -201,15 +201,15 @@ The client references only the AI App ID. It must not need to know provider name
 
 ### 7.1 Principle
 
-Cortexbase does NOT authenticate users itself. Authentication belongs to the implementor's application. Cortexbase **consumes** an identity token issued by the implementor's identity provider and **validates it**.
+Beavend does NOT authenticate users itself. Authentication belongs to the implementor's application. Beavend **consumes** an identity token issued by the implementor's identity provider and **validates it**.
 
 Authentication is for the **end user**, not for the AI App.
 
 ```text
-Implementor's Auth Provider ─► End User ─► JWT ─► Cortexbase
+Implementor's Auth Provider ─► End User ─► JWT ─► Beavend
 ```
 
-One Cortexbase deployment serves many end users; each request is evaluated against the identity in that request's token.
+One Beavend deployment serves many end users; each request is evaluated against the identity in that request's token.
 
 ### 7.2 Supported authentication models
 
@@ -244,9 +244,9 @@ authentication:
   issuer: https://example.supabase.co/auth/v1
 ```
 
-### 7.3 What Cortexbase validates
+### 7.3 What Beavend validates
 
-On each request Cortexbase verifies, and only verifies:
+On each request Beavend verifies, and only verifies:
 
 * Signature (via JWKS or configured key)
 * Expiry (`exp`) and not-before (`nbf`), with configurable clock skew
@@ -258,19 +258,19 @@ JWKS documents are cached with refresh on key rotation.
 
 ### 7.4 Revocation is out of scope
 
-Cortexbase only **forwards and validates** tokens. It does not issue them, and it does not track or manage their lifecycle.
+Beavend only **forwards and validates** tokens. It does not issue them, and it does not track or manage their lifecycle.
 
-* Cortexbase does **not** maintain a denylist, session store, or introspection client.
+* Beavend does **not** maintain a denylist, session store, or introspection client.
 * A token that is validly signed, unexpired, and matches issuer/audience is accepted.
 * Token lifetime, refresh, logout, and revocation are the **implementor's identity provider's responsibility**. Implementors who need fast cutoff should use short-lived tokens at their provider.
-* When a tool uses `forward_user_token`, the implementor's own API remains free to reject a revoked or otherwise invalid token, so revocation can still take effect on data access without any Cortexbase involvement.
-* Blocking a specific user from AI features can be done through the implementor's claims (e.g. `ai_access: false` at next token issue) or Cortexbase policies, not through token revocation.
+* When a tool uses `forward_user_token`, the implementor's own API remains free to reject a revoked or otherwise invalid token, so revocation can still take effect on data access without any Beavend involvement.
+* Blocking a specific user from AI features can be done through the implementor's claims (e.g. `ai_access: false` at next token issue) or Beavend policies, not through token revocation.
 
 ---
 
 ## 8. Identity Extraction
 
-After validation, Cortexbase normalizes the token into an internal identity:
+After validation, Beavend normalizes the token into an internal identity:
 
 ```text
 Identity
@@ -291,7 +291,7 @@ Identity
 }
 ```
 
-The stable Cortexbase user key is `project + issuer + subject`. The identity feeds authorization, limits, memory, usage tracking, logging, and **tool identity bindings**.
+The stable Beavend user key is `project + issuer + subject`. The identity feeds authorization, limits, memory, usage tracking, logging, and **tool identity bindings**.
 
 ---
 
@@ -308,7 +308,7 @@ An authenticated user does not automatically have access to every AI App or Tool
 
 ## 10. Authorization Policies
 
-Cortexbase provides generic policies. It does not hardcode concepts such as `premium`, `subscription`, `free`, or `paid`. Implementors expose those through token claims or an external check.
+Beavend provides generic policies. It does not hardcode concepts such as `premium`, `subscription`, `free`, or `paid`. Implementors expose those through token claims or an external check.
 
 ```yaml
 policies:
@@ -333,7 +333,7 @@ policies:
   subscription-check:
     external:
       type: webhook        # webhook | opa
-      url: https://api.example.com/cortexbase/authorize
+      url: https://api.example.com/beavend/authorize
       timeout_ms: 500
       on_failure: deny     # deny | allow
       cache_ttl: 60
@@ -368,7 +368,7 @@ limits:
 
 ### 11.1 Tiers
 
-Limits can vary by claims, so implementors can express plans without Cortexbase knowing about billing:
+Limits can vary by claims, so implementors can express plans without Beavend knowing about billing:
 
 ```yaml
 limits:
@@ -400,7 +400,7 @@ Counters require a store from v0.1: Redis if present, otherwise a PostgreSQL fal
 Provider credentials are never distributed to clients. Neither are LiteLLM virtual keys.
 
 ```text
-Mobile App ── User JWT ──► Cortexbase
+Mobile App ── User JWT ──► Beavend
                               ├── validate token
                               ├── authorize AI App
                               ├── check user limits
@@ -418,7 +418,7 @@ Additional controls:
 * **Secrets encrypted at rest** (provider keys, downstream tool credentials); never returned via API.
 * **Confused-deputy protection:** user identity used for data access comes only from the validated token, never from model output (§17.3).
 * **Tool results are untrusted input** (§17.6).
-* Application-specific attestation (e.g. device attestation) remains outside Cortexbase scope, though claims from it may be used in policies.
+* Application-specific attestation (e.g. device attestation) remains outside Beavend scope, though claims from it may be used in policies.
 
 ---
 
@@ -436,7 +436,7 @@ The provider layer is behind a `ProviderAdapter` interface. **LiteLLM is the def
 
 ## 14. Model Management
 
-Cortexbase exposes **logical models** to AI Apps: `fast`, `reasoning`, `vision`, `embedding`, `local`.
+Beavend exposes **logical models** to AI Apps: `fast`, `reasoning`, `vision`, `embedding`, `local`.
 
 ```yaml
 models:
@@ -467,7 +467,7 @@ routing:
         use: fast
 ```
 
-Cortexbase handles application-level routing. LiteLLM handles provider-level routing, retries, and fallback.
+Beavend handles application-level routing. LiteLLM handles provider-level routing, retries, and fallback.
 
 ---
 
@@ -490,7 +490,7 @@ Published versions are **immutable**, enabling rollback, comparison, and traceab
 
 ### 17.1 Definition
 
-A **Tool** is a named, schema-typed capability the model may call. **Implementors create custom tools** in the dashboard or in config. Tools are how the AI reaches the implementor's real data, since Cortexbase holds none.
+A **Tool** is a named, schema-typed capability the model may call. **Implementors create custom tools** in the dashboard or in config. Tools are how the AI reaches the implementor's real data, since Beavend holds none.
 
 ### 17.2 Executor types
 
@@ -771,9 +771,9 @@ Inspect a request end to end: authentication, authorization, limit, prompt versi
 Thin clients. Each SDK lives in its own repository. Initial targets: Android (Kotlin Multiplatform), iOS (Swift native), Web (TypeScript).
 
 ```text
-cortexbase-sdk-kmp   → Android (Maven Central)
-cortexbase-sdk-ios   → iOS, macOS (Swift Package Manager)
-cortexbase-sdk-web   → Browser, Node, Deno, Bun (npm)
+beavend-sdk-kmp   → Android (Maven Central)
+beavend-sdk-ios   → iOS, macOS (Swift Package Manager)
+beavend-sdk-web   → Browser, Node, Deno, Bun (npm)
 ```
 
 **SDK responsibilities:** attach the user's token (via a token-provider callback so refreshed tokens are used), HTTP, streaming (SSE), serialization, response parsing, typed errors, retries with backoff, cancellation, client-side tool handlers, confirmation flow.
@@ -786,16 +786,16 @@ cortexbase-sdk-web   → Browser, Node, Deno, Bun (npm)
 
 **Web SDK** has zero runtime dependencies and is built with `tsup` for ESM + CJS dual output.
 
-All SDKs are versioned independently of the server and document the minimum compatible server version. The SDK sends `X-Cortexbase-SDK-Version` on every request to allow server-side version skew detection.
+All SDKs are versioned independently of the server and document the minimum compatible server version. The SDK sends `X-Beavend-SDK-Version` on every request to allow server-side version skew detection.
 
 ```kotlin
-val cortexbase = Cortexbase(
+val beavend = Beavend(
     url = "https://ai.example.com",
     project = "my-project",
     tokenProvider = { auth.currentUser.getIdToken() }
 )
 
-val assistant = cortexbase.ai("assistant")
+val assistant = beavend.ai("assistant")
 
 assistant.chat { message("Hello") }
 assistant.stream { message("Hello") }
@@ -864,7 +864,7 @@ event: done           data: {"request_id": "req_abc123"}
 
 ```text
 Client (User JWT)
-  → Cortexbase API
+  → Beavend API
   → Validate token (signature, exp, iss, aud)
   → Normalize identity
   → Resolve Project / Environment / AI App
@@ -887,10 +887,10 @@ Client (User JWT)
 
 ## 30. Projects, Tenancy, and Environments
 
-Cortexbase supports multiple Projects on one deployment.
+Beavend supports multiple Projects on one deployment.
 
 ```text
-Cortexbase Instance
+Beavend Instance
 ├── Project A ── environments: dev / staging / prod
 │     ├── Auth config
 │     ├── AI Apps, Prompts, Policies, Tools, Models
@@ -908,15 +908,15 @@ Cortexbase Instance
 
 ## 31. Configuration as Code
 
-* `cortexbase export` / `cortexbase import` for the complete Project configuration in YAML.
+* `beavend export` / `beavend import` for the complete Project configuration in YAML.
 * The dashboard and Git stay in sync; drift detection is a later feature.
 * Secrets are referenced (`env:`/secret refs), not embedded in exported files.
 * Enables promotion of config between environments.
 
-Exported files carry a `cortexbase_version` field so the importer can detect schema incompatibilities and warn before applying:
+Exported files carry a `beavend_version` field so the importer can detect schema incompatibilities and warn before applying:
 
 ```yaml
-cortexbase_version: "0.1"
+beavend_version: "0.1"
 project: my-project
 environment: production
 ```
@@ -947,8 +947,8 @@ app:
 Self-hostable via Docker.
 
 ```text
-cortexbase-server
-cortexbase-dashboard
+beavend-server
+beavend-dashboard
 postgres
 redis
 litellm
@@ -967,7 +967,7 @@ Runs locally or on a VPS/cloud host. Helm chart and Kubernetes manifests are lat
 
 | Area | Requirement |
 |---|---|
-| Overhead | Cortexbase adds under 30 ms p95 (excluding provider and tool time) |
+| Overhead | Beavend adds under 30 ms p95 (excluding provider and tool time) |
 | Scalability | Server is stateless and horizontally scalable; state in Postgres/Redis |
 | Availability | Graceful degradation: if Redis is down, use the Postgres counter fallback; if LiteLLM is down, return `503`; limits fail closed by default (configurable) |
 | Security | Secrets encrypted at rest, TLS expected, SSRF protections on tool executors (egress allowlists) |
@@ -981,7 +981,7 @@ Runs locally or on a VPS/cloud host. Helm chart and Kubernetes manifests are lat
 ## 34. Internal Architecture
 
 ```text
-Cortexbase
+Beavend
 ├── API Layer (runtime + management)
 ├── Identity
 │   ├── JWT / OIDC / Firebase / Supabase / Custom
@@ -1022,7 +1022,7 @@ assistant  configuration: v12  prompt: v7  routing: v4  guardrails: v3  tools: g
 
 ```text
 Docker deployment
-Cortexbase Server + Dashboard
+Beavend Server + Dashboard
 Projects (environment in key model)
 AI Apps
 Provider management + ProviderAdapter (LiteLLM)
@@ -1036,7 +1036,7 @@ Basic structured output
 Usage tracking + logs (metadata only)
 Admin auth (local + OIDC)
 Config export/import
-Android SDK (cortexbase-sdk-kmp), REST API
+Android SDK (beavend-sdk-kmp), REST API
 ```
 
 ### v0.2 — Tools and safety
@@ -1049,7 +1049,7 @@ Client-side tools
 Guardrails (incl. streaming modes, injection handling)
 Prompt versioning
 OpenTelemetry / Prometheus
-iOS SDK (cortexbase-sdk-ios, Swift native), Web SDK (cortexbase-sdk-web)
+iOS SDK (beavend-sdk-ios, Swift native), Web SDK (beavend-sdk-web)
 Provider/model fallback, advanced routing
 Multimodal attachments
 Privacy: retention, redaction, delete by subject
@@ -1082,9 +1082,9 @@ Plugin system, marketplace
 
 **LiteLLM** handles provider infrastructure: provider integrations, unified model API, provider credentials, provider routing, fallbacks, model deployments, provider-level usage and cost.
 
-**Cortexbase** handles application infrastructure: AI Apps, token validation and identity normalization, authorization, per-user limits, prompts, application-level routing, tools and data access, tool authorization, guardrails, memory, caching, client SDKs, dashboard, application-level usage and observability.
+**Beavend** handles application infrastructure: AI Apps, token validation and identity normalization, authorization, per-user limits, prompts, application-level routing, tools and data access, tool authorization, guardrails, memory, caching, client SDKs, dashboard, application-level usage and observability.
 
-Cortexbase does not duplicate LiteLLM's integration layer, and it accesses LiteLLM through `ProviderAdapter` so it is replaceable.
+Beavend does not duplicate LiteLLM's integration layer, and it accesses LiteLLM through `ProviderAdapter` so it is replaceable.
 
 ---
 
@@ -1094,10 +1094,10 @@ Cortexbase does not duplicate LiteLLM's integration layer, and it accesses LiteL
 
 More specifically: *Firebase AI Logic for self-hosted applications.*
 
-Cortexbase is not primarily an AI gateway, LLM proxy, or LLM router. Those descriptions focus on provider infrastructure. The core value is:
+Beavend is not primarily an AI gateway, LLM proxy, or LLM router. Those descriptions focus on provider infrastructure. The core value is:
 
 ```text
-Application → Cortexbase → AI capabilities (with your data, your users, your models)
+Application → Beavend → AI capabilities (with your data, your users, your models)
 ```
 
 **Personas:** the mobile/web developer who wants AI features without building a backend; the small team that needs per-user limits and safety without a platform team; the privacy-sensitive implementor who must self-host and keep data in their own systems.
@@ -1126,12 +1126,12 @@ Limit          → 30 inference/day
 Then in the app:
 
 ```kotlin
-cortexbase.ai("assistant").chat { message("What's the status of my last order?") }
+beavend.ai("assistant").chat { message("What's the status of my last order?") }
 ```
 
-The app needs only the Cortexbase URL, project ID, AI App ID, and the user's token. It does not need a provider key, LiteLLM key, system prompt, model ID, or routing/guardrail configuration. Changing the model or provider requires no app release.
+The app needs only the Beavend URL, project ID, AI App ID, and the user's token. It does not need a provider key, LiteLLM key, system prompt, model ID, or routing/guardrail configuration. Changing the model or provider requires no app release.
 
-The AI reads the user's orders live from the implementor's API with the user's own identity, and Cortexbase stores none of that data.
+The AI reads the user's orders live from the implementor's API with the user's own identity, and Beavend stores none of that data.
 
 ---
 
@@ -1144,13 +1144,13 @@ The AI reads the user's orders live from the implementor's API with the user's o
 5. **How much of the tool-call loop** (max depth, parallel calls) is configurable vs fixed?
 6. **Multi-region / HA reference architecture:** required for v1.0?
 7. **Cost estimation** when LiteLLM is bypassed by a custom `ProviderAdapter`.
-8. **Trademark, domain, and package-name availability** for "Cortexbase" (GitHub org, npm, Maven, PyPI, domains) must be verified before public launch.
+8. **Trademark, domain, and package-name availability** for "Beavend" (GitHub org, npm, Maven, PyPI, domains) must be verified before public launch.
 
 ---
 
 ## 41. Success Criteria
 
-Cortexbase is successful when a developer can:
+Beavend is successful when a developer can:
 
 1. Deploy it with Docker.
 2. Connect an existing authentication provider.
@@ -1180,4 +1180,4 @@ Configure its behavior.
 Call it from your application.
 ```
 
-Cortexbase provides the runtime between the authenticated user, the AI provider, and the implementor's data, without becoming the application's authentication system, its database, or its business logic.
+Beavend provides the runtime between the authenticated user, the AI provider, and the implementor's data, without becoming the application's authentication system, its database, or its business logic.

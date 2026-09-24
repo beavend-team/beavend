@@ -1,4 +1,4 @@
-# Cortexbase Security Architecture
+# Beavend Security Architecture
 
 > **Status:** Confirmed Architecture (v0.1) & Future Considerations
 
@@ -6,14 +6,14 @@
 
 ## 1. Security Context & Trust Boundaries
 
-Cortexbase sits in a security-critical intermediary position:
+Beavend sits in a security-critical intermediary position:
 
 ```text
 End User (Mobile / Web SDK)
      │  1. Ingress Boundary: Bearer JWT (Untrusted Client)
      ▼
 ┌────────────────────────────────────────────────────────┐
-│ Cortexbase Runtime Plane                               │
+│ Beavend Runtime Plane                               │
 │  - Token validation & Identity normalization           │
 │  - CEL Policy Evaluation                               │
 │  - Per-user rate limits / Quotas                       │
@@ -39,7 +39,7 @@ Implementor APIs / DBs / MCP   LiteLLM / AI Providers
 ## 2. Authentication & Identity Boundaries
 
 ### 2.1 Runtime JWT Validation (Pure Local CPU)
-Cortexbase **validates and forwards** tokens; it does not issue tokens.
+Beavend **validates and forwards** tokens; it does not issue tokens.
 On every runtime request:
 * **Signature Verification:** Verified using cached JWKS retrieved from the implementor's identity provider (e.g. Firebase, Supabase, generic OIDC). JWKS is cached in memory with automatic asynchronous refresh upon unknown `kid` (key rotation).
 * **Claims Checked:**
@@ -51,7 +51,7 @@ On every runtime request:
 
 ### 2.2 Token Revocation Explicitly Out of Scope
 In accordance with PRD §7.4:
-* Cortexbase maintains **no session store, denylist, or token revocation list**.
+* Beavend maintains **no session store, denylist, or token revocation list**.
 * Token lifecycle, expiry, and revocation are the sole responsibility of the implementor's identity provider.
 * Implementors requiring instant cutoff must configure short token lifetimes at their IdP or use the `forward_user_token` tool downstream auth mode, allowing their downstream APIs to reject revoked tokens directly.
 
@@ -157,7 +157,7 @@ To prevent Server-Side Request Forgery against internal networks, cloud metadata
 * When payload logging is enabled, strict PII redaction rules are executed before disk write.
 
 ### 7.2 Subject Privacy Purge (GDPR / CCPA)
-* Cortexbase provides an administrative endpoint:
+* Beavend provides an administrative endpoint:
   `DELETE /v1/admin/subjects/{issuer}/{subject}`
 * This triggers an atomic purge of:
   * Active conversation threads and messages.

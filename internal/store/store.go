@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/cortexbase/cortexbase/internal/store/db"
+	"github.com/beavend/beavend/internal/store/db"
 )
 
 // Store encapsulates the database pool and generated queries.

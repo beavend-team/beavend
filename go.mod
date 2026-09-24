@@ -1,4 +1,4 @@
-module github.com/cortexbase/cortexbase
+module github.com/beavend/beavend
 
 go 1.22.0
 

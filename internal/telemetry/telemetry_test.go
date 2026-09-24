@@ -84,7 +84,7 @@ func TestLogging_RedactionAndContext(t *testing.T) {
 
 func TestTelemetry_Metrics(t *testing.T) {
 	ctx := context.Background()
-	tel, err := Init(ctx, "cortexbase-test", "0.1.0")
+	tel, err := Init(ctx, "beavend-test", "0.1.0")
 	if err != nil {
 		t.Fatalf("failed to init telemetry: %v", err)
 	}

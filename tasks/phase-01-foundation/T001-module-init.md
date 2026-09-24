@@ -7,7 +7,7 @@ Initialize the Go module, establish internal package boundaries, and pin techsta
 None
 
 ## Scope
-* Initialize Go module `github.com/cortexbase/cortexbase` with Go 1.22+.
+* Initialize Go module `github.com/beavend/beavend` with Go 1.22+.
 * Create root directory structure as specified in Architecture §14.
 * Configure `golangci-lint` with `depguard` rules enforcing modular monolith inward dependency boundaries.
 

@@ -13,8 +13,8 @@ Implement environment variable and YAML-based configuration loading for server i
 * Implement configuration validation rejecting invalid port numbers, missing master encryption keys, or malformed database connection strings.
 
 ## Requirements
-- Support flags: `CORTEXBASE_ROLE` (`all`, `runtime`, `control`).
-- Require `CORTEXBASE_MASTER_KEY` (32 bytes hex) when running in production environment.
+- Support flags: `BEAVEND_ROLE` (`all`, `runtime`, `control`).
+- Require `BEAVEND_MASTER_KEY` (32 bytes hex) when running in production environment.
 - Provide sensible defaults for local development.
 
 ## Constraints

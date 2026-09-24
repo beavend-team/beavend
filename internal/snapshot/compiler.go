@@ -13,8 +13,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/santhosh-tekuri/jsonschema/v5"
 
-	"github.com/cortexbase/cortexbase/internal/core"
-	"github.com/cortexbase/cortexbase/internal/store/db"
+	"github.com/beavend/beavend/internal/core"
+	"github.com/beavend/beavend/internal/store/db"
 )
 
 // QuerySource provides data needed to compile a configuration snapshot.
@@ -158,7 +158,7 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 			if len(inputSchema) > 0 {
 				// Pre-compile JSON Schema
 				jsCompiler := jsonschema.NewCompiler()
-				schemaURL := fmt.Sprintf("schema://cortexbase/tool/%s.json", t.ToolID)
+				schemaURL := fmt.Sprintf("schema://beavend/tool/%s.json", t.ToolID)
 				if err := jsCompiler.AddResource(schemaURL, bytes.NewReader(t.InputSchema)); err != nil {
 					return nil, fmt.Errorf("add json schema resource for tool %s: %w", t.ToolID, err)
 				}

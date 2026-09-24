@@ -4,7 +4,7 @@
 Accepted
 
 ## Context
-Cortexbase must interface with numerous AI model providers (OpenAI, Anthropic, Google Gemini, Ollama, OpenRouter, Azure OpenAI, AWS Bedrock). Maintaining direct API integrations, SDKs, and error mappings for 50+ AI providers within Go would divert engineering focus away from application-level backend capabilities.
+Beavend must interface with numerous AI model providers (OpenAI, Anthropic, Google Gemini, Ollama, OpenRouter, Azure OpenAI, AWS Bedrock). Maintaining direct API integrations, SDKs, and error mappings for 50+ AI providers within Go would divert engineering focus away from application-level backend capabilities.
 
 However, LiteLLM is written in Python. In high-concurrency environments, LiteLLM could become a throughput or latency bottleneck if forced into the path of all requests.
 

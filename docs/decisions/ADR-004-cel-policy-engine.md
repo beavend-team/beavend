@@ -4,7 +4,7 @@
 Accepted
 
 ## Context
-Cortexbase requires an expressive, high-performance rule engine to evaluate whether an authenticated end user is authorized to invoke an AI App or a Tool, and to determine which rate-limit tier applies based on JWT claims (e.g. `role`, `plan`, `ai_access`).
+Beavend requires an expressive, high-performance rule engine to evaluate whether an authenticated end user is authorized to invoke an AI App or a Tool, and to determine which rate-limit tier applies based on JWT claims (e.g. `role`, `plan`, `ai_access`).
 
 We considered:
 1. Writing a custom expression parser and interpreter.

@@ -31,15 +31,15 @@ func TestConfig_DefaultValues(t *testing.T) {
 
 func TestConfig_EnvOverrides(t *testing.T) {
 	envMap := map[string]string{
-		"CORTEXBASE_ENV":               "staging",
-		"CORTEXBASE_ROLE":              "runtime",
-		"CORTEXBASE_HTTP_PORT":         "9000",
-		"CORTEXBASE_HTTP_READ_TIMEOUT": "30s",
-		"CORTEXBASE_DATABASE_URL":      "postgres://user:pass@localhost:5432/cortexbase_test",
-		"CORTEXBASE_REDIS_URL":         "redis://localhost:6380/1",
-		"CORTEXBASE_MASTER_KEY":        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		"CORTEXBASE_ADMIN_EMAIL":       "ops@company.com",
-		"CORTEXBASE_ADMIN_PASSWORD":    "supersecretpass",
+		"BEAVEND_ENV":               "staging",
+		"BEAVEND_ROLE":              "runtime",
+		"BEAVEND_HTTP_PORT":         "9000",
+		"BEAVEND_HTTP_READ_TIMEOUT": "30s",
+		"BEAVEND_DATABASE_URL":      "postgres://user:pass@localhost:5432/beavend_test",
+		"BEAVEND_REDIS_URL":         "redis://localhost:6380/1",
+		"BEAVEND_MASTER_KEY":        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"BEAVEND_ADMIN_EMAIL":       "ops@company.com",
+		"BEAVEND_ADMIN_PASSWORD":    "supersecretpass",
 	}
 
 	lookup := func(k string) string {
@@ -76,7 +76,7 @@ http:
   port: 8443
   read_timeout: 20s
 database:
-  url: postgres://postgres:secret@localhost:5432/cortex_yaml?sslmode=disable
+  url: postgres://postgres:secret@localhost:5432/beavend_yaml?sslmode=disable
 `
 	if err := os.WriteFile(yamlPath, []byte(yamlContent), 0600); err != nil {
 		t.Fatalf("failed to write test YAML config: %v", err)
@@ -104,7 +104,7 @@ database:
 
 	// 2. Load with environment overriding YAML values
 	overrideLookup := func(k string) string {
-		if k == "CORTEXBASE_HTTP_PORT" {
+		if k == "BEAVEND_HTTP_PORT" {
 			return "9999"
 		}
 		return ""
@@ -127,57 +127,57 @@ func TestConfig_ValidationErrors(t *testing.T) {
 		{
 			name: "invalid role",
 			envMap: map[string]string{
-				"CORTEXBASE_ROLE": "invalid_role",
+				"BEAVEND_ROLE": "invalid_role",
 			},
 			errSubstr: "invalid role",
 		},
 		{
 			name: "invalid environment",
 			envMap: map[string]string{
-				"CORTEXBASE_ENV": "sandbox",
+				"BEAVEND_ENV": "sandbox",
 			},
 			errSubstr: "invalid environment",
 		},
 		{
 			name: "invalid http port",
 			envMap: map[string]string{
-				"CORTEXBASE_HTTP_PORT": "70000",
+				"BEAVEND_HTTP_PORT": "70000",
 			},
 			errSubstr: "invalid HTTP port",
 		},
 		{
 			name: "invalid master key length",
 			envMap: map[string]string{
-				"CORTEXBASE_MASTER_KEY": "tooshort",
+				"BEAVEND_MASTER_KEY": "tooshort",
 			},
 			errSubstr: "security master key must be a valid 64-character",
 		},
 		{
 			name: "malformed database url",
 			envMap: map[string]string{
-				"CORTEXBASE_DATABASE_URL": "mysql://user:pass@localhost/db",
+				"BEAVEND_DATABASE_URL": "mysql://user:pass@localhost/db",
 			},
 			errSubstr: "malformed database connection string",
 		},
 		{
 			name: "malformed redis url",
 			envMap: map[string]string{
-				"CORTEXBASE_REDIS_URL": "http://localhost:6379",
+				"BEAVEND_REDIS_URL": "http://localhost:6379",
 			},
 			errSubstr: "malformed redis connection string",
 		},
 		{
 			name: "production with default master key",
 			envMap: map[string]string{
-				"CORTEXBASE_ENV": "production",
+				"BEAVEND_ENV": "production",
 			},
 			errSubstr: "default master key is forbidden in production",
 		},
 		{
 			name: "production with default admin password",
 			envMap: map[string]string{
-				"CORTEXBASE_ENV":        "production",
-				"CORTEXBASE_MASTER_KEY": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"BEAVEND_ENV":        "production",
+				"BEAVEND_MASTER_KEY": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			},
 			errSubstr: "default admin password is forbidden in production",
 		},

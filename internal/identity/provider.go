@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/cortexbase/cortexbase/internal/core"
+	"github.com/beavend/beavend/internal/core"
 )
 
 // Provider implements core.AuthProvider using the SnapshotResolver, Verifier, and Normalizers.

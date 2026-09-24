@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// PostgresListener listens for PostgreSQL NOTIFY events on channel cortexbase_revisions.
+// PostgresListener listens for PostgreSQL NOTIFY events on channel beavend_revisions.
 type PostgresListener struct {
 	databaseURL string
 	handler     func(ctx context.Context, event RevisionEvent) error

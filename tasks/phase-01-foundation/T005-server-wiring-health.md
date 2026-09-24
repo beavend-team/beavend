@@ -1,7 +1,7 @@
 # T005 — HTTP Server Wiring, Role Flags, and Health Probes
 
 ## Goal
-Implement the main application entrypoint in `cmd/cortexbase` with role-based routing, signal handling, graceful shutdown, and `/healthz` / `/readyz` probes.
+Implement the main application entrypoint in `cmd/beavend` with role-based routing, signal handling, graceful shutdown, and `/healthz` / `/readyz` probes.
 
 ## Depends On
 - T001
@@ -24,14 +24,14 @@ Implement the main application entrypoint in `cmd/cortexbase` with role-based ro
 - Do not mount control routes on `--role=runtime` or runtime routes on `--role=control`.
 
 ## Acceptance Criteria
-- [x] Binary builds successfully: `go build -o cortexbase ./cmd/cortexbase`.
+- [x] Binary builds successfully: `go build -o beavend ./cmd/beavend`.
 - [x] Binary starts and responds with `200 OK` on `/healthz`.
 - [x] Role flag controls route mounting as expected.
 - [x] Graceful shutdown drains connections cleanly upon signal.
 
 ## Verification
 ```bash
-go run ./cmd/cortexbase --role=all &
+go run ./cmd/beavend --role=all &
 PID=$!
 sleep 1
 curl -f http://localhost:8080/healthz

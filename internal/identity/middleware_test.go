@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/cortexbase/cortexbase/internal/core"
-	"github.com/cortexbase/cortexbase/internal/snapshot"
+	"github.com/beavend/beavend/internal/core"
+	"github.com/beavend/beavend/internal/snapshot"
 )
 
 func TestAuthMiddleware(t *testing.T) {

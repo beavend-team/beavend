@@ -96,7 +96,7 @@ func DefaultConfig() *Config {
 			IdleTimeout:  120 * time.Second,
 		},
 		Database: DatabaseConfig{
-			URL:             "postgres://cortexbase:cortexbase@localhost:5432/cortexbase?sslmode=disable",
+			URL:             "postgres://beavend:beavend@localhost:5432/beavend?sslmode=disable",
 			MaxOpenConns:    25,
 			MaxIdleConns:    5,
 			ConnMaxLifetime: 15 * time.Minute,
@@ -108,13 +108,13 @@ func DefaultConfig() *Config {
 		},
 		LiteLLM: LiteLLMConfig{
 			URL: "http://localhost:4000",
-			Key: "sk-cortexbase-local-master",
+			Key: "sk-beavend-local-master",
 		},
 		Security: SecurityConfig{
 			MasterKey: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		},
 		Admin: AdminConfig{
-			Email:    "admin@cortexbase.local",
+			Email:    "admin@beavend.local",
 			Password: "adminpassword123",
 		},
 		Log: LogConfig{
@@ -155,70 +155,70 @@ func LoadFileWithLookup(filePath string, lookup func(string) string) (*Config, e
 	}
 
 	// Apply environment variable overrides if present
-	if val := lookup("CORTEXBASE_ENV"); val != "" {
+	if val := lookup("BEAVEND_ENV"); val != "" {
 		cfg.Env = strings.TrimSpace(val)
 	}
-	if val := lookup("CORTEXBASE_ROLE"); val != "" {
+	if val := lookup("BEAVEND_ROLE"); val != "" {
 		cfg.Role = strings.TrimSpace(val)
 	}
 
-	if val := lookup("CORTEXBASE_HTTP_PORT"); val != "" {
+	if val := lookup("BEAVEND_HTTP_PORT"); val != "" {
 		port, err := strconv.Atoi(strings.TrimSpace(val))
 		if err != nil {
-			return nil, fmt.Errorf("invalid CORTEXBASE_HTTP_PORT: %w", err)
+			return nil, fmt.Errorf("invalid BEAVEND_HTTP_PORT: %w", err)
 		}
 		cfg.HTTP.Port = port
 	}
 
-	if val := lookup("CORTEXBASE_HTTP_READ_TIMEOUT"); val != "" {
+	if val := lookup("BEAVEND_HTTP_READ_TIMEOUT"); val != "" {
 		d, err := time.ParseDuration(strings.TrimSpace(val))
 		if err != nil {
-			return nil, fmt.Errorf("invalid CORTEXBASE_HTTP_READ_TIMEOUT: %w", err)
+			return nil, fmt.Errorf("invalid BEAVEND_HTTP_READ_TIMEOUT: %w", err)
 		}
 		cfg.HTTP.ReadTimeout = d
 	}
 
-	if val := lookup("CORTEXBASE_HTTP_WRITE_TIMEOUT"); val != "" {
+	if val := lookup("BEAVEND_HTTP_WRITE_TIMEOUT"); val != "" {
 		d, err := time.ParseDuration(strings.TrimSpace(val))
 		if err != nil {
-			return nil, fmt.Errorf("invalid CORTEXBASE_HTTP_WRITE_TIMEOUT: %w", err)
+			return nil, fmt.Errorf("invalid BEAVEND_HTTP_WRITE_TIMEOUT: %w", err)
 		}
 		cfg.HTTP.WriteTimeout = d
 	}
 
-	if val := lookup("CORTEXBASE_HTTP_IDLE_TIMEOUT"); val != "" {
+	if val := lookup("BEAVEND_HTTP_IDLE_TIMEOUT"); val != "" {
 		d, err := time.ParseDuration(strings.TrimSpace(val))
 		if err != nil {
-			return nil, fmt.Errorf("invalid CORTEXBASE_HTTP_IDLE_TIMEOUT: %w", err)
+			return nil, fmt.Errorf("invalid BEAVEND_HTTP_IDLE_TIMEOUT: %w", err)
 		}
 		cfg.HTTP.IdleTimeout = d
 	}
 
-	if val := lookup("CORTEXBASE_DATABASE_URL"); val != "" {
+	if val := lookup("BEAVEND_DATABASE_URL"); val != "" {
 		cfg.Database.URL = strings.TrimSpace(val)
 	}
-	if val := lookup("CORTEXBASE_REDIS_URL"); val != "" {
+	if val := lookup("BEAVEND_REDIS_URL"); val != "" {
 		cfg.Redis.URL = strings.TrimSpace(val)
 	}
-	if val := lookup("CORTEXBASE_LITELLM_URL"); val != "" {
+	if val := lookup("BEAVEND_LITELLM_URL"); val != "" {
 		cfg.LiteLLM.URL = strings.TrimSpace(val)
 	}
-	if val := lookup("CORTEXBASE_LITELLM_KEY"); val != "" {
+	if val := lookup("BEAVEND_LITELLM_KEY"); val != "" {
 		cfg.LiteLLM.Key = strings.TrimSpace(val)
 	}
-	if val := lookup("CORTEXBASE_MASTER_KEY"); val != "" {
+	if val := lookup("BEAVEND_MASTER_KEY"); val != "" {
 		cfg.Security.MasterKey = strings.TrimSpace(val)
 	}
-	if val := lookup("CORTEXBASE_ADMIN_EMAIL"); val != "" {
+	if val := lookup("BEAVEND_ADMIN_EMAIL"); val != "" {
 		cfg.Admin.Email = strings.TrimSpace(val)
 	}
-	if val := lookup("CORTEXBASE_ADMIN_PASSWORD"); val != "" {
+	if val := lookup("BEAVEND_ADMIN_PASSWORD"); val != "" {
 		cfg.Admin.Password = strings.TrimSpace(val)
 	}
-	if val := lookup("CORTEXBASE_LOG_LEVEL"); val != "" {
+	if val := lookup("BEAVEND_LOG_LEVEL"); val != "" {
 		cfg.Log.Level = strings.TrimSpace(val)
 	}
-	if val := lookup("CORTEXBASE_LOG_FORMAT"); val != "" {
+	if val := lookup("BEAVEND_LOG_FORMAT"); val != "" {
 		cfg.Log.Format = strings.TrimSpace(val)
 	}
 

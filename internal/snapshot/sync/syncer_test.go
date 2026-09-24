@@ -9,10 +9,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/require"
 
-	"github.com/cortexbase/cortexbase/internal/core"
-	"github.com/cortexbase/cortexbase/internal/snapshot"
-	synckit "github.com/cortexbase/cortexbase/internal/snapshot/sync"
-	"github.com/cortexbase/cortexbase/internal/store/db"
+	"github.com/beavend/beavend/internal/core"
+	"github.com/beavend/beavend/internal/snapshot"
+	synckit "github.com/beavend/beavend/internal/snapshot/sync"
+	"github.com/beavend/beavend/internal/store/db"
 )
 
 type mockQuerySource struct {

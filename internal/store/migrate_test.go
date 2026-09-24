@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/cortexbase/cortexbase/internal/store"
+	"github.com/beavend/beavend/internal/store"
 )
 
 func TestEmbeddedMigrations(t *testing.T) {

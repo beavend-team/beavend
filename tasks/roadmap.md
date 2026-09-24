@@ -1,6 +1,6 @@
-# Cortexbase Implementation Roadmap
+# Beavend Implementation Roadmap
 
-This roadmap translates the Cortexbase PRD, Architecture, and Tech Stack into actionable, phased development milestones.
+This roadmap translates the Beavend PRD, Architecture, and Tech Stack into actionable, phased development milestones.
 
 ---
 
@@ -41,7 +41,7 @@ Phase 4: Policy Engine (CEL)      │                              │
   * Core domain interfaces and models in `internal/core`.
   * Configuration loading (`internal/config`) supporting environment variables and YAML.
   * Structured logging with `slog` and OpenTelemetry tracer provider setup.
-  * Server entrypoint `cmd/cortexbase` supporting `--role` flags and graceful shutdown.
+  * Server entrypoint `cmd/beavend` supporting `--role` flags and graceful shutdown.
   * Unauthenticated `/healthz` and `/readyz` probes.
   * OpenAPI 3.1 contract at `api/openapi.yaml`.
 * **Dependencies:** None.
@@ -155,4 +155,4 @@ Phase 4: Policy Engine (CEL)      │                              │
   * Local admin account authentication and session cookie management.
   * React + TypeScript + Vite SPA embedded in Go binary via `embed.FS`.
 * **Dependencies:** Phase 2.
-* **Expected Outcome:** Administrators can configure Cortexbase entirely through a web browser UI.
+* **Expected Outcome:** Administrators can configure Beavend entirely through a web browser UI.

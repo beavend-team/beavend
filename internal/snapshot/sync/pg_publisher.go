@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const PostgresNotificationChannel = "cortexbase_revisions"
+const PostgresNotificationChannel = "beavend_revisions"
 
 // PostgresPublisher broadcasts revision invalidation events via PostgreSQL NOTIFY.
 type PostgresPublisher struct {

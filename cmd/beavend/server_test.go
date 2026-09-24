@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cortexbase/cortexbase/internal/config"
+	"github.com/beavend/beavend/internal/config"
 )
 
 type mockReadyChecker struct {

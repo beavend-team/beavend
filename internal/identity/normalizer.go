@@ -6,7 +6,7 @@ import (
 
 	"github.com/lestrrat-go/jwx/v2/jwt"
 
-	"github.com/cortexbase/cortexbase/internal/core"
+	"github.com/beavend/beavend/internal/core"
 )
 
 // Normalizer transforms a validated JWT into the normalized core.Identity.

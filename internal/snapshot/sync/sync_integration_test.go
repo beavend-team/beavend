@@ -11,14 +11,14 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 
-	"github.com/cortexbase/cortexbase/internal/snapshot"
-	synckit "github.com/cortexbase/cortexbase/internal/snapshot/sync"
+	"github.com/beavend/beavend/internal/snapshot"
+	synckit "github.com/beavend/beavend/internal/snapshot/sync"
 )
 
 func TestSyncer_RedisIntegration(t *testing.T) {
-	redisURL := os.Getenv("CORTEXBASE_REDIS_URL")
+	redisURL := os.Getenv("BEAVEND_REDIS_URL")
 	if redisURL == "" {
-		t.Skip("Skipping Redis integration test: CORTEXBASE_REDIS_URL not set")
+		t.Skip("Skipping Redis integration test: BEAVEND_REDIS_URL not set")
 	}
 
 	opt, err := redis.ParseURL(redisURL)
@@ -66,9 +66,9 @@ func TestSyncer_RedisIntegration(t *testing.T) {
 }
 
 func TestSyncer_PostgresListenNotifyIntegration(t *testing.T) {
-	dbURL := os.Getenv("CORTEXBASE_DATABASE_URL")
+	dbURL := os.Getenv("BEAVEND_DATABASE_URL")
 	if dbURL == "" {
-		t.Skip("Skipping Postgres LISTEN/NOTIFY integration test: CORTEXBASE_DATABASE_URL not set")
+		t.Skip("Skipping Postgres LISTEN/NOTIFY integration test: BEAVEND_DATABASE_URL not set")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

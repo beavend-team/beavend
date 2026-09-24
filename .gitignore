@@ -1,5 +1,5 @@
 # Binaries
-cortexbase
+beavend
 *.exe
 *.exe~
 *.dll

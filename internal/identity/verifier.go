@@ -11,7 +11,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jws"
 	"github.com/lestrrat-go/jwx/v2/jwt"
 
-	"github.com/cortexbase/cortexbase/internal/core"
+	"github.com/beavend/beavend/internal/core"
 )
 
 const (

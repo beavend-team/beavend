@@ -4,7 +4,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/cortexbase/cortexbase/internal/core"
+	"github.com/beavend/beavend/internal/core"
 )
 
 // Registry manages in-memory configuration snapshots across multiple projects and environments.

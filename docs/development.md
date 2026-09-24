@@ -1,6 +1,6 @@
-# Cortexbase Local Development Guide
+# Beavend Local Development Guide
 
-This guide details how to configure, develop, test, and contribute to the Cortexbase Go server, control plane, and administrative dashboard.
+This guide details how to configure, develop, test, and contribute to the Beavend Go server, control plane, and administrative dashboard.
 
 ---
 
@@ -25,8 +25,8 @@ Ensure the following tools are installed on your workstation:
 
 ### 2.1 Clone Repository & Install Dependencies
 ```bash
-# In the cortexbase project directory
-cd cortexbase
+# In the beavend project directory
+cd beavend
 
 # Install Go dependencies
 go mod download
@@ -38,7 +38,7 @@ cd ..
 ```
 
 ### 2.2 Local Infrastructure via Docker Compose
-Cortexbase provides a minimal `docker-compose.yml` for local development supporting PostgreSQL 16, Valkey (Redis-compatible), and LiteLLM:
+Beavend provides a minimal `docker-compose.yml` for local development supporting PostgreSQL 16, Valkey (Redis-compatible), and LiteLLM:
 
 ```bash
 # Start local databases and services
@@ -49,34 +49,34 @@ docker compose -f deploy/docker/docker-compose.yml up -d postgres valkey litellm
 Copy `.env.example` to `.env`:
 ```bash
 # Server Configuration
-CORTEXBASE_ENV=development
-CORTEXBASE_ROLE=all
-CORTEXBASE_HTTP_PORT=8080
-CORTEXBASE_LOG_LEVEL=debug
-CORTEXBASE_LOG_FORMAT=json
+BEAVEND_ENV=development
+BEAVEND_ROLE=all
+BEAVEND_HTTP_PORT=8080
+BEAVEND_LOG_LEVEL=debug
+BEAVEND_LOG_FORMAT=json
 
 # Primary Storage (PostgreSQL)
-CORTEXBASE_DATABASE_URL=postgres://cortexbase:cortexbase@localhost:5432/cortexbase?sslmode=disable
+BEAVEND_DATABASE_URL=postgres://beavend:beavend@localhost:5432/beavend?sslmode=disable
 
 # Ephemeral State & Counters (Valkey / Redis)
-CORTEXBASE_REDIS_URL=redis://localhost:6379/0
+BEAVEND_REDIS_URL=redis://localhost:6379/0
 
 # Provider Gateway (LiteLLM)
-CORTEXBASE_LITELLM_URL=http://localhost:4000
-CORTEXBASE_LITELLM_KEY=sk-cortexbase-local-master
+BEAVEND_LITELLM_URL=http://localhost:4000
+BEAVEND_LITELLM_KEY=sk-beavend-local-master
 
 # Envelope Encryption (32-byte hex for AES-256)
-CORTEXBASE_MASTER_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+BEAVEND_MASTER_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 
 # Initial Admin Credentials (Control Plane)
-CORTEXBASE_ADMIN_EMAIL=admin@cortexbase.local
-CORTEXBASE_ADMIN_PASSWORD=adminpassword123
+BEAVEND_ADMIN_EMAIL=admin@beavend.local
+BEAVEND_ADMIN_PASSWORD=adminpassword123
 ```
 
 ### 2.4 Apply Database Migrations
 Run `goose` migrations against PostgreSQL:
 ```bash
-goose -dir internal/store/migrations postgres "$CORTEXBASE_DATABASE_URL" up
+goose -dir internal/store/migrations postgres "$BEAVEND_DATABASE_URL" up
 ```
 
 ---
@@ -86,7 +86,7 @@ goose -dir internal/store/migrations postgres "$CORTEXBASE_DATABASE_URL" up
 ### 3.1 All-In-One Mode (Default Local Dev)
 Runs runtime plane, control plane, and embedded dashboard in one process:
 ```bash
-go run ./cmd/cortexbase --role=all
+go run ./cmd/beavend --role=all
 ```
 * Runtime API: `http://localhost:8080/v1`
 * Management API: `http://localhost:8080/v1/admin`
@@ -98,10 +98,10 @@ go run ./cmd/cortexbase --role=all
 To test multi-process separation:
 ```bash
 # Terminal 1: Runtime plane on port 8081
-CORTEXBASE_HTTP_PORT=8081 go run ./cmd/cortexbase --role=runtime
+BEAVEND_HTTP_PORT=8081 go run ./cmd/beavend --role=runtime
 
 # Terminal 2: Control plane on port 8082
-CORTEXBASE_HTTP_PORT=8082 go run ./cmd/cortexbase --role=control
+BEAVEND_HTTP_PORT=8082 go run ./cmd/beavend --role=control
 ```
 
 ### 3.3 Running Dashboard with Hot Reloading
@@ -141,7 +141,7 @@ sqlc generate
 
 ---
 
-## 5. Extending Cortexbase
+## 5. Extending Beavend
 
 ### 5.1 How to Add a New LLM Provider Adapter
 1. Navigate to `internal/providers/`.
@@ -155,7 +155,7 @@ sqlc generate
    }
    ```
 3. Register the adapter in the provider factory `internal/providers/factory.go`.
-4. Add unit tests verifying request/response conversion and error mapping to the Cortexbase error taxonomy.
+4. Add unit tests verifying request/response conversion and error mapping to the Beavend error taxonomy.
 
 ### 5.2 How to Add a New Tool Executor
 1. Navigate to `internal/tools/executors/`.

@@ -12,17 +12,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cortexbase/cortexbase/internal/config"
-	"github.com/cortexbase/cortexbase/internal/snapshot"
-	synckit "github.com/cortexbase/cortexbase/internal/snapshot/sync"
-	"github.com/cortexbase/cortexbase/internal/store"
-	"github.com/cortexbase/cortexbase/internal/telemetry"
+	"github.com/beavend/beavend/internal/config"
+	"github.com/beavend/beavend/internal/snapshot"
+	synckit "github.com/beavend/beavend/internal/snapshot/sync"
+	"github.com/beavend/beavend/internal/store"
+	"github.com/beavend/beavend/internal/telemetry"
 )
 
 func main() {
 	var (
-		roleFlag   = flag.String("role", "", "Role to run: all, runtime, or control (defaults to CORTEXBASE_ROLE)")
-		portFlag   = flag.Int("port", 0, "HTTP port to listen on (defaults to CORTEXBASE_HTTP_PORT)")
+		roleFlag   = flag.String("role", "", "Role to run: all, runtime, or control (defaults to BEAVEND_ROLE)")
+		portFlag   = flag.Int("port", 0, "HTTP port to listen on (defaults to BEAVEND_HTTP_PORT)")
 		configFlag = flag.String("config", "", "Path to YAML configuration file")
 	)
 	flag.Parse()
@@ -60,7 +60,7 @@ func main() {
 	logger := telemetry.SetupLogger(cfg.Log.Level, os.Stdout)
 	slog.SetDefault(logger)
 
-	slog.Info("starting cortexbase server",
+	slog.Info("starting beavend server",
 		slog.String("role", cfg.Role),
 		slog.String("env", cfg.Env),
 		slog.Int("port", cfg.HTTP.Port),
@@ -69,7 +69,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tel, err := telemetry.Init(ctx, "cortexbase", "0.1.0")
+	tel, err := telemetry.Init(ctx, "beavend", "0.1.0")
 	if err != nil {
 		slog.Error("failed to initialize telemetry", slog.String("error", err.Error()))
 		os.Exit(1)

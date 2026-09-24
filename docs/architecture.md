@@ -1,6 +1,6 @@
-# Cortexbase — Architecture
+# Beavend — Architecture
 
-> Companion to `Cortexbase-PRD.md` and `techstack.md`.
+> Companion to `Beavend-PRD.md` and `techstack.md`.
 > Goals: **easy to maintain**, **stateless and horizontally scalable to millions of users**, **secure by construction**, and **simple to self-host**.
 
 ---
@@ -11,7 +11,7 @@
 
 | Considered | Verdict |
 |---|---|
-| Microservices | Rejected. Operational burden (service discovery, distributed tracing across ~10 services, version skew) is too high for self-hosters and a small maintainer team. Cortexbase has no domain that needs independent scaling beyond runtime vs. control. |
+| Microservices | Rejected. Operational burden (service discovery, distributed tracing across ~10 services, version skew) is too high for self-hosters and a small maintainer team. Beavend has no domain that needs independent scaling beyond runtime vs. control. |
 | Single undifferentiated monolith | Rejected. Admin traffic (dashboard, config edits) and runtime traffic (AI requests) have very different load, availability, and security needs. |
 | **Modular monolith, two roles** | **Chosen.** One codebase, one binary, one image, clean internal module boundaries. `--role=runtime`, `--role=control`, or `--role=all` (default for small installs). Scale roles independently when needed. |
 
@@ -192,7 +192,7 @@ This keeps instances stateless while supporting human-in-the-loop flows.
 ### 7.1 Identity
 
 * JWKS documents are cached per issuer with background refresh and key-rotation handling. **Token validation is purely local CPU work** (no network call on the hot path).
-* Signature, `exp`/`nbf`, `iss`, `aud`, and allowed algorithms are checked. Revocation is out of scope by design (PRD §7.4): Cortexbase forwards and validates but does not manage token lifecycle.
+* Signature, `exp`/`nbf`, `iss`, `aud`, and allowed algorithms are checked. Revocation is out of scope by design (PRD §7.4): Beavend forwards and validates but does not manage token lifecycle.
 * Output is the normalized `Identity{project, env, issuer, subject, audience, claims}`.
 
 ### 7.2 Policy engine
@@ -219,7 +219,7 @@ Runtime ──► ProviderAdapter (interface)
 ```
 
 * Logical model (`fast`) → deployment → adapter, resolved from the snapshot.
-* **LiteLLM runs as N stateless replicas** behind an internal load balancer; provider keys live only there (or in Cortexbase secrets for the native adapter).
+* **LiteLLM runs as N stateless replicas** behind an internal load balancer; provider keys live only there (or in Beavend secrets for the native adapter).
 * Circuit breaker and health checks per deployment; provider errors normalized to the taxonomy (`502 provider_error`).
 * Streaming is passed through with **no intermediate buffering** except when `stream_mode: buffered` guardrails demand it.
 * Fallback ordering (v0.2): same logical model can list several deployments; adapter layer retries next deployment on eligible errors, before the first token is sent.
@@ -365,7 +365,7 @@ Runtime pods can run in multiple regions close to users; config snapshots replic
 * **Admin plane hardening:** separate listener/port, RBAC, audit log, optional network restriction (IP allowlist / private network).
 * **Tenant isolation:** `project_id` scoping in every query, cache key, and counter key; automated tests assert no cross-project leakage.
 * **Abuse controls:** per-IP and per-project ingress rate limits in addition to per-user limits, body size limits, and payload validation before any expensive work.
-* **Token lifecycle** is deliberately outside Cortexbase (implementor's IdP), consistent with PRD §7.4.
+* **Token lifecycle** is deliberately outside Beavend (implementor's IdP), consistent with PRD §7.4.
 
 ---
 
@@ -397,7 +397,7 @@ Package boundaries enforce the modular monolith. Dependencies flow **inward**: a
 
 ```text
 server/
-├── cmd/cortexbase/            # main: role selection, wiring
+├── cmd/beavend/            # main: role selection, wiring
 ├── internal/
 │   ├── core/                  # domain types + interfaces (Identity, Snapshot, ProviderAdapter, …)
 │   ├── runtime/               # pipeline stages, agent loop, SSE, request state
@@ -424,7 +424,7 @@ server/
 └── testdata/
 ```
 
-> **SDKs are in separate repositories** (`cortexbase-sdk-kmp`, `cortexbase-sdk-ios`, `cortexbase-sdk-web`) and are not part of this codebase. See `techstack.md §12` for SDK repo layouts and the OpenAPI contract release flow.
+> **SDKs are in separate repositories** (`beavend-sdk-kmp`, `beavend-sdk-ios`, `beavend-sdk-web`) and are not part of this codebase. See `techstack.md §12` for SDK repo layouts and the OpenAPI contract release flow.
 
 **Maintainability rules**
 
@@ -443,15 +443,15 @@ server/
 
 ```text
 ┌──────────────────────── Docker Compose ─────────────────────────┐
-│ cortexbase (--role=all)  │ postgres │ valkey │ litellm │ (ollama)│
+│ beavend (--role=all)  │ postgres │ valkey │ litellm │ (ollama)│
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-Dashboard is embedded in the `cortexbase` container. One command, a few hundred MB of RAM.
+Dashboard is embedded in the `beavend` container. One command, a few hundred MB of RAM.
 
 ### 15.2 Tier 1: Small production
 
-* 2+ `cortexbase --role=runtime` behind a load balancer; 1 `--role=control`.
+* 2+ `beavend --role=runtime` behind a load balancer; 1 `--role=control`.
 * Managed Postgres and Redis; 2+ LiteLLM replicas.
 * TLS terminated at the LB; SSE-safe timeouts.
 
@@ -472,7 +472,7 @@ Suggested SLIs/SLOs for the runtime plane:
 
 | SLI | Target |
 |---|---|
-| Cortexbase-added overhead, p95 (excluding provider/tool time) | < 30 ms |
+| Beavend-added overhead, p95 (excluding provider/tool time) | < 30 ms |
 | Time to first streamed byte overhead, p95 | < 50 ms |
 | Availability of runtime API (excluding provider failures) | 99.9% |
 | Config propagation (publish → all runtimes) | < 5 s p95 |

@@ -10,7 +10,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/cortexbase/cortexbase/internal/snapshot"
+	"github.com/beavend/beavend/internal/snapshot"
 )
 
 // SyncerOptions configures the Syncer.

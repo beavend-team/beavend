@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/cortexbase/cortexbase/internal/core"
+	"github.com/beavend/beavend/internal/core"
 )
 
 func TestVerifier_ValidTokens(t *testing.T) {

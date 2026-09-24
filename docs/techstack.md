@@ -1,6 +1,6 @@
-# Cortexbase — Tech Stack
+# Beavend — Tech Stack
 
-> Companion to `Cortexbase-PRD.md` and `architecture.md`.
+> Companion to `Beavend-PRD.md` and `architecture.md`.
 > Goal: the most **efficient** (runtime cost, latency, scale to millions of users) and **effective** (easy to build, operate, and contribute to) stack for a self-hosted AI application backend.
 >
 > Versions are intentionally not pinned here. Pin the current stable release of each dependency at implementation time and record it in `go.mod`, `package.json`, and `docker-compose.yml`.
@@ -9,11 +9,11 @@
 
 ## 1. Workload Profile (what the stack must be good at)
 
-The stack is chosen for what Cortexbase actually does, not for general preference.
+The stack is chosen for what Beavend actually does, not for general preference.
 
 | Characteristic | Implication |
 |---|---|
-| Mostly **I/O-bound proxying**: client → Cortexbase → provider/tool | Needs cheap, massive concurrency, not raw CPU speed |
+| Mostly **I/O-bound proxying**: client → Beavend → provider/tool | Needs cheap, massive concurrency, not raw CPU speed |
 | **Long-lived streaming (SSE)** responses, seconds to minutes each | Needs efficient connection handling and no response buffering |
 | Hot path is **small logic**: validate JWT, evaluate policy, check limit, render prompt | Must be fast and allocation-light; **no DB read per request** |
 | **Many concurrent users**, bursty | Stateless horizontal scaling |
@@ -30,7 +30,7 @@ Peak (assume 10× average)                          ≈ 1,000–1,500 requests/s
 Average stream duration ~10 s → concurrent streams ≈ 10,000–15,000 at peak
 ```
 
-That load is comfortably handled by a small cluster of modest Go instances. In practice the limiting factors are **provider rate limits, cost, Redis/Postgres write throughput, and LiteLLM**, not the Cortexbase server language. The stack and architecture are designed so each of those can be scaled or bypassed independently. Validate with load tests early (§11).
+That load is comfortably handled by a small cluster of modest Go instances. In practice the limiting factors are **provider rate limits, cost, Redis/Postgres write throughput, and LiteLLM**, not the Beavend server language. The stack and architecture are designed so each of those can be scaled or bypassed independently. Validate with load tests early (§11).
 
 ---
 
@@ -70,14 +70,14 @@ That load is comfortably handled by a small cluster of modest Go instances. In p
 * **Efficient.** Low memory per connection, fast startup, predictable GC pauses, small footprint. Runs well on a $5–20 VPS for small installs and scales linearly in clusters.
 * **Easiest to operate.** One static binary, no runtime to install, tiny container images. This directly serves the "docker compose up" goal.
 * **Easy to maintain.** Small language, one obvious way to do things, fast compiles, excellent tooling (formatter, vet, race detector, pprof built in). New contributors become productive quickly.
-* **Ecosystem fits.** First-class libraries for HTTP, JWT/JWKS, OpenTelemetry, Prometheus, pgx (Postgres), Redis, CEL, and JSON Schema. The infrastructure category Cortexbase belongs to (proxies, gateways, backends like Supabase pieces, Traefik, Caddy, Vault) is heavily Go, so the open-source contributor pool matches.
+* **Ecosystem fits.** First-class libraries for HTTP, JWT/JWKS, OpenTelemetry, Prometheus, pgx (Postgres), Redis, CEL, and JSON Schema. The infrastructure category Beavend belongs to (proxies, gateways, backends like Supabase pieces, Traefik, Caddy, Vault) is heavily Go, so the open-source contributor pool matches.
 * **Streaming is native.** `http.Flusher` and context cancellation give proper backpressure and client-disconnect propagation to providers, saving cost when users cancel.
 
 ### 3.2 Alternatives considered
 
 | Option | Verdict | Reason |
 |---|---|---|
-| **Rust** (axum/tokio) | Rejected for v1 | Best raw efficiency, but slower development, harder to hire/onboard contributors, and Cortexbase is I/O-bound so the gain is marginal. Revisit for isolated hot components only. |
+| **Rust** (axum/tokio) | Rejected for v1 | Best raw efficiency, but slower development, harder to hire/onboard contributors, and Beavend is I/O-bound so the gain is marginal. Revisit for isolated hot components only. |
 | **TypeScript** (Node/Bun/Deno) | Rejected | Good developer familiarity and shared types with the dashboard, but single-threaded event loop needs more care for CPU spikes (JSON schema, guardrails), higher memory per instance, and heavier runtime to ship. |
 | **Kotlin/JVM** (Ktor/Spring) | Rejected | Attractive for sharing code with the KMP SDK and for Android-centric teams, but higher memory, slower cold start, larger images, and JVM tuning burden hurt small self-hosters. Kotlin's real benefit (shared models) is achieved better through OpenAPI codegen. |
 | **Python** (FastAPI) | Rejected | Simple and matches LiteLLM, but GIL and per-process memory limit high-concurrency streaming, requiring many workers. Fine for LiteLLM's role, not for the hot path. |
@@ -148,12 +148,12 @@ Postgres partitions handle a large volume comfortably. When request logs reach h
 
 ### 5.1 LiteLLM as default
 
-LiteLLM stays as specified in the PRD: provider integrations, unified API, fallbacks, cost data. Cortexbase talks to it over its OpenAI-compatible HTTP API through the `ProviderAdapter` interface.
+LiteLLM stays as specified in the PRD: provider integrations, unified API, fallbacks, cost data. Beavend talks to it over its OpenAI-compatible HTTP API through the `ProviderAdapter` interface.
 
 Operational rules:
 
 * Run LiteLLM as a **stateless service with multiple replicas** behind an internal load balancer. Its master key and provider keys never leave the server network.
-* Cortexbase, not clients, holds the LiteLLM credential.
+* Beavend, not clients, holds the LiteLLM credential.
 * Treat LiteLLM as a **replaceable** component (see below).
 
 ### 5.2 Native OpenAI-compatible adapter (scale escape hatch)
@@ -164,7 +164,7 @@ LiteLLM is Python and can become the throughput bottleneck at very high request 
 * Per-model choice of adapter in configuration: `adapter: litellm | openai_compat`.
 * LiteLLM remains the path for exotic providers and its fallback/cost features.
 
-This gives a high-scale path without rewriting anything and keeps the "don't clone LiteLLM" principle: Cortexbase only speaks the common wire format itself.
+This gives a high-scale path without rewriting anything and keeps the "don't clone LiteLLM" principle: Beavend only speaks the common wire format itself.
 
 ### 5.3 Adapter interface (sketch)
 
@@ -177,7 +177,7 @@ type ProviderAdapter interface {
 }
 ```
 
-Errors are normalized to Cortexbase's error taxonomy; usage/cost is returned in a uniform struct.
+Errors are normalized to Beavend's error taxonomy; usage/cost is returned in a uniform struct.
 
 ---
 
@@ -213,24 +213,24 @@ The **OpenAPI 3.1 spec** (plus a documented SSE event schema) is the single sour
 
 | Repository | Language | Distributes to |
 |---|---|---|
-| `cortexbase/cortexbase` | Go + React | — (server + dashboard) |
-| `cortexbase/cortexbase-sdk-kmp` | Kotlin Multiplatform | Maven Central (Android) |
-| `cortexbase/cortexbase-sdk-ios` | Swift | Swift Package Manager |
-| `cortexbase/cortexbase-sdk-web` | TypeScript | npm |
+| `beavend/beavend` | Go + React | — (server + dashboard) |
+| `beavend/beavend-sdk-kmp` | Kotlin Multiplatform | Maven Central (Android) |
+| `beavend/beavend-sdk-ios` | Swift | Swift Package Manager |
+| `beavend/beavend-sdk-web` | TypeScript | npm |
 
 #### OpenAPI spec distribution
 
-The spec source lives at `api/openapi.yaml` in the main `cortexbase` repo. On every versioned release (e.g. `v0.2.0`) the CI publishes the spec as a GitHub Release asset:
+The spec source lives at `api/openapi.yaml` in the main `beavend` repo. On every versioned release (e.g. `v0.2.0`) the CI publishes the spec as a GitHub Release asset:
 
 ```
-https://github.com/cortexbase/cortexbase/releases/download/v0.2.0/openapi.yaml
+https://github.com/beavend/beavend/releases/download/v0.2.0/openapi.yaml
 ```
 
 Each SDK repo contains a pinned copy of the spec (`api/openapi.yaml`) checked into version control. A `make update-spec VERSION=v0.2.0` target downloads the pinned version:
 
 ```makefile
 update-spec:
-    curl -fL https://github.com/cortexbase/cortexbase/releases/download/$(VERSION)/openapi.yaml \
+    curl -fL https://github.com/beavend/beavend/releases/download/$(VERSION)/openapi.yaml \
          -o api/openapi.yaml
 ```
 
@@ -239,20 +239,20 @@ SDK CI runs contract conformance tests against the committed spec. Updating to a
 #### SDK versioning policy
 
 * SDK versions follow SemVer independently of the server version.
-* Each SDK release documents the minimum compatible server version (e.g. `cortexbase >= v0.1.0`).
-* The SDK sends `X-Cortexbase-SDK-Version: <version>` on every request so the server can log and warn on version skew.
+* Each SDK release documents the minimum compatible server version (e.g. `beavend >= v0.1.0`).
+* The SDK sends `X-Beavend-SDK-Version: <version>` on every request so the server can log and warn on version skew.
 * Breaking server API changes are introduced only in minor or major server versions; SDKs have at least one minor version cycle to adapt before the old endpoint is removed.
 
-### 7.2 Kotlin Multiplatform SDK (`cortexbase-sdk-kmp`) — Android
+### 7.2 Kotlin Multiplatform SDK (`beavend-sdk-kmp`) — Android
 
 * Targets: `androidTarget` (primary distribution), with the multiplatform module structure ready to add other targets later.
 * **Ktor client** (OkHttp engine on Android), **kotlinx.serialization**, **coroutines/Flow** for streaming.
 * Public API: `ai(id).chat/stream`, token provider callback, retries with backoff, cancellation, client-tool handlers, confirmation flow.
 * Distributed via **Maven Central**. Publishing pipeline uses the Sonatype Portal with GPG signing.
 * Gradle setup: `kotlin("multiplatform")` convention plugin, `build-logic/` for shared build logic, `gradle/libs.versions.toml` version catalog. This is why a separate repo is essential — this Gradle setup conflicts with a Go server workspace.
-* Conformance tests run against a mock Cortexbase server (Docker) in CI.
+* Conformance tests run against a mock Beavend server (Docker) in CI.
 
-### 7.3 iOS SDK (`cortexbase-sdk-ios`) — Swift native
+### 7.3 iOS SDK (`beavend-sdk-ios`) — Swift native
 
 * **Pure Swift** implementation — no KMP dependency. Implements the same thin client against the REST/SSE API using `URLSession` and `AsyncStream`.
 * Public API mirrors the KMP SDK surface: `ai(id).chat/stream`, token provider callback, retries, cancellation, client-tool handlers, confirmation flow.
@@ -261,7 +261,7 @@ SDK CI runs contract conformance tests against the committed spec. Updating to a
 * Minimum deployment target: iOS 16+ (for `AsyncStream` and structured concurrency).
 * CI: `xcodebuild` on macOS runners; unit tests + integration tests against a mock server container.
 
-### 7.4 Web SDK (`cortexbase-sdk-web`) — TypeScript
+### 7.4 Web SDK (`beavend-sdk-web`) — TypeScript
 
 * Zero runtime dependencies; `fetch` + `ReadableStream` SSE parser; works in browsers, Node, Deno, Bun, edge runtimes.
 * Built with **`tsup`** (esbuild-based): produces ESM + CJS dual outputs with `.d.ts` declarations.
@@ -284,7 +284,7 @@ Community SDKs (Python, Flutter, React Native) are supported by publishing the O
 | Dashboards/alerts | Ship example Grafana dashboards and alert rules |
 | Profiling | `pprof` behind admin auth |
 
-Cortexbase's own **usage/log tables** (for the product dashboard) are separate from operational telemetry (for operators).
+Beavend's own **usage/log tables** (for the product dashboard) are separate from operational telemetry (for operators).
 
 ---
 
@@ -302,11 +302,11 @@ Cortexbase's own **usage/log tables** (for the product dashboard) are separate f
 
 | Tier | Target | Stack |
 |---|---|---|
-| **Tier 0: Single node** | Hobby, dev, small teams | Docker Compose: `cortexbase` (single binary, all roles), `postgres`, `valkey`, `litellm` (+ optional `ollama`) |
-| **Tier 1: Small production** | Thousands to low millions of users | 2+ Cortexbase replicas behind a load balancer, managed Postgres, managed Redis, 2+ LiteLLM replicas |
+| **Tier 0: Single node** | Hobby, dev, small teams | Docker Compose: `beavend` (single binary, all roles), `postgres`, `valkey`, `litellm` (+ optional `ollama`) |
+| **Tier 1: Small production** | Thousands to low millions of users | 2+ Beavend replicas behind a load balancer, managed Postgres, managed Redis, 2+ LiteLLM replicas |
 | **Tier 2: Large scale** | Millions of active users | Kubernetes (Helm chart), separate runtime and control-plane deployments, HPA on CPU/concurrent streams, Redis Cluster, Postgres primary + read replica + PgBouncer, optional ClickHouse, native OpenAI-compatible adapter for high-volume models |
 
-Build/release: GoReleaser produces multi-arch binaries and images; SemVer; migrations run automatically or via `cortexbase migrate`.
+Build/release: GoReleaser produces multi-arch binaries and images; SemVer; migrations run automatically or via `beavend migrate`.
 
 ---
 
@@ -328,10 +328,10 @@ Build/release: GoReleaser produces multi-arch binaries and images; SemVer; migra
 
 SDKs live in their own repos. The main repo contains the server, dashboard, and the API contract.
 
-### `cortexbase/cortexbase` — server + dashboard
+### `beavend/beavend` — server + dashboard
 
 ```text
-cortexbase/
+beavend/
 ├── api/                 # OpenAPI spec (source of truth), SSE schema, error taxonomy
 ├── server/              # Go: runtime + control plane (single module)
 ├── dashboard/           # React + TS admin SPA
@@ -344,40 +344,40 @@ cortexbase/
 └── .github/             # CI workflows
 ```
 
-### `cortexbase/cortexbase-sdk-kmp` — Android (Kotlin Multiplatform)
+### `beavend/beavend-sdk-kmp` — Android (Kotlin Multiplatform)
 
 ```text
-cortexbase-sdk-kmp/
+beavend-sdk-kmp/
 ├── api/                 # Pinned openapi.yaml (downloaded via make update-spec)
 ├── build-logic/         # Convention plugins (Gradle)
 ├── gradle/              # libs.versions.toml version catalog
-├── cortexbase-sdk/      # KMP library module (androidTarget)
+├── beavend-sdk/      # KMP library module (androidTarget)
 │   ├── src/androidMain/
 │   └── src/commonMain/
-├── cortexbase-sdk-test/ # Integration tests (mock server via testcontainers)
+├── beavend-sdk-test/ # Integration tests (mock server via testcontainers)
 ├── sample/              # Sample Android app
 ├── Makefile             # update-spec, publish, test targets
 └── .github/             # CI: lint, test, publish to Maven Central
 ```
 
-### `cortexbase/cortexbase-sdk-ios` — Swift native
+### `beavend/beavend-sdk-ios` — Swift native
 
 ```text
-cortexbase-sdk-ios/
+beavend-sdk-ios/
 ├── api/                 # Pinned openapi.yaml
 ├── Sources/
-│   └── Cortexbase/      # Swift source (URLSession, AsyncStream, SSE parser)
+│   └── Beavend/      # Swift source (URLSession, AsyncStream, SSE parser)
 ├── Tests/
-│   └── CortexbaseTests/ # Unit + integration tests
+│   └── BeavendTests/ # Unit + integration tests
 ├── Package.swift        # SwiftPM manifest
 ├── Makefile             # update-spec, test targets
 └── .github/             # CI: xcodebuild on macOS runners
 ```
 
-### `cortexbase/cortexbase-sdk-web` — TypeScript
+### `beavend/beavend-sdk-web` — TypeScript
 
 ```text
-cortexbase-sdk-web/
+beavend-sdk-web/
 ├── api/                 # Pinned openapi.yaml
 ├── src/                 # TypeScript source
 ├── dist/                # Built ESM + CJS output (tsup)
@@ -389,7 +389,7 @@ cortexbase-sdk-web/
 
 ### API contract release flow
 
-When a new `cortexbase` version is tagged, the main repo CI:
+When a new `beavend` version is tagged, the main repo CI:
 
 1. Validates `api/openapi.yaml` against the live server handlers.
 2. Publishes `openapi.yaml` as a GitHub Release asset at the tagged version.

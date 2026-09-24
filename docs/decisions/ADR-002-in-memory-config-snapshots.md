@@ -4,7 +4,7 @@
 Accepted
 
 ## Context
-The Cortexbase runtime plane is on the critical path of end-user application interactions. The PRD imposes a strict non-functional performance requirement: Cortexbase must add under 30 ms p95 overhead (excluding provider and downstream tool latency).
+The Beavend runtime plane is on the critical path of end-user application interactions. The PRD imposes a strict non-functional performance requirement: Beavend must add under 30 ms p95 overhead (excluding provider and downstream tool latency).
 
 AI requests require extensive configuration data: project settings, AI App metadata, active prompt versions, logical model mappings, CEL authorization policies, JSON schemas for tools, and rate limit rules. Querying PostgreSQL on every request to fetch and parse this configuration would introduce significant database connection overhead, query latency, and a severe scaling bottleneck.
 
