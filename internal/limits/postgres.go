@@ -95,6 +95,13 @@ func (s *PostgresLimitStore) CheckAndDebit(ctx context.Context, key string, rule
 		cost := int64(1)
 		if r.Resource == "tokens" {
 			cost = requestedTokens
+			if cost <= 0 {
+				cost = 1
+			}
+		}
+		maxLimit := r.Max
+		if maxLimit < 0 {
+			maxLimit = 0
 		}
 
 		bucketStartSec := (nowSec / windowSec) * windowSec
@@ -137,7 +144,7 @@ func (s *PostgresLimitStore) CheckAndDebit(ctx context.Context, key string, rule
 		}
 
 		elapsed := nowSec % windowSec
-		ruleAllowed, retry := EstimateSlidingWindow(prevVal, currVal, cost, r.Max, windowSec, elapsed)
+		ruleAllowed, retry := EstimateSlidingWindow(prevVal, currVal, cost, maxLimit, windowSec, elapsed)
 		if !ruleAllowed {
 			allowed = false
 			if retry > maxRetry {
@@ -216,6 +223,12 @@ func (s *PostgresLimitStore) ReconcileTokens(ctx context.Context, key string, es
 		}
 		windows = append(windows, w)
 	}
+	if err := rows.Err(); err != nil {
+		if s.failClosed {
+			return fmt.Errorf("%w: iterate token windows: %w", ErrLimitStoreUnavailable, err)
+		}
+		return nil
+	}
 
 	queries := db.New(s.pool)
 	nowSec := now.Unix()
@@ -225,13 +238,17 @@ func (s *PostgresLimitStore) ReconcileTokens(ctx context.Context, key string, es
 		bucketStartSec := (nowSec / windowSec) * windowSec
 		bucketStart := time.Unix(bucketStartSec, 0).UTC()
 
-		_ = queries.AdjustRateLimitCounter(ctx, db.AdjustRateLimitCounterParams{
+		if err := queries.AdjustRateLimitCounter(ctx, db.AdjustRateLimitCounterParams{
 			Key:           key,
 			Resource:      "tokens",
 			WindowSeconds: w,
 			BucketStart:   pgtype.Timestamptz{Time: bucketStart, Valid: true},
 			CurrentCount:  delta,
-		})
+		}); err != nil {
+			if s.failClosed {
+				return fmt.Errorf("%w: adjust counter: %w", ErrLimitStoreUnavailable, err)
+			}
+		}
 	}
 
 	return nil

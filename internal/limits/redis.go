@@ -89,12 +89,19 @@ func (s *RedisLimitStore) CheckAndDebit(ctx context.Context, key string, rules [
 		isToken := int64(0)
 		if r.Resource == "tokens" {
 			cost = requestedTokens
+			if cost <= 0 {
+				cost = 1
+			}
 			isToken = 1
+		}
+		maxLimit := r.Max
+		if maxLimit < 0 {
+			maxLimit = 0
 		}
 
 		offset := 2 + i*4
 		argv[offset] = windowSec
-		argv[offset+1] = r.Max
+		argv[offset+1] = maxLimit
 		argv[offset+2] = cost
 		argv[offset+3] = isToken
 	}

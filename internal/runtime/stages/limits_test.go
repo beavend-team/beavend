@@ -225,5 +225,41 @@ func TestLimitsStage_TableDriven(t *testing.T) {
 
 		err = stage.Handle(ctx, state)
 		assert.ErrorIs(t, err, ErrMissingSnapshot)
+		require.NotNil(t, state.Error)
+		assert.Equal(t, "unavailable", state.Error.Code)
+	})
+
+	t.Run("missing app id returns error", func(t *testing.T) {
+		store := limits.NewMemoryLimitStore(nil)
+		stage, err := NewLimitsStage(store, nil, nil)
+		require.NoError(t, err)
+
+		state := &core.ReqState{
+			RequestID: "req-missing-appid",
+			Snapshot:  snap,
+		}
+
+		err = stage.Handle(ctx, state)
+		assert.ErrorIs(t, err, ErrMissingAIApp)
+		require.NotNil(t, state.Error)
+		assert.Equal(t, "invalid_request", state.Error.Code)
+	})
+
+	t.Run("unknown app returns not found", func(t *testing.T) {
+		store := limits.NewMemoryLimitStore(nil)
+		stage, err := NewLimitsStage(store, nil, nil)
+		require.NoError(t, err)
+
+		state := &core.ReqState{
+			RequestID: "req-unknown-app",
+			AIAppID:   "non-existent",
+			Snapshot:  snap,
+		}
+
+		err = stage.Handle(ctx, state)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrMissingAIApp)
+		require.NotNil(t, state.Error)
+		assert.Equal(t, "not_found", state.Error.Code)
 	})
 }

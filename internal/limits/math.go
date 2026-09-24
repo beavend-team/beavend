@@ -25,6 +25,15 @@ func EstimateSlidingWindow(prevCount, currCount, cost, maxLimit, windowSec, elap
 	if maxLimit <= 0 {
 		return false, time.Duration(windowSec) * time.Second
 	}
+	if prevCount < 0 {
+		prevCount = 0
+	}
+	if currCount < 0 {
+		currCount = 0
+	}
+	if cost < 0 {
+		cost = 0
+	}
 	if elapsedSec < 0 {
 		elapsedSec = 0
 	}

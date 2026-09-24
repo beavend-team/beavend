@@ -42,8 +42,17 @@ func NewTierResolver(compiler *policy.Compiler, evaluator *policy.Evaluator) (*T
 }
 
 // getOrCompileProgram returns a cached compiled cel.Program or compiles and caches it.
-func (r *TierResolver) getOrCompileProgram(expr string) (cel.Program, error) {
+// It checks the Snapshot in context first to avoid compilation on the hot path.
+func (r *TierResolver) getOrCompileProgram(ctx context.Context, expr string) (cel.Program, error) {
 	expr = strings.TrimSpace(expr)
+	if snap, ok := core.SnapshotFromContext(ctx); ok && snap != nil && snap.CompiledPolicies != nil {
+		if rawPrg, exists := snap.CompiledPolicies[expr]; exists {
+			if prg, ok := rawPrg.(cel.Program); ok {
+				return prg, nil
+			}
+		}
+	}
+
 	if val, ok := r.cache.Load(expr); ok {
 		return val.(cel.Program), nil
 	}
@@ -98,7 +107,7 @@ func (r *TierResolver) ResolveRules(ctx context.Context, rules []core.LimitRule,
 		}
 
 		// Conditional tier rule
-		prg, err := r.getOrCompileProgram(condition)
+		prg, err := r.getOrCompileProgram(ctx, condition)
 		if err != nil {
 			return nil, err
 		}

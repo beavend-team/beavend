@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/beavend/beavend/internal/core"
+	"github.com/beavend/beavend/internal/policy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -472,4 +473,66 @@ func TestRedisLimitStore_FailClosedAndOpen(t *testing.T) {
 	// Reconcile with fail open
 	err = storeOpen.ReconcileTokens(ctx, "{lim:test:dev:anon}", 100, 50)
 	assert.NoError(t, err)
+}
+
+func TestPostgresLimitStore_FailClosedAndOpen(t *testing.T) {
+	ctx := context.Background()
+	rules := []core.LimitRule{
+		{Resource: "inference", Window: time.Minute, Max: 5},
+	}
+
+	// FailClosed = true with nil pool
+	storeClosed := NewPostgresLimitStore(nil, &PostgresLimitStoreOptions{FailClosed: true})
+	allowed, _, err := storeClosed.CheckAndDebit(ctx, "{lim:test:dev:anon}", rules, 1)
+	assert.Error(t, err)
+	assert.False(t, allowed)
+	assert.ErrorIs(t, err, ErrLimitStoreUnavailable)
+
+	// FailClosed = false with nil pool
+	storeOpen := NewPostgresLimitStore(nil, &PostgresLimitStoreOptions{FailClosed: false})
+	allowed, _, err = storeOpen.CheckAndDebit(ctx, "{lim:test:dev:anon}", rules, 1)
+	assert.NoError(t, err)
+	assert.True(t, allowed)
+
+	// Reconcile with fail closed
+	err = storeClosed.ReconcileTokens(ctx, "{lim:test:dev:anon}", 100, 50)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrLimitStoreUnavailable)
+
+	// Reconcile with fail open
+	err = storeOpen.ReconcileTokens(ctx, "{lim:test:dev:anon}", 100, 50)
+	assert.NoError(t, err)
+}
+
+func TestTierResolver_SnapshotPrecompiled(t *testing.T) {
+	resolver, err := NewTierResolver(nil, nil)
+	require.NoError(t, err)
+
+	compiler, err := policy.NewCompiler()
+	require.NoError(t, err)
+
+	prg, err := compiler.Compile("claims.tier == 'gold'")
+	require.NoError(t, err)
+
+	snap := core.NewSnapshot("proj-1", "prod", 1)
+	snap.CompiledPolicies["claims.tier == 'gold'"] = prg
+
+	ctx := core.ContextWithSnapshot(context.Background(), snap)
+
+	rules := []core.LimitRule{
+		{Resource: "inference", Window: time.Minute, Max: 10},
+		{Resource: "inference", Window: time.Minute, Max: 100, TierCondition: "claims.tier == 'gold'"},
+	}
+
+	id := &core.Identity{Claims: map[string]any{"tier": "gold"}}
+	resolved, err := resolver.ResolveRules(ctx, rules, id, nil)
+	require.NoError(t, err)
+	require.Len(t, resolved, 1)
+	assert.Equal(t, int64(100), resolved[0].Max)
+}
+
+func TestEstimateSlidingWindow_NegativeInputs(t *testing.T) {
+	// Negative counts should be treated safely as 0
+	allowed, _ := EstimateSlidingWindow(-5, -2, -1, 10, 60, -10)
+	assert.True(t, allowed)
 }

@@ -79,16 +79,31 @@ func (s *LimitsStage) Handle(ctx context.Context, state *core.ReqState) error {
 	}
 
 	if state.Snapshot == nil {
+		state.Error = &core.ErrorResponse{
+			Code:      "unavailable",
+			Message:   "missing snapshot in request state",
+			RequestID: state.RequestID,
+		}
 		return ErrMissingSnapshot
 	}
 
 	// Resolve AIApp if not already populated
 	if state.AIApp == nil {
 		if state.AIAppID == "" {
+			state.Error = &core.ErrorResponse{
+				Code:      "invalid_request",
+				Message:   "missing ai app id in request state",
+				RequestID: state.RequestID,
+			}
 			return ErrMissingAIApp
 		}
 		app, exists := state.Snapshot.App(state.AIAppID)
 		if !exists {
+			state.Error = &core.ErrorResponse{
+				Code:      "not_found",
+				Message:   fmt.Sprintf("ai app %q not found", state.AIAppID),
+				RequestID: state.RequestID,
+			}
 			return fmt.Errorf("%w: %s", ErrMissingAIApp, state.AIAppID)
 		}
 		state.AIApp = app
