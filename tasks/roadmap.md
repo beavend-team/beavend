@@ -14,15 +14,15 @@ Phase 2: Persistent Storage & Config Snapshots [Done]
    │
    ├──────────────────────────────┬──────────────────────────────┐
    ▼                              ▼                              ▼
-Phase 3: Identity & Auth [Done] Phase 5: Rate Limiting [Done] Phase 6: Provider Layer
+Phase 3: Identity & Auth [Done] Phase 5: Rate Limiting [Done] Phase 6: Provider Layer [Done]
    │                              │                              │
    ▼                              │                              │
-Phase 4: Policy Engine (CEL) [Done] │
+Phase 4: Policy Engine (CEL) [Done] │                              │
    │                              │                              │
    └──────────────────────────────┴──────────────────────────────┘
                                   │
                                   ▼
-                   Phase 7: Runtime Pipeline & Agent Loop
+                   Phase 7: Runtime Pipeline & Agent Loop [Next]
                                   │
                    Phase 8: Tool Engine & Downstream Auth
                                   │
@@ -108,18 +108,27 @@ Phase 4: Policy Engine (CEL) [Done] │
 
 ---
 
-## Phase 6: Provider Abstraction & Model Routing [Next]
-* **Goal:** Implement the `ProviderAdapter` interface, the default LiteLLM adapter, and logical model routing.
+## Phase 6: Provider Abstraction & Model Routing [Completed]
+* **Status:** Completed
+* **Goal:** Implement the `ProviderAdapter` interface, the default LiteLLM adapter, native OpenAI-compatible adapter, and logical model routing.
+* **Tasks:**
+  * `tasks/phase-06-provider-layer/T021-provider-interfaces-and-wire-protocol.md` — Provider interfaces & OpenAI wire protocol
+  * `tasks/phase-06-provider-layer/T022-litellm-adapter.md` — LiteLLM provider adapter
+  * `tasks/phase-06-provider-layer/T023-openaicompat-adapter.md` — Native OpenAI-compatible adapter
+  * `tasks/phase-06-provider-layer/T024-model-resolver-and-routing.md` — Logical model routing resolver
+  * `tasks/phase-06-provider-layer/T025-model-routing-pipeline-stage.md` — Model routing pipeline stage
 * **Major Deliverables:**
-  * `core.ProviderAdapter` interface definition.
-  * `LiteLLMAdapter` HTTP client supporting chat completion, streaming, and error normalization.
-  * Logical model resolver mapping aliases (`fast`, `reasoning`) to deployments.
+  * `core.ProviderAdapter` implementation for LiteLLM (`LiteLLMAdapter`).
+  * `OpenAICompatAdapter` native Go adapter for high-throughput direct OpenAI endpoints.
+  * Streaming SSE parser and OpenAI wire protocol conversion.
+  * Logical model resolver mapping aliases (`fast`, `reasoning`) to deployments and adapters.
+  * Model routing runtime stage for request pipeline.
 * **Dependencies:** Phase 1, Phase 2.
-* **Expected Outcome:** Server communicates with LiteLLM to execute completions and streams with normalized error handling.
+* **Expected Outcome:** Server communicates with LiteLLM and OpenAI-compatible providers to execute completions and streams with normalized error handling and zero-DB-read hot-path resolution.
 
 ---
 
-## Phase 7: AI Runtime Pipeline & Agent Loop
+## Phase 7: AI Runtime Pipeline & Agent Loop [Next]
 * **Goal:** Implement the sequential stage execution pipeline, prompt templating, and Server-Sent Events (SSE) streaming delivery.
 * **Major Deliverables:**
   * Stage pipeline orchestrator (`Stage` interface).
