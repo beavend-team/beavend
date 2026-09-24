@@ -120,9 +120,13 @@ func AuthMiddleware(resolver SnapshotResolver, verifier *Verifier, opts ...Middl
 			}
 
 			// 3. Resolve Snapshot from memory (zero-DB read on hot path)
-			var authCfg *core.AuthConfig
+			var (
+				authCfg *core.AuthConfig
+				snap    *core.Snapshot
+			)
 			if resolver != nil {
-				snap, ok := resolver.Get(projectID, env)
+				var ok bool
+				snap, ok = resolver.Get(projectID, env)
 				if !ok {
 					writeError(w, http.StatusUnauthorized, "unauthenticated", fmt.Sprintf("project %q (%s) not found", projectID, env), reqID)
 					return
@@ -156,9 +160,12 @@ func AuthMiddleware(resolver SnapshotResolver, verifier *Verifier, opts ...Middl
 				return
 			}
 
-			// 6. Inject Identity and raw token into request Context
+			// 6. Inject Identity, Snapshot, and raw token into request Context
 			ctx := ContextWithIdentity(r.Context(), id)
 			ctx = ContextWithRawToken(ctx, tokenStr)
+			if snap != nil {
+				ctx = core.ContextWithSnapshot(ctx, snap)
+			}
 			ctx = telemetry.WithRequestID(ctx, reqID)
 			ctx = telemetry.WithProjectID(ctx, projectID)
 			ctx = telemetry.WithEnvironment(ctx, env)

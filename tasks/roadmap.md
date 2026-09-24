@@ -17,7 +17,7 @@ Phase 2: Persistent Storage & Config Snapshots [Done]
 Phase 3: Identity & Auth [Done] Phase 5: Rate Limiting      Phase 6: Provider Layer
    │                              │                              │
    ▼                              │                              │
-Phase 4: Policy Engine (CEL)      │                              │
+Phase 4: Policy Engine (CEL) [Done] │
    │                              │                              │
    └──────────────────────────────┴──────────────────────────────┘
                                   │
@@ -77,8 +77,8 @@ Phase 4: Policy Engine (CEL)      │                              │
 
 ---
 
-## Phase 4: Authorization & Policy Engine [Next]
-* **Status:** Ready / Next
+## Phase 4: Authorization & Policy Engine [Completed]
+* **Status:** Completed
 * **Goal:** Implement the Google CEL (Common Expression Language) policy evaluation engine to authorize AI App and Tool access based on identity claims.
 * **Major Deliverables:**
   * CEL program compiler integrated into snapshot compilation (`internal/policy`).
@@ -89,7 +89,8 @@ Phase 4: Policy Engine (CEL)      │                              │
 
 ---
 
-## Phase 5: Rate Limiting & User Quotas
+## Phase 5: Rate Limiting & User Quotas [Next]
+* **Status:** Ready / Next
 * **Goal:** Enforce atomic multi-window user inference limits and token quotas via Redis Lua scripts with tier resolution and token reconciliation.
 * **Major Deliverables:**
   * Redis Lua script for multi-window sliding window rate limits.

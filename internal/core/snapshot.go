@@ -1,6 +1,29 @@
 package core
 
-import "time"
+import (
+	"context"
+	"time"
+)
+
+type contextKey string
+
+const (
+	snapshotContextKey contextKey = "beavend_snapshot"
+)
+
+// ContextWithSnapshot returns a new context containing the Snapshot.
+func ContextWithSnapshot(ctx context.Context, snap *Snapshot) context.Context {
+	return context.WithValue(ctx, snapshotContextKey, snap)
+}
+
+// SnapshotFromContext extracts the Snapshot from context if present.
+func SnapshotFromContext(ctx context.Context) (*Snapshot, bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	snap, ok := ctx.Value(snapshotContextKey).(*Snapshot)
+	return snap, ok
+}
 
 // Snapshot represents an immutable compiled project configuration in memory.
 // It is swapped atomically and read without touching PostgreSQL on the request hot path.
@@ -87,4 +110,13 @@ func (s *Snapshot) Auth() (*AuthConfig, bool) {
 		return nil, false
 	}
 	return s.AuthConfig, true
+}
+
+// CompiledPolicy returns the pre-compiled policy program by ID or expression if present.
+func (s *Snapshot) CompiledPolicy(id string) (any, bool) {
+	if s == nil || s.CompiledPolicies == nil {
+		return nil, false
+	}
+	p, ok := s.CompiledPolicies[id]
+	return p, ok
 }

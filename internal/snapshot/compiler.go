@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/cel-go/cel"
 	"github.com/jackc/pgx/v5"
 	"github.com/santhosh-tekuri/jsonschema/v5"
 
 	"github.com/beavend/beavend/internal/core"
+	"github.com/beavend/beavend/internal/policy"
 	"github.com/beavend/beavend/internal/store/db"
 )
 
@@ -31,24 +31,20 @@ type QuerySource interface {
 
 // Compiler compiles raw store records into an in-memory immutable Snapshot.
 type Compiler struct {
-	queries QuerySource
-	celEnv  *cel.Env
+	queries        QuerySource
+	policyCompiler *policy.Compiler
 }
 
 // NewCompiler creates a new Snapshot Compiler.
 func NewCompiler(queries QuerySource) (*Compiler, error) {
-	// Standard CEL environment exposing 'claims' and 'meta' maps
-	celEnv, err := cel.NewEnv(
-		cel.Variable("claims", cel.MapType(cel.StringType, cel.DynType)),
-		cel.Variable("meta", cel.MapType(cel.StringType, cel.DynType)),
-	)
+	pc, err := policy.NewCompiler()
 	if err != nil {
-		return nil, fmt.Errorf("init cel environment: %w", err)
+		return nil, fmt.Errorf("init cel policy compiler: %w", err)
 	}
 
 	return &Compiler{
-		queries: queries,
-		celEnv:  celEnv,
+		queries:        queries,
+		policyCompiler: pc,
 	}, nil
 }
 
@@ -124,13 +120,9 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 		}
 
 		if strings.TrimSpace(pol.Expression) != "" {
-			ast, iss := c.celEnv.Compile(pol.Expression)
-			if iss.Err() != nil {
-				return nil, fmt.Errorf("compile cel policy %s (%q): %w", pol.PolicyID, pol.Expression, iss.Err())
-			}
-			prg, err := c.celEnv.Program(ast)
+			prg, err := c.policyCompiler.Compile(pol.Expression)
 			if err != nil {
-				return nil, fmt.Errorf("build cel program %s: %w", pol.PolicyID, err)
+				return nil, fmt.Errorf("compile cel policy %s (%q): %w", pol.PolicyID, pol.Expression, err)
 			}
 			snap.CompiledPolicies[pol.PolicyID] = prg
 			if pol.Name != "" && pol.Name != pol.PolicyID {
@@ -215,6 +207,19 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 			Result:           resConfig,
 			Cache:            cacheConfig,
 		}
+
+		// Referential integrity: verify tool authorization policy exists or is valid inline CEL
+		if t.Authorization != "" {
+			if _, exists := snap.Policies[t.Authorization]; !exists {
+				// Inline CEL expression: validate syntax and pre-compile
+				prg, err := c.policyCompiler.Compile(t.Authorization)
+				if err != nil {
+					return nil, fmt.Errorf("tool %s invalid authorization policy %q: %w", t.ToolID, t.Authorization, err)
+				}
+				snap.CompiledPolicies[t.Authorization] = prg
+			}
+		}
+
 		snap.Tools[t.ToolID] = tDef
 		if t.Name != "" && t.Name != t.ToolID {
 			snap.Tools[t.Name] = tDef
@@ -293,13 +298,9 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 		if a.AccessPolicy != "" {
 			if _, exists := snap.Policies[a.AccessPolicy]; !exists {
 				// Inline CEL expression: validate syntax and pre-compile
-				ast, iss := c.celEnv.Compile(a.AccessPolicy)
-				if iss.Err() != nil {
-					return nil, fmt.Errorf("app %s invalid access policy %q: %w", a.AppID, a.AccessPolicy, iss.Err())
-				}
-				prg, err := c.celEnv.Program(ast)
+				prg, err := c.policyCompiler.Compile(a.AccessPolicy)
 				if err != nil {
-					return nil, fmt.Errorf("app %s build access policy program %q: %w", a.AppID, a.AccessPolicy, err)
+					return nil, fmt.Errorf("app %s invalid access policy %q: %w", a.AppID, a.AccessPolicy, err)
 				}
 				snap.CompiledPolicies[a.AccessPolicy] = prg
 			}
@@ -315,13 +316,9 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 			for _, limit := range limits {
 				if limit.TierCondition != "" {
 					if _, exists := snap.CompiledPolicies[limit.TierCondition]; !exists {
-						ast, iss := c.celEnv.Compile(limit.TierCondition)
-						if iss.Err() != nil {
-							return nil, fmt.Errorf("app %s invalid limit tier condition %q: %w", a.AppID, limit.TierCondition, iss.Err())
-						}
-						prg, err := c.celEnv.Program(ast)
+						prg, err := c.policyCompiler.Compile(limit.TierCondition)
 						if err != nil {
-							return nil, fmt.Errorf("app %s build limit tier program %q: %w", a.AppID, limit.TierCondition, err)
+							return nil, fmt.Errorf("app %s invalid limit tier condition %q: %w", a.AppID, limit.TierCondition, err)
 						}
 						snap.CompiledPolicies[limit.TierCondition] = prg
 					}

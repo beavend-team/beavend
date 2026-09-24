@@ -229,3 +229,49 @@ func TestCompiler_MissingReferencedPrompt(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "references non-existent prompt")
 }
+
+func TestCompiler_ToolCELAuthorization(t *testing.T) {
+	t.Run("invalid tool CEL policy fails compilation", func(t *testing.T) {
+		mock := &mockQuerySource{
+			revision: 1,
+			tools: []db.GetSnapshotToolsRow{
+				{
+					ID:            "tv-bad-auth",
+					ToolID:        "tool_with_bad_auth",
+					Authorization: "claims.plan ==== invalid syntax",
+				},
+			},
+		}
+
+		compiler, err := snapshot.NewCompiler(mock)
+		require.NoError(t, err)
+
+		_, err = compiler.Compile(context.Background(), "test-proj", "prod")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid authorization policy")
+	})
+
+	t.Run("valid inline tool CEL policy pre-compiles successfully", func(t *testing.T) {
+		mock := &mockQuerySource{
+			revision: 1,
+			tools: []db.GetSnapshotToolsRow{
+				{
+					ID:            "tv-good-auth",
+					ToolID:        "tool_with_good_auth",
+					Authorization: `claims.role == "admin"`,
+				},
+			},
+		}
+
+		compiler, err := snapshot.NewCompiler(mock)
+		require.NoError(t, err)
+
+		snap, err := compiler.Compile(context.Background(), "test-proj", "prod")
+		require.NoError(t, err)
+		require.NotNil(t, snap)
+
+		prg, ok := snap.CompiledPolicy(`claims.role == "admin"`)
+		require.True(t, ok)
+		require.NotNil(t, prg)
+	})
+}
