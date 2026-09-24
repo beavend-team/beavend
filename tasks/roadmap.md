@@ -14,7 +14,7 @@ Phase 2: Persistent Storage & Config Snapshots [Done]
    │
    ├──────────────────────────────┬──────────────────────────────┐
    ▼                              ▼                              ▼
-Phase 3: Identity & Auth [Done] Phase 5: Rate Limiting      Phase 6: Provider Layer
+Phase 3: Identity & Auth [Done] Phase 5: Rate Limiting [Done] Phase 6: Provider Layer
    │                              │                              │
    ▼                              │                              │
 Phase 4: Policy Engine (CEL) [Done] │
@@ -89,9 +89,15 @@ Phase 4: Policy Engine (CEL) [Done] │
 
 ---
 
-## Phase 5: Rate Limiting & User Quotas [Next]
-* **Status:** Ready / Next
+## Phase 5: Rate Limiting & User Quotas [Completed]
+* **Status:** Completed
 * **Goal:** Enforce atomic multi-window user inference limits and token quotas via Redis Lua scripts with tier resolution and token reconciliation.
+* **Tasks:**
+  * `tasks/phase-05-rate-limiting/T016-redis-lua-limits.md` — Redis Lua multi-window limit store
+  * `tasks/phase-05-rate-limiting/T017-tier-resolution.md` — Tier resolution engine via CEL evaluation
+  * `tasks/phase-05-rate-limiting/T018-token-reconciliation.md` — Token reservation and asynchronous reconciliation
+  * `tasks/phase-05-rate-limiting/T019-postgres-fallback-limits.md` — PostgreSQL fallback limit store
+  * `tasks/phase-05-rate-limiting/T020-limits-pipeline-stage.md` — Limits pipeline stage & HTTP handling
 * **Major Deliverables:**
   * Redis Lua script for multi-window sliding window rate limits.
   * Tier resolution engine mapping identity claims to limit rules.
@@ -102,7 +108,7 @@ Phase 4: Policy Engine (CEL) [Done] │
 
 ---
 
-## Phase 6: Provider Abstraction & Model Routing
+## Phase 6: Provider Abstraction & Model Routing [Next]
 * **Goal:** Implement the `ProviderAdapter` interface, the default LiteLLM adapter, and logical model routing.
 * **Major Deliverables:**
   * `core.ProviderAdapter` interface definition.

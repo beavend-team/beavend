@@ -179,6 +179,15 @@ type ProviderConfigs struct {
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
+type RateLimitCounters struct {
+	Key           string             `json:"key"`
+	Resource      string             `json:"resource"`
+	WindowSeconds int32              `json:"window_seconds"`
+	BucketStart   pgtype.Timestamptz `json:"bucket_start"`
+	CurrentCount  int64              `json:"current_count"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+}
+
 type ToolSecrets struct {
 	ID              string             `json:"id"`
 	ProjectID       string             `json:"project_id"`
