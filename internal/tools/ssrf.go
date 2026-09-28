@@ -195,5 +195,26 @@ func NewSafeHTTPClient(cfg SafeDialerConfig, timeout time.Duration) *http.Client
 	return &http.Client{
 		Transport: NewSafeTransport(cfg),
 		Timeout:   timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("ssrf: stopped after 10 redirects")
+			}
+			lastReq := via[len(via)-1]
+			// Disallow downgrade from https to http
+			if lastReq.URL.Scheme == "https" && req.URL.Scheme == "http" {
+				return errors.New("ssrf: redirect downgrade from https to http forbidden")
+			}
+			// If cross-origin, strip sensitive headers
+			if !strings.EqualFold(req.URL.Host, lastReq.URL.Host) {
+				req.Header.Del("Authorization")
+				for h := range req.Header {
+					hLower := strings.ToLower(h)
+					if strings.HasPrefix(hLower, "x-beavend-") || strings.HasPrefix(hLower, "x-user-") {
+						req.Header.Del(h)
+					}
+				}
+			}
+			return nil
+		},
 	}
 }

@@ -172,7 +172,8 @@ func main() {
 		continuationMgr := tools.NewContinuationManager(continuationStore, []byte(cfg.Security.MasterKey))
 
 		authenticator := tools.NewDownstreamAuthenticator(nil)
-		execRegistry := agent.NewDefaultExecutorRegistry(authenticator)
+		isDev := cfg.Env == "development" || cfg.Env == "test"
+		execRegistry := agent.NewDefaultExecutorRegistry(authenticator, isDev)
 		policyCompiler, _ := policy.NewCompiler()
 		policyEvaluator, _ := policy.NewEvaluator(policyCompiler)
 

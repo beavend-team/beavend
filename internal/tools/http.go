@@ -81,6 +81,17 @@ func (e *HTTPExecutor) Execute(ctx context.Context, call core.ToolCall, id core.
 	// Build URL with templating
 	rawURL := e.def.Executor.URL
 	usedKeys := make(map[string]struct{})
+
+	// Always substitute verified identity placeholders first
+	if strings.Contains(rawURL, "{user_id}") {
+		rawURL = strings.ReplaceAll(rawURL, "{user_id}", url.PathEscape(id.Subject))
+		usedKeys["user_id"] = struct{}{}
+	}
+	if strings.Contains(rawURL, "{subject}") {
+		rawURL = strings.ReplaceAll(rawURL, "{subject}", url.PathEscape(id.Subject))
+		usedKeys["subject"] = struct{}{}
+	}
+
 	for k, v := range args {
 		placeholder := fmt.Sprintf("{%s}", k)
 		if strings.Contains(rawURL, placeholder) {
@@ -88,9 +99,6 @@ func (e *HTTPExecutor) Execute(ctx context.Context, call core.ToolCall, id core.
 			usedKeys[k] = struct{}{}
 		}
 	}
-	// Also check identity subject
-	rawURL = strings.ReplaceAll(rawURL, "{user_id}", url.PathEscape(id.Subject))
-	rawURL = strings.ReplaceAll(rawURL, "{subject}", url.PathEscape(id.Subject))
 
 	method := strings.ToUpper(strings.TrimSpace(e.def.Executor.Method))
 	if method == "" {

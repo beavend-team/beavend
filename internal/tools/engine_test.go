@@ -156,3 +156,42 @@ func TestSanitizer(t *testing.T) {
 		t.Errorf("expected truncation indicator in content: %s", resTrunc.Content)
 	}
 }
+
+func TestInjectIdentityBindings_ConfusedDeputyEdgeCases(t *testing.T) {
+	bindings := map[string]string{
+		"user_id":      "identity.subject",
+		"non_existent": "identity.claims.unknown_claim",
+	}
+
+	// 1. Missing claim: attacker-supplied value must be discarded and NOT retained
+	args := map[string]any{
+		"user_id":      "attacker_alice",
+		"non_existent": "attacker_bob",
+		"preserved":    "keep_me",
+	}
+	id := &core.Identity{Subject: "real_user"}
+
+	res := InjectIdentityBindings(args, bindings, id)
+	if res["user_id"] != "real_user" {
+		t.Fatalf("expected user_id to be real_user, got %v", res["user_id"])
+	}
+	if _, exists := res["non_existent"]; exists {
+		t.Fatalf("expected non_existent bound key to be discarded, but got %v", res["non_existent"])
+	}
+	if res["preserved"] != "keep_me" {
+		t.Fatalf("expected preserved key to stay, got %v", res["preserved"])
+	}
+
+	// 2. Nil Identity: all bound keys must be discarded
+	argsNilID := map[string]any{
+		"user_id":   "attacker_alice",
+		"preserved": "keep_me",
+	}
+	resNil := InjectIdentityBindings(argsNilID, bindings, nil)
+	if _, exists := resNil["user_id"]; exists {
+		t.Fatalf("expected bound user_id to be discarded when Identity is nil, but got %v", resNil["user_id"])
+	}
+	if resNil["preserved"] != "keep_me" {
+		t.Fatalf("expected preserved key to stay, got %v", resNil["preserved"])
+	}
+}

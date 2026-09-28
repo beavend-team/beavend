@@ -135,6 +135,11 @@ func TestPromptStage_Handle(t *testing.T) {
 		assert.Equal(t, "You are Customer Support Bot helping user usr_999 with plan enterprise in production.", state.ChatRequest.Messages[0].Content)
 		assert.Equal(t, "user", state.ChatRequest.Messages[1].Role)
 		assert.Equal(t, "Where is my invoice?", state.ChatRequest.Messages[1].Content)
+
+		// Calling stage again replaces the system message in place without duplicating
+		err = stage.Handle(ctx, state)
+		require.NoError(t, err)
+		assert.Len(t, state.ChatRequest.Messages, 2, "must not duplicate system message")
 	})
 
 	t.Run("cancelled context halts stage", func(t *testing.T) {

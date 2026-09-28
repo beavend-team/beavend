@@ -287,6 +287,22 @@ func TestHandler_HandleConfirm(t *testing.T) {
 
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
 	})
+
+	t.Run("subject mismatch returns 403 forbidden", func(t *testing.T) {
+		body := `{"confirmation_token":"` + token + `","approved":true}`
+		req := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/confirm", bytes.NewBufferString(body))
+		req.Header.Set("X-Project-ID", "proj_1")
+		req.Header.Set("X-Environment", "development")
+		req = req.WithContext(identity.ContextWithIdentity(req.Context(), &core.Identity{Subject: "usr_attacker"}))
+
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+
+		assert.Equal(t, http.StatusForbidden, rec.Code)
+		var errResp core.ErrorResponse
+		_ = json.Unmarshal(rec.Body.Bytes(), &errResp)
+		assert.Equal(t, "forbidden", errResp.Code)
+	})
 }
 
 func TestHandler_HandleToolResults(t *testing.T) {

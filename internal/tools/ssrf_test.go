@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 )
@@ -126,5 +127,54 @@ func TestSafeDialer_AllowPrivateForLocalTesting(t *testing.T) {
 	_, err = blockedClient.Get(ts.URL)
 	if err == nil {
 		t.Fatalf("expected connection to local test server to be blocked, but succeeded")
+	}
+}
+
+func TestSafeHTTPClient_CheckRedirect(t *testing.T) {
+	client := NewSafeHTTPClient(SafeDialerConfig{AllowPrivate: true}, 5*time.Second)
+
+	// 1. Disallow downgrade from https to http
+	httpsReq, _ := http.NewRequest(http.MethodGet, "https://example.com/start", nil)
+	httpReq, _ := http.NewRequest(http.MethodGet, "http://example.com/insecure", nil)
+	err := client.CheckRedirect(httpReq, []*http.Request{httpsReq})
+	if err == nil || !strings.Contains(err.Error(), "downgrade") {
+		t.Fatalf("expected error on https to http downgrade, got %v", err)
+	}
+
+	// 2. Stopped after 10 redirects
+	via := make([]*http.Request, 10)
+	for i := range via {
+		via[i], _ = http.NewRequest(http.MethodGet, "https://example.com/step", nil)
+	}
+	nextReq, _ := http.NewRequest(http.MethodGet, "https://example.com/step11", nil)
+	err = client.CheckRedirect(nextReq, via)
+	if err == nil || !strings.Contains(err.Error(), "stopped after 10 redirects") {
+		t.Fatalf("expected 10 redirects error, got %v", err)
+	}
+
+	// 3. Sensitive headers stripped on cross-origin redirect
+	origReq, _ := http.NewRequest(http.MethodGet, "https://api.internal.com/data", nil)
+	redirectReq, _ := http.NewRequest(http.MethodGet, "https://external.thirdparty.com/callback", nil)
+	redirectReq.Header.Set("Authorization", "Bearer secret-token")
+	redirectReq.Header.Set("X-Beavend-Signature", "abc123sig")
+	redirectReq.Header.Set("X-User-Subject", "usr_alice")
+	redirectReq.Header.Set("Content-Type", "application/json")
+
+	err = client.CheckRedirect(redirectReq, []*http.Request{origReq})
+	if err != nil {
+		t.Fatalf("unexpected redirect error: %v", err)
+	}
+
+	if redirectReq.Header.Get("Authorization") != "" {
+		t.Errorf("Authorization header was not stripped on cross-origin redirect")
+	}
+	if redirectReq.Header.Get("X-Beavend-Signature") != "" {
+		t.Errorf("X-Beavend-Signature was not stripped on cross-origin redirect")
+	}
+	if redirectReq.Header.Get("X-User-Subject") != "" {
+		t.Errorf("X-User-Subject was not stripped on cross-origin redirect")
+	}
+	if redirectReq.Header.Get("Content-Type") != "application/json" {
+		t.Errorf("Content-Type should have been preserved, got %q", redirectReq.Header.Get("Content-Type"))
 	}
 }

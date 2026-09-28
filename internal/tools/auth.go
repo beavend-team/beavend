@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -147,8 +148,11 @@ func (a *DownstreamAuthenticator) applySignedHeaders(ctx context.Context, req *h
 		if err != nil {
 			return fmt.Errorf("read request body for signing: %w", err)
 		}
-		// Reset body reader for transport
-		req.Body = io.NopCloser(strings.NewReader(string(bodyBytes)))
+		// Reset body reader for transport and configure GetBody for retries
+		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		req.GetBody = func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(bodyBytes)), nil
+		}
 		h := sha256.Sum256(bodyBytes)
 		bodyHash = hex.EncodeToString(h[:])
 	} else {
@@ -157,6 +161,9 @@ func (a *DownstreamAuthenticator) applySignedHeaders(ctx context.Context, req *h
 	}
 
 	path := req.URL.Path
+	if path == "" {
+		path = "/"
+	}
 	if req.URL.RawQuery != "" {
 		path += "?" + req.URL.RawQuery
 	}

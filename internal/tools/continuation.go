@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -218,15 +219,19 @@ func (cm *ContinuationManager) Store() SuspendedStateStore {
 
 // ComputeArgsHash generates a canonical SHA-256 hex string of the arguments.
 func ComputeArgsHash(arguments string) string {
+	trimmed := strings.TrimSpace(arguments)
+	if trimmed == "" {
+		trimmed = "{}"
+	}
 	var parsed any
-	if err := json.Unmarshal([]byte(arguments), &parsed); err == nil {
+	if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
 		canonicalJSON, err := json.Marshal(parsed)
 		if err == nil {
 			h := sha256.Sum256(canonicalJSON)
 			return hex.EncodeToString(h[:])
 		}
 	}
-	h := sha256.Sum256([]byte(arguments))
+	h := sha256.Sum256([]byte(trimmed))
 	return hex.EncodeToString(h[:])
 }
 
@@ -309,9 +314,20 @@ func (cm *ContinuationManager) ValidateResumption(ctx context.Context, tokenStr 
 		return nil, nil, err
 	}
 
-	if callerID != nil && callerID.Subject != "" {
+	// If token was bound to a specific subject, require caller to match that subject
+	if claims.Subject != "" {
+		if callerID == nil || callerID.Subject == "" {
+			return nil, nil, fmt.Errorf("%w: token bound to subject %q but caller has no subject", ErrSubjectMismatch, claims.Subject)
+		}
 		if claims.Subject != callerID.Subject {
 			return nil, nil, fmt.Errorf("%w: token subject %q != caller %q", ErrSubjectMismatch, claims.Subject, callerID.Subject)
+		}
+	}
+
+	// Verify project isolation if caller provides project context
+	if callerID != nil && callerID.Project != "" && claims.ProjectID != "" {
+		if callerID.Project != claims.ProjectID {
+			return nil, nil, fmt.Errorf("%w: token project %q != caller project %q", ErrSubjectMismatch, claims.ProjectID, callerID.Project)
 		}
 	}
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/beavend/beavend/internal/config"
 	"github.com/beavend/beavend/internal/core"
+	"github.com/beavend/beavend/internal/identity"
 	"github.com/beavend/beavend/internal/prompts"
 	"github.com/beavend/beavend/internal/routing"
 	"github.com/beavend/beavend/internal/runtime"
@@ -303,6 +304,7 @@ func TestRuntimeEndpointsWiring(t *testing.T) {
 	reqConfirm := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/confirm", bytes.NewBufferString(confirmBody))
 	reqConfirm.Header.Set("X-Project-ID", "proj_test")
 	reqConfirm.Header.Set("X-Environment", "development")
+	reqConfirm = reqConfirm.WithContext(identity.ContextWithIdentity(reqConfirm.Context(), &core.Identity{Subject: "user_test", Project: "proj_test"}))
 	recConfirm := httptest.NewRecorder()
 
 	router.ServeHTTP(recConfirm, reqConfirm)
@@ -333,6 +335,7 @@ func TestRuntimeEndpointsWiring(t *testing.T) {
 	reqToolResults := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/tool-results", bytes.NewBufferString(toolResultsBody))
 	reqToolResults.Header.Set("X-Project-ID", "proj_test")
 	reqToolResults.Header.Set("X-Environment", "development")
+	reqToolResults = reqToolResults.WithContext(identity.ContextWithIdentity(reqToolResults.Context(), &core.Identity{Subject: "user_client", Project: "proj_test"}))
 	recToolResults := httptest.NewRecorder()
 
 	router.ServeHTTP(recToolResults, reqToolResults)

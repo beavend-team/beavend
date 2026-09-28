@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -68,7 +69,7 @@ func NewHandler(resolver SnapshotResolver, pipeline *Pipeline, opts ...HandlerOp
 		continuationMgr = tools.NewContinuationManager(nil, nil)
 	}
 	if execRegistry == nil {
-		execRegistry = agent.NewDefaultExecutorRegistry(nil)
+		execRegistry = agent.NewDefaultExecutorRegistry(nil, false)
 	}
 
 	return &Handler{
@@ -156,7 +157,7 @@ func (h *Handler) HandleConfirm(w http.ResponseWriter, r *http.Request) {
 	// Validate confirmation token and retrieve state
 	suspState, claims, err := h.continuationMgr.ValidateResumption(r.Context(), req.ConfirmationToken, id)
 	if err != nil {
-		h.writeRawError(w, "invalid_argument", fmt.Sprintf("continuation validation failed: %v", err), reqID)
+		h.writeRawError(w, continuationErrorCode(err), fmt.Sprintf("continuation validation failed: %v", err), reqID)
 		return
 	}
 
@@ -263,7 +264,7 @@ func (h *Handler) HandleToolResults(w http.ResponseWriter, r *http.Request) {
 
 	suspState, claims, err := h.continuationMgr.ValidateResumption(r.Context(), req.ContinuationToken, id)
 	if err != nil {
-		h.writeRawError(w, "invalid_argument", fmt.Sprintf("continuation validation failed: %v", err), reqID)
+		h.writeRawError(w, continuationErrorCode(err), fmt.Sprintf("continuation validation failed: %v", err), reqID)
 		return
 	}
 
@@ -471,4 +472,17 @@ func getOrGenerateRequestID(r *http.Request) string {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	return "req_" + hex.EncodeToString(b)
+}
+
+func continuationErrorCode(err error) string {
+	if errors.Is(err, tools.ErrSubjectMismatch) {
+		return "forbidden"
+	}
+	if errors.Is(err, tools.ErrStateNotFound) {
+		return "not_found"
+	}
+	if errors.Is(err, tools.ErrTokenSignatureInvalid) || errors.Is(err, tools.ErrArgsHashMismatch) {
+		return "forbidden"
+	}
+	return "invalid_argument"
 }

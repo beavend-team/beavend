@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/beavend/beavend/internal/core"
@@ -14,14 +13,18 @@ func InjectIdentityBindings(args map[string]any, bindings map[string]string, id 
 	if args == nil {
 		args = make(map[string]any)
 	}
-	if len(bindings) == 0 || id == nil {
+	if len(bindings) == 0 {
 		return args
 	}
 
 	for argKey, bindingPath := range bindings {
-		val := resolveBindingValue(bindingPath, id)
-		if val != nil {
-			args[argKey] = val
+		// Strictly discard any caller- or LLM-supplied value for bound keys
+		delete(args, argKey)
+		if id != nil {
+			val := resolveBindingValue(bindingPath, id)
+			if val != nil {
+				args[argKey] = val
+			}
 		}
 	}
 
@@ -61,6 +64,6 @@ func resolveBindingValue(path string, id *core.Identity) any {
 		if val, exists := id.Claim(clean); exists {
 			return val
 		}
-		return fmt.Sprintf("unresolved_binding:%s", path)
+		return nil
 	}
 }

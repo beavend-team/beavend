@@ -149,4 +149,33 @@ func TestContinuationManager_ValidateResumption(t *testing.T) {
 	if !errors.Is(err, ErrStateNotFound) {
 		t.Errorf("expected ErrStateNotFound, got %v", err)
 	}
+
+	// 5. Anonymous caller cannot resume authenticated user's state
+	_ = store.Save(ctx, state, 5*time.Minute)
+	_, _, err = cm.ValidateResumption(ctx, token, nil)
+	if err == nil || !errors.Is(err, ErrSubjectMismatch) {
+		t.Fatalf("expected ErrSubjectMismatch for nil callerID, got %v", err)
+	}
+	_, _, err = cm.ValidateResumption(ctx, token, &core.Identity{Subject: ""})
+	if err == nil || !errors.Is(err, ErrSubjectMismatch) {
+		t.Fatalf("expected ErrSubjectMismatch for empty subject caller, got %v", err)
+	}
+
+	// 6. Project isolation check
+	callerDiffProject := &core.Identity{Subject: "usr_alice", Project: "proj_other"}
+	_, _, err = cm.ValidateResumption(ctx, token, callerDiffProject)
+	if err == nil || !errors.Is(err, ErrSubjectMismatch) {
+		t.Fatalf("expected ErrSubjectMismatch for project mismatch, got %v", err)
+	}
+}
+
+func TestComputeArgsHash_Normalization(t *testing.T) {
+	h1 := ComputeArgsHash("")
+	h2 := ComputeArgsHash("   ")
+	h3 := ComputeArgsHash("{}")
+	h4 := ComputeArgsHash("{  }")
+
+	if h1 != h2 || h2 != h3 || h3 != h4 {
+		t.Fatalf("expected all empty/whitespace variants to yield same hash: %s vs %s vs %s vs %s", h1, h2, h3, h4)
+	}
 }

@@ -33,12 +33,14 @@ type ExecutorRegistry interface {
 // DefaultExecutorRegistry creates standard tool executors (HTTP, Webhook, etc.).
 type DefaultExecutorRegistry struct {
 	authenticator core.Authenticator
+	allowPrivate  bool
 }
 
 // NewDefaultExecutorRegistry creates a new DefaultExecutorRegistry.
-func NewDefaultExecutorRegistry(authenticator core.Authenticator) *DefaultExecutorRegistry {
+func NewDefaultExecutorRegistry(authenticator core.Authenticator, allowPrivate bool) *DefaultExecutorRegistry {
 	return &DefaultExecutorRegistry{
 		authenticator: authenticator,
+		allowPrivate:  allowPrivate,
 	}
 }
 
@@ -46,8 +48,7 @@ func NewDefaultExecutorRegistry(authenticator core.Authenticator) *DefaultExecut
 func (r *DefaultExecutorRegistry) GetExecutor(def core.ToolDefinition) (core.Executor, error) {
 	switch def.Executor.Type {
 	case "http", "webhook", "":
-		// Allow private for development/testing if needed, or default safe dialer
-		client := tools.NewSafeHTTPClient(tools.SafeDialerConfig{AllowPrivate: true}, 15*time.Second)
+		client := tools.NewSafeHTTPClient(tools.SafeDialerConfig{AllowPrivate: r.allowPrivate}, 15*time.Second)
 		return tools.NewHTTPExecutor(def, client, r.authenticator), nil
 	default:
 		return nil, fmt.Errorf("unsupported executor type: %s", def.Executor.Type)
@@ -78,7 +79,7 @@ func NewLoop(cfg LoopConfig) *Loop {
 		cfg.ContinuationMgr = tools.NewContinuationManager(nil, nil)
 	}
 	if cfg.ExecutorRegistry == nil {
-		cfg.ExecutorRegistry = NewDefaultExecutorRegistry(nil)
+		cfg.ExecutorRegistry = NewDefaultExecutorRegistry(nil, false)
 	}
 	if cfg.Sanitizer == nil {
 		cfg.Sanitizer = tools.NewSanitizer()
@@ -99,6 +100,9 @@ func (l *Loop) ContinuationManager() *tools.ContinuationManager {
 func (l *Loop) Run(ctx context.Context, state *core.ReqState, adapter core.ProviderAdapter) error {
 	if state == nil {
 		return errors.New("nil req state")
+	}
+	if state.ChatRequest == nil {
+		return errors.New("nil chat request in state")
 	}
 
 	// 1. Resolve available tools from Snapshot for this AI App
@@ -505,6 +509,12 @@ func (l *Loop) createSuspendedState(state *core.ReqState, toolCall core.ToolCall
 		rev = state.Snapshot.Revision
 	}
 
+	var msgs []core.ChatMessage
+	if state.ChatRequest != nil && len(state.ChatRequest.Messages) > 0 {
+		msgs = make([]core.ChatMessage, len(state.ChatRequest.Messages))
+		copy(msgs, state.ChatRequest.Messages)
+	}
+
 	return &tools.SuspendedState{
 		ProjectID:        state.ProjectID,
 		Environment:      state.Environment,
@@ -512,7 +522,7 @@ func (l *Loop) createSuspendedState(state *core.ReqState, toolCall core.ToolCall
 		AIAppID:          state.AIAppID,
 		Subject:          subject,
 		Issuer:           issuer,
-		Messages:         state.ChatRequest.Messages,
+		Messages:         msgs,
 		PendingToolCall:  toolCall,
 		ToolDefinitionID: toolDefID,
 		SnapshotRevision: rev,

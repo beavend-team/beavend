@@ -152,7 +152,11 @@ func (s *PromptStage) Handle(ctx context.Context, state *core.ReqState) error {
 		state.ChatRequest = &core.ChatRequest{}
 	}
 
-	if len(state.ChatRequest.Messages) == 0 || state.ChatRequest.Messages[0].Role != "system" || state.ChatRequest.Messages[0].Content != rendered {
+	if len(state.ChatRequest.Messages) == 0 {
+		state.ChatRequest.Messages = []core.ChatMessage{{Role: "system", Content: rendered}}
+	} else if state.ChatRequest.Messages[0].Role == "system" {
+		state.ChatRequest.Messages[0].Content = rendered
+	} else {
 		systemMsg := core.ChatMessage{
 			Role:    "system",
 			Content: rendered,
