@@ -237,24 +237,32 @@ func LoadFileWithLookup(filePath string, lookup func(string) string) (*Config, e
 		cfg.Log.Format = strings.TrimSpace(val)
 	}
 	if val := lookup("BEAVEND_USAGE_BUFFER_SIZE"); val != "" {
-		if size, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
-			cfg.Usage.BufferSize = size
+		size, err := strconv.Atoi(strings.TrimSpace(val))
+		if err != nil {
+			return nil, fmt.Errorf("invalid BEAVEND_USAGE_BUFFER_SIZE: %w", err)
 		}
+		cfg.Usage.BufferSize = size
 	}
 	if val := lookup("BEAVEND_USAGE_BATCH_SIZE"); val != "" {
-		if size, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
-			cfg.Usage.BatchSize = size
+		size, err := strconv.Atoi(strings.TrimSpace(val))
+		if err != nil {
+			return nil, fmt.Errorf("invalid BEAVEND_USAGE_BATCH_SIZE: %w", err)
 		}
+		cfg.Usage.BatchSize = size
 	}
 	if val := lookup("BEAVEND_USAGE_FLUSH_INTERVAL"); val != "" {
-		if d, err := time.ParseDuration(strings.TrimSpace(val)); err == nil {
-			cfg.Usage.FlushInterval = d
+		d, err := time.ParseDuration(strings.TrimSpace(val))
+		if err != nil {
+			return nil, fmt.Errorf("invalid BEAVEND_USAGE_FLUSH_INTERVAL: %w", err)
 		}
+		cfg.Usage.FlushInterval = d
 	}
 	if val := lookup("BEAVEND_USAGE_ROLLUP_INTERVAL"); val != "" {
-		if d, err := time.ParseDuration(strings.TrimSpace(val)); err == nil {
-			cfg.Usage.RollupInterval = d
+		d, err := time.ParseDuration(strings.TrimSpace(val))
+		if err != nil {
+			return nil, fmt.Errorf("invalid BEAVEND_USAGE_ROLLUP_INTERVAL: %w", err)
 		}
+		cfg.Usage.RollupInterval = d
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -307,6 +315,19 @@ func (c *Config) Validate() error {
 		if c.Admin.Password == "adminpassword123" {
 			return fmt.Errorf("default admin password is forbidden in production environment")
 		}
+	}
+
+	if c.Usage.BufferSize <= 0 {
+		return fmt.Errorf("invalid usage buffer size: %d (must be > 0)", c.Usage.BufferSize)
+	}
+	if c.Usage.BatchSize <= 0 {
+		return fmt.Errorf("invalid usage batch size: %d (must be > 0)", c.Usage.BatchSize)
+	}
+	if c.Usage.FlushInterval <= 0 {
+		return fmt.Errorf("invalid usage flush interval: %v (must be > 0)", c.Usage.FlushInterval)
+	}
+	if c.Usage.RollupInterval <= 0 {
+		return fmt.Errorf("invalid usage rollup interval: %v (must be > 0)", c.Usage.RollupInterval)
 	}
 
 	return nil

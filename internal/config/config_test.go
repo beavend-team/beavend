@@ -181,6 +181,27 @@ func TestConfig_ValidationErrors(t *testing.T) {
 			},
 			errSubstr: "default admin password is forbidden in production",
 		},
+		{
+			name: "invalid usage buffer size env",
+			envMap: map[string]string{
+				"BEAVEND_USAGE_BUFFER_SIZE": "not_a_number",
+			},
+			errSubstr: "invalid BEAVEND_USAGE_BUFFER_SIZE",
+		},
+		{
+			name: "invalid usage flush interval env",
+			envMap: map[string]string{
+				"BEAVEND_USAGE_FLUSH_INTERVAL": "invalid_duration",
+			},
+			errSubstr: "invalid BEAVEND_USAGE_FLUSH_INTERVAL",
+		},
+		{
+			name: "zero usage batch size validation",
+			envMap: map[string]string{
+				"BEAVEND_USAGE_BATCH_SIZE": "0",
+			},
+			errSubstr: "invalid usage batch size",
+		},
 	}
 
 	for _, tc := range tests {
