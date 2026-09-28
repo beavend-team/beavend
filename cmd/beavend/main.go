@@ -15,14 +15,18 @@ import (
 	"github.com/beavend/beavend/internal/config"
 	"github.com/beavend/beavend/internal/identity"
 	"github.com/beavend/beavend/internal/limits"
+	"github.com/beavend/beavend/internal/policy"
 	"github.com/beavend/beavend/internal/providers/litellm"
 	"github.com/beavend/beavend/internal/routing"
 	"github.com/beavend/beavend/internal/runtime"
+	"github.com/beavend/beavend/internal/runtime/agent"
 	"github.com/beavend/beavend/internal/runtime/stages"
 	"github.com/beavend/beavend/internal/snapshot"
 	synckit "github.com/beavend/beavend/internal/snapshot/sync"
 	"github.com/beavend/beavend/internal/store"
 	"github.com/beavend/beavend/internal/telemetry"
+	"github.com/beavend/beavend/internal/tools"
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -155,16 +159,41 @@ func main() {
 			slog.Warn("failed to initialize litellm adapter", slog.String("error", err.Error()))
 		}
 
+		var continuationStore tools.SuspendedStateStore
+		if cfg.Redis.URL != "" {
+			if rOpts, err := redis.ParseURL(cfg.Redis.URL); err == nil {
+				redisClient := redis.NewClient(rOpts)
+				continuationStore = tools.NewRedisSuspendedStateStore(redisClient)
+			}
+		}
+		if continuationStore == nil {
+			continuationStore = tools.NewInMemorySuspendedStateStore()
+		}
+		continuationMgr := tools.NewContinuationManager(continuationStore, []byte(cfg.Security.MasterKey))
+
+		authenticator := tools.NewDownstreamAuthenticator(nil)
+		execRegistry := agent.NewDefaultExecutorRegistry(authenticator)
+		policyCompiler, _ := policy.NewCompiler()
+		policyEvaluator, _ := policy.NewEvaluator(policyCompiler)
+
+		loop := agent.NewLoop(agent.LoopConfig{
+			PolicyEvaluator:  policyEvaluator,
+			ContinuationMgr:  continuationMgr,
+			ExecutorRegistry: execRegistry,
+		})
+
 		limitStore := limits.NewMemoryLimitStore(nil)
 		authzStage, _ := stages.NewAuthZStage(nil)
 		limitsStage, _ := stages.NewLimitsStage(limitStore, nil, nil)
 		promptStage, _ := stages.NewPromptStage(nil)
 		routingStage, _ := stages.NewModelRoutingStage(modelResolver)
-		execStage, _ := stages.NewExecutionStage(modelResolver)
+		execStage, _ := stages.NewExecutionStage(modelResolver, loop)
 
 		pipeline := runtime.NewStandardPipeline(authzStage, limitsStage, promptStage, routingStage, execStage)
 		runtimeHandler := runtime.NewHandler(registry, pipeline, runtime.HandlerOptions{
 			DefaultEnvironment: cfg.Env,
+			ContinuationMgr:    continuationMgr,
+			ExecutorRegistry:   execRegistry,
 		})
 		routerOpts.RuntimeHandler = runtimeHandler
 

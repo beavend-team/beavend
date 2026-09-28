@@ -24,9 +24,9 @@ Phase 4: Policy Engine (CEL) [Done] │                              │
                                   ▼
                    Phase 7: Runtime Pipeline & Agent Loop [Done]
                                   │
-                   Phase 8: Tool Engine & Downstream Auth [Next]
+                   Phase 8: Tool Engine & Downstream Auth [Done]
                                   │
-                   Phase 9: Usage Tracking & Async Logging
+                   Phase 9: Usage Tracking & Async Logging [Next]
                                   │
                    Phase 10: Control Plane & Embedded Dashboard
 ```
@@ -148,8 +148,15 @@ Phase 4: Policy Engine (CEL) [Done] │                              │
 
 ---
 
-## Phase 8: Tool Engine & Downstream Auth
+## Phase 8: Tool Engine & Downstream Auth [Completed]
+* **Status:** Completed
 * **Goal:** Implement custom tool orchestration, JSON Schema validation, identity binding injection, SSRF-safe HTTP execution, and human-in-the-loop confirmation.
+* **Tasks:**
+  * `tasks/phase-08-tools/T031-ssrf-guard-and-safe-dialer.md` — SSRF guard & DNS-rebinding-safe dialer
+  * `tasks/phase-08-tools/T032-downstream-auth-and-http-executor.md` — Downstream auth strategies & HTTP tool executor
+  * `tasks/phase-08-tools/T033-tool-engine-bindings-validation-sanitizer.md` — Identity bindings, schema validation & untrusted result sanitizer
+  * `tasks/phase-08-tools/T034-suspended-state-redis-and-confirmation-token.md` — Suspended state continuation & HMAC confirmation tokens
+  * `tasks/phase-08-tools/T035-bounded-agent-loop-and-runtime-endpoints.md` — Bounded agent loop & runtime confirmation endpoints
 * **Major Deliverables:**
   * Tool engine with bounded loop depth (max iterations).
   * Hardened HTTP executor with custom `SafeDialer` blocking private/metadata IPs.

@@ -14,6 +14,7 @@ import (
 
 	"github.com/beavend/beavend/internal/core"
 	"github.com/beavend/beavend/internal/routing"
+	"github.com/beavend/beavend/internal/runtime/agent"
 )
 
 var (
@@ -30,19 +31,33 @@ var (
 // ExecutionStage invokes the resolved provider adapter to execute unary or streaming chat completions.
 type ExecutionStage struct {
 	resolver *routing.Resolver
+	loop     *agent.Loop
 	tracer   trace.Tracer
 }
 
 // NewExecutionStage creates a new ExecutionStage using the provided model resolver.
-func NewExecutionStage(resolver *routing.Resolver) (*ExecutionStage, error) {
+func NewExecutionStage(resolver *routing.Resolver, loop ...*agent.Loop) (*ExecutionStage, error) {
 	if resolver == nil {
 		return nil, errors.New("nil model resolver")
 	}
 
+	var l *agent.Loop
+	if len(loop) > 0 && loop[0] != nil {
+		l = loop[0]
+	} else {
+		l = agent.NewLoop(agent.LoopConfig{})
+	}
+
 	return &ExecutionStage{
 		resolver: resolver,
+		loop:     l,
 		tracer:   otel.Tracer("beavend/stages/execution"),
 	}, nil
+}
+
+// Loop returns the agent loop used by this execution stage.
+func (s *ExecutionStage) Loop() *agent.Loop {
+	return s.loop
 }
 
 // Handle executes the provider invocation for unary or streaming requests.
@@ -120,7 +135,7 @@ func (s *ExecutionStage) Handle(ctx context.Context, state *core.ReqState) error
 }
 
 func (s *ExecutionStage) handleUnary(ctx context.Context, adapter core.ProviderAdapter, state *core.ReqState, span trace.Span) error {
-	resp, err := adapter.Chat(ctx, *state.ChatRequest)
+	err := s.loop.Run(ctx, state, adapter)
 	if err != nil {
 		span.RecordError(err)
 		if invocationErrors != nil {
@@ -154,117 +169,76 @@ func (s *ExecutionStage) handleUnary(ctx context.Context, adapter core.ProviderA
 		return err
 	}
 
-	if resp.ID == "" {
-		resp.ID = fmt.Sprintf("chat_%d", time.Now().UnixNano())
-	}
-	resp.RequestID = state.RequestID
-	resp.AIAppID = state.AIAppID
-	if resp.CreatedAt == 0 {
-		resp.CreatedAt = time.Now().Unix()
-	}
+	resp := state.ChatResponse
+	if resp != nil {
+		if resp.ID == "" {
+			resp.ID = fmt.Sprintf("chat_%d", time.Now().UnixNano())
+		}
+		resp.RequestID = state.RequestID
+		resp.AIAppID = state.AIAppID
+		if resp.CreatedAt == 0 {
+			resp.CreatedAt = time.Now().Unix()
+		}
 
-	state.ChatResponse = resp
-	state.Usage = resp.Usage
+		state.Usage = resp.Usage
 
-	span.SetAttributes(
-		attribute.Int("usage.input_tokens", resp.Usage.InputTokens),
-		attribute.Int("usage.output_tokens", resp.Usage.OutputTokens),
-		attribute.Int("usage.total_tokens", resp.Usage.TotalTokens),
-		attribute.String("finish_reason", resp.FinishReason),
-	)
+		span.SetAttributes(
+			attribute.Int("usage.input_tokens", resp.Usage.InputTokens),
+			attribute.Int("usage.output_tokens", resp.Usage.OutputTokens),
+			attribute.Int("usage.total_tokens", resp.Usage.TotalTokens),
+			attribute.String("finish_reason", resp.FinishReason),
+		)
+	}
 
 	slog.InfoContext(ctx, "provider chat completed successfully",
 		"request_id", state.RequestID,
 		"project_id", state.ProjectID,
 		"env", state.Environment,
 		"ai_app_id", state.AIAppID,
-		"total_tokens", resp.Usage.TotalTokens,
-		"finish_reason", resp.FinishReason,
 	)
 
 	return nil
 }
 
 func (s *ExecutionStage) handleStreaming(ctx context.Context, adapter core.ProviderAdapter, state *core.ReqState, span trace.Span) error {
-	streamEvents, err := adapter.Stream(ctx, *state.ChatRequest)
-	if err != nil {
-		span.RecordError(err)
-		if invocationErrors != nil {
-			invocationErrors.Add(ctx, 1)
-		}
-
-		code := "provider_error"
-		if errors.Is(err, context.DeadlineExceeded) {
-			code = "provider_timeout"
-		}
-
-		var appErr *core.ErrorResponse
-		if errors.As(err, &appErr) {
-			state.Error = appErr
-		} else {
-			state.Error = &core.ErrorResponse{
-				Code:      code,
-				Message:   fmt.Sprintf("upstream stream error: %v", err),
-				RequestID: state.RequestID,
-			}
-		}
-
-		slog.ErrorContext(ctx, "provider stream initiation failed",
-			"request_id", state.RequestID,
-			"project_id", state.ProjectID,
-			"env", state.Environment,
-			"ai_app_id", state.AIAppID,
-			"adapter", state.ResolvedModel.Adapter,
-			"error", err,
-		)
-		return err
-	}
-
 	if state.StreamChan == nil {
 		state.StreamChan = make(chan core.StreamEvent, 32)
 	}
 
-	// Forward stream events in background goroutine to state.StreamChan
+	// Forward stream events through the agent loop in background goroutine to state.StreamChan
 	go func() {
 		defer close(state.StreamChan)
 
-		hasDoneEvent := false
-		hasErrorEvent := false
-		for {
+		err := s.loop.Run(ctx, state, adapter)
+		if err != nil {
+			span.RecordError(err)
+			if invocationErrors != nil {
+				invocationErrors.Add(ctx, 1)
+			}
+
+			code := "provider_error"
+			if errors.Is(err, context.DeadlineExceeded) {
+				code = "provider_timeout"
+			}
+
+			var appErr *core.ErrorResponse
+			if errors.As(err, &appErr) {
+				state.Error = appErr
+			} else {
+				state.Error = &core.ErrorResponse{
+					Code:      code,
+					Message:   fmt.Sprintf("upstream stream error: %v", err),
+					RequestID: state.RequestID,
+				}
+			}
+
 			select {
 			case <-ctx.Done():
-				return
-			case event, open := <-streamEvents:
-				if !open {
-					// If channel closed cleanly without a done event and without error, emit done
-					if !hasDoneEvent && !hasErrorEvent {
-						state.StreamChan <- core.StreamEvent{
-							Type:      "done",
-							RequestID: state.RequestID,
-						}
-					}
-					return
-				}
-
-				if event.RequestID == "" {
-					event.RequestID = state.RequestID
-				}
-
-				if event.Usage != nil {
-					state.Usage = *event.Usage
-				}
-
-				if event.Type == "done" {
-					hasDoneEvent = true
-				} else if event.Type == "error" {
-					hasErrorEvent = true
-				}
-
-				select {
-				case <-ctx.Done():
-					return
-				case state.StreamChan <- event:
-				}
+			case state.StreamChan <- core.StreamEvent{
+				Type:      "error",
+				Error:     state.Error,
+				RequestID: state.RequestID,
+			}:
 			}
 		}
 	}()

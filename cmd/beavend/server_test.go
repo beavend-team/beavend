@@ -17,6 +17,7 @@ import (
 	"github.com/beavend/beavend/internal/runtime"
 	"github.com/beavend/beavend/internal/runtime/stages"
 	"github.com/beavend/beavend/internal/snapshot"
+	"github.com/beavend/beavend/internal/tools"
 )
 
 type mockReadyChecker struct {
@@ -277,5 +278,65 @@ func TestRuntimeEndpointsWiring(t *testing.T) {
 	}
 	if !strings.Contains(recStream.Body.String(), "event: delta\ndata: {\"text\":\"Streaming token\"}\n\n") {
 		t.Errorf("expected delta event chunk in body: %s", recStream.Body.String())
+	}
+
+	// 3. Confirm
+	suspState := &tools.SuspendedState{
+		ProjectID:   "proj_test",
+		Environment: "development",
+		RequestID:   "req_confirm_svr",
+		AIAppID:     "assistant",
+		Subject:     "user_test",
+		Messages: []core.ChatMessage{
+			{Role: "user", Content: "Run tool"},
+		},
+		PendingToolCall: core.ToolCall{
+			ID:        "t_act",
+			Name:      "test_action",
+			Arguments: `{}`,
+		},
+	}
+	_ = runtimeHandler.ContinuationManager().Store().Save(context.Background(), suspState, 5*time.Minute)
+	confirmToken, _ := runtimeHandler.ContinuationManager().IssueConfirmationToken(suspState, suspState.PendingToolCall, 5*time.Minute)
+
+	confirmBody := `{"confirmation_token":"` + confirmToken + `","approved":false}`
+	reqConfirm := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/confirm", bytes.NewBufferString(confirmBody))
+	reqConfirm.Header.Set("X-Project-ID", "proj_test")
+	reqConfirm.Header.Set("X-Environment", "development")
+	recConfirm := httptest.NewRecorder()
+
+	router.ServeHTTP(recConfirm, reqConfirm)
+	if recConfirm.Code != http.StatusOK {
+		t.Fatalf("expected 200 for confirm, got %d: %s", recConfirm.Code, recConfirm.Body.String())
+	}
+
+	// 4. Tool Results
+	suspStateClient := &tools.SuspendedState{
+		ProjectID:   "proj_test",
+		Environment: "development",
+		RequestID:   "req_client_svr",
+		AIAppID:     "assistant",
+		Subject:     "user_client",
+		Messages: []core.ChatMessage{
+			{Role: "user", Content: "Take photo"},
+		},
+		PendingToolCall: core.ToolCall{
+			ID:        "t_cam",
+			Name:      "camera",
+			Arguments: `{}`,
+		},
+	}
+	_ = runtimeHandler.ContinuationManager().Store().Save(context.Background(), suspStateClient, 5*time.Minute)
+	clientToken, _ := runtimeHandler.ContinuationManager().IssueConfirmationToken(suspStateClient, suspStateClient.PendingToolCall, 5*time.Minute)
+
+	toolResultsBody := `{"continuation_token":"` + clientToken + `","call_id":"t_cam","result":{"photo":"ok"}}`
+	reqToolResults := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/tool-results", bytes.NewBufferString(toolResultsBody))
+	reqToolResults.Header.Set("X-Project-ID", "proj_test")
+	reqToolResults.Header.Set("X-Environment", "development")
+	recToolResults := httptest.NewRecorder()
+
+	router.ServeHTTP(recToolResults, reqToolResults)
+	if recToolResults.Code != http.StatusOK {
+		t.Fatalf("expected 200 for tool-results, got %d: %s", recToolResults.Code, recToolResults.Body.String())
 	}
 }

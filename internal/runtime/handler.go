@@ -16,8 +16,10 @@ import (
 
 	"github.com/beavend/beavend/internal/core"
 	"github.com/beavend/beavend/internal/identity"
+	"github.com/beavend/beavend/internal/runtime/agent"
 	"github.com/beavend/beavend/internal/runtime/stream"
 	"github.com/beavend/beavend/internal/telemetry"
+	"github.com/beavend/beavend/internal/tools"
 )
 
 // SnapshotResolver retrieves a Snapshot for a given project and environment.
@@ -25,24 +27,31 @@ type SnapshotResolver interface {
 	Get(projectID, env string) (*core.Snapshot, bool)
 }
 
-// Handler handles runtime AI App requests for chat completion and streaming.
+// Handler handles runtime AI App requests for chat completion, streaming, and tool continuation.
 type Handler struct {
-	resolver     SnapshotResolver
-	pipeline     *Pipeline
-	streamWriter *stream.Writer
-	defaultEnv   string
+	resolver        SnapshotResolver
+	pipeline        *Pipeline
+	streamWriter    *stream.Writer
+	continuationMgr *tools.ContinuationManager
+	execRegistry    agent.ExecutorRegistry
+	sanitizer       *tools.Sanitizer
+	defaultEnv      string
 }
 
 // HandlerOptions configures runtime Handler.
 type HandlerOptions struct {
 	DefaultEnvironment string
 	HeartbeatInterval  time.Duration
+	ContinuationMgr    *tools.ContinuationManager
+	ExecutorRegistry   agent.ExecutorRegistry
 }
 
 // NewHandler creates a new runtime Handler.
 func NewHandler(resolver SnapshotResolver, pipeline *Pipeline, opts ...HandlerOptions) *Handler {
 	defaultEnv := "development"
 	heartbeat := 15 * time.Second
+	var continuationMgr *tools.ContinuationManager
+	var execRegistry agent.ExecutorRegistry
 
 	if len(opts) > 0 {
 		if opts[0].DefaultEnvironment != "" {
@@ -51,14 +60,31 @@ func NewHandler(resolver SnapshotResolver, pipeline *Pipeline, opts ...HandlerOp
 		if opts[0].HeartbeatInterval > 0 {
 			heartbeat = opts[0].HeartbeatInterval
 		}
+		continuationMgr = opts[0].ContinuationMgr
+		execRegistry = opts[0].ExecutorRegistry
+	}
+
+	if continuationMgr == nil {
+		continuationMgr = tools.NewContinuationManager(nil, nil)
+	}
+	if execRegistry == nil {
+		execRegistry = agent.NewDefaultExecutorRegistry(nil)
 	}
 
 	return &Handler{
-		resolver:     resolver,
-		pipeline:     pipeline,
-		streamWriter: stream.NewWriter(heartbeat),
-		defaultEnv:   defaultEnv,
+		resolver:        resolver,
+		pipeline:        pipeline,
+		streamWriter:    stream.NewWriter(heartbeat),
+		continuationMgr: continuationMgr,
+		execRegistry:    execRegistry,
+		sanitizer:       tools.NewSanitizer(),
+		defaultEnv:      defaultEnv,
 	}
+}
+
+// ContinuationManager returns the handler's continuation manager.
+func (h *Handler) ContinuationManager() *tools.ContinuationManager {
+	return h.continuationMgr
 }
 
 // HandleChat handles synchronous unary chat requests (POST /v1/apps/{ai_app_id}/chat).
@@ -109,6 +135,213 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ConfirmRequestBody represents the payload to confirm or deny tool execution.
+type ConfirmRequestBody struct {
+	ConfirmationToken string `json:"confirmation_token"`
+	Approved          bool   `json:"approved"`
+}
+
+// HandleConfirm handles resuming a request suspended for tool confirmation (POST /v1/apps/{ai_app_id}/confirm).
+func (h *Handler) HandleConfirm(w http.ResponseWriter, r *http.Request) {
+	reqID := getOrGenerateRequestID(r)
+
+	var req ConfirmRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeRawError(w, "invalid_argument", "invalid request body", reqID)
+		return
+	}
+
+	id, _ := identity.FromContext(r.Context())
+
+	// Validate confirmation token and retrieve state
+	suspState, claims, err := h.continuationMgr.ValidateResumption(r.Context(), req.ConfirmationToken, id)
+	if err != nil {
+		h.writeRawError(w, "invalid_argument", fmt.Sprintf("continuation validation failed: %v", err), reqID)
+		return
+	}
+
+	// Delete state from store once consumed
+	_ = h.continuationMgr.Store().Delete(r.Context(), claims.ProjectID, claims.RequestID)
+
+	snap, ok := h.resolver.Get(suspState.ProjectID, suspState.Environment)
+	if !ok || snap == nil {
+		h.writeRawError(w, "unavailable", "configuration snapshot not found", reqID)
+		return
+	}
+
+	app, ok := snap.App(suspState.AIAppID)
+	if !ok || app == nil {
+		h.writeRawError(w, "not_found", "ai app not found", reqID)
+		return
+	}
+
+	if !req.Approved {
+		// User declined execution: inject cancellation tool message
+		suspState.Messages = append(suspState.Messages, core.ChatMessage{
+			Role:       "tool",
+			ToolCallID: suspState.PendingToolCall.ID,
+			Content:    "<tool_result status=\"cancelled\">\nUser declined to confirm tool execution.\n</tool_result>",
+		})
+	} else {
+		// User approved: execute pending tool
+		toolDef, ok := snap.Tool(suspState.PendingToolCall.Name)
+		if !ok {
+			toolDef, ok = snap.Tool(suspState.PendingToolCall.ID)
+		}
+
+		if !ok || toolDef == nil {
+			h.writeRawError(w, "not_found", fmt.Sprintf("tool %q not found", suspState.PendingToolCall.Name), reqID)
+			return
+		}
+
+		executor, err := h.execRegistry.GetExecutor(*toolDef)
+		if err != nil {
+			h.writeRawError(w, "internal_error", fmt.Sprintf("resolve executor: %v", err), reqID)
+			return
+		}
+
+		var callerID core.Identity
+		if id != nil {
+			callerID = *id
+		}
+
+		res, err := executor.Execute(r.Context(), suspState.PendingToolCall, callerID)
+		if err != nil {
+			res = core.ToolResult{
+				CallID:  suspState.PendingToolCall.ID,
+				ToolID:  toolDef.ID,
+				Content: fmt.Sprintf("execution error: %v", err),
+				IsError: true,
+			}
+		}
+
+		sanitized := h.sanitizer.Sanitize(res, toolDef.Result)
+
+		suspState.Messages = append(suspState.Messages, core.ChatMessage{
+			Role:       "tool",
+			ToolCallID: suspState.PendingToolCall.ID,
+			Content:    sanitized.Content,
+		})
+	}
+
+	state := &core.ReqState{
+		RequestID:   suspState.RequestID,
+		ProjectID:   suspState.ProjectID,
+		Environment: suspState.Environment,
+		AIAppID:     suspState.AIAppID,
+		Snapshot:    snap,
+		AIApp:       app,
+		Identity:    id,
+		IsStreaming: suspState.IsStreaming,
+		ChatRequest: &core.ChatRequest{
+			Messages: suspState.Messages,
+		},
+		StartTime: time.Now(),
+	}
+
+	h.executeResumption(w, r, state)
+}
+
+// ToolResultsRequestBody represents the payload from client-side tool execution.
+type ToolResultsRequestBody struct {
+	ContinuationToken string `json:"continuation_token"`
+	CallID            string `json:"call_id"`
+	Result            any    `json:"result"`
+}
+
+// HandleToolResults handles receiving client-side tool results (POST /v1/apps/{ai_app_id}/tool-results).
+func (h *Handler) HandleToolResults(w http.ResponseWriter, r *http.Request) {
+	reqID := getOrGenerateRequestID(r)
+
+	var req ToolResultsRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeRawError(w, "invalid_argument", "invalid request body", reqID)
+		return
+	}
+
+	id, _ := identity.FromContext(r.Context())
+
+	suspState, claims, err := h.continuationMgr.ValidateResumption(r.Context(), req.ContinuationToken, id)
+	if err != nil {
+		h.writeRawError(w, "invalid_argument", fmt.Sprintf("continuation validation failed: %v", err), reqID)
+		return
+	}
+
+	_ = h.continuationMgr.Store().Delete(r.Context(), claims.ProjectID, claims.RequestID)
+
+	snap, ok := h.resolver.Get(suspState.ProjectID, suspState.Environment)
+	if !ok || snap == nil {
+		h.writeRawError(w, "unavailable", "configuration snapshot not found", reqID)
+		return
+	}
+
+	app, ok := snap.App(suspState.AIAppID)
+	if !ok || app == nil {
+		h.writeRawError(w, "not_found", "ai app not found", reqID)
+		return
+	}
+
+	// Format client result as JSON string and wrap as untrusted data
+	resultJSON, _ := json.Marshal(req.Result)
+	wrappedResult := fmt.Sprintf("<tool_result tool_id=%q call_id=%q status=\"success\">\n%s\n</tool_result>",
+		suspState.PendingToolCall.Name, req.CallID, string(resultJSON))
+
+	suspState.Messages = append(suspState.Messages, core.ChatMessage{
+		Role:       "tool",
+		ToolCallID: req.CallID,
+		Content:    wrappedResult,
+	})
+
+	state := &core.ReqState{
+		RequestID:   suspState.RequestID,
+		ProjectID:   suspState.ProjectID,
+		Environment: suspState.Environment,
+		AIAppID:     suspState.AIAppID,
+		Snapshot:    snap,
+		AIApp:       app,
+		Identity:    id,
+		IsStreaming: suspState.IsStreaming,
+		ChatRequest: &core.ChatRequest{
+			Messages: suspState.Messages,
+		},
+		StartTime: time.Now(),
+	}
+
+	h.executeResumption(w, r, state)
+}
+
+func (h *Handler) executeResumption(w http.ResponseWriter, r *http.Request, state *core.ReqState) {
+	if state.IsStreaming {
+		rc := http.NewResponseController(w)
+		_ = rc.SetWriteDeadline(time.Time{})
+
+		if err := h.pipeline.Execute(r.Context(), state); err != nil {
+			h.writeError(w, state.Error)
+			return
+		}
+
+		if err := h.streamWriter.Stream(r.Context(), w, state.StreamChan); err != nil {
+			slog.WarnContext(r.Context(), "resumed sse stream ended with error",
+				"request_id", state.RequestID,
+				"error", err,
+			)
+		}
+	} else {
+		if err := h.pipeline.Execute(r.Context(), state); err != nil {
+			h.writeError(w, state.Error)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if state.ChatResponse != nil {
+			_ = json.NewEncoder(w).Encode(state.ChatResponse)
+		} else {
+			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+		}
+	}
+}
+
 func (h *Handler) buildRequestState(w http.ResponseWriter, r *http.Request, isStreaming bool) (*core.ReqState, bool) {
 	appID := chi.URLParam(r, "ai_app_id")
 	if appID == "" {
@@ -139,84 +372,61 @@ func (h *Handler) buildRequestState(w http.ResponseWriter, r *http.Request, isSt
 		env = h.defaultEnv
 	}
 
-	// 1. Resolve Snapshot (from context or registry)
-	snap, ok := core.SnapshotFromContext(r.Context())
+	snap, ok := h.resolver.Get(projectID, env)
 	if !ok || snap == nil {
-		if h.resolver != nil {
-			snap, ok = h.resolver.Get(projectID, env)
-		}
-	}
-	if !ok || snap == nil {
-		h.writeRawError(w, "unavailable", fmt.Sprintf("project %q (%s) configuration snapshot not available", projectID, env), reqID)
+		h.writeRawError(w, "unavailable", fmt.Sprintf("configuration snapshot for project %q (%s) not found", projectID, env), reqID)
 		return nil, false
 	}
 
-	// 2. Resolve AI App
-	app, exists := snap.App(appID)
-	if !exists {
+	app, ok := snap.App(appID)
+	if !ok || app == nil {
 		h.writeRawError(w, "not_found", fmt.Sprintf("ai app %q not found", appID), reqID)
 		return nil, false
 	}
 
-	// 3. Resolve Identity
-	id, _ := identity.FromContext(r.Context())
-	rawTok, _ := identity.RawTokenFromContext(r.Context())
-
-	// 4. Parse ChatRequest JSON Body (capped at 10MB)
 	var chatReq core.ChatRequest
 	if r.Body != nil {
-		limitedReader := http.MaxBytesReader(w, r.Body, 10<<20)
-		bodyBytes, err := io.ReadAll(limitedReader)
-		if err != nil {
-			h.writeRawError(w, "invalid_argument", "failed to read request body or exceeded 10MB limit", reqID)
-			return nil, false
-		}
-		if len(bodyBytes) > 0 {
-			if err := json.Unmarshal(bodyBytes, &chatReq); err != nil {
+		b, err := io.ReadAll(r.Body)
+		if err == nil && len(b) > 0 {
+			if err := json.Unmarshal(b, &chatReq); err != nil {
 				h.writeRawError(w, "invalid_argument", fmt.Sprintf("invalid json payload: %v", err), reqID)
 				return nil, false
 			}
 		}
 	}
+	chatReq.Stream = isStreaming
 
-	state := &core.ReqState{
+	id, _ := identity.FromContext(r.Context())
+
+	return &core.ReqState{
 		RequestID:   reqID,
 		ProjectID:   projectID,
 		Environment: env,
 		AIAppID:     appID,
-		RawToken:    rawTok,
-		Identity:    id,
 		Snapshot:    snap,
 		AIApp:       app,
-		ChatRequest: &chatReq,
+		Identity:    id,
 		IsStreaming: isStreaming,
-		Metadata:    make(map[string]any),
-		StartTime:   time.Now().UTC(),
-	}
-
-	return state, true
+		ChatRequest: &chatReq,
+		StartTime:   time.Now(),
+	}, true
 }
 
-func (h *Handler) writeError(w http.ResponseWriter, errResp *core.ErrorResponse) {
-	if errResp == nil {
-		errResp = &core.ErrorResponse{
+func (h *Handler) writeError(w http.ResponseWriter, appErr *core.ErrorResponse) {
+	if appErr == nil {
+		appErr = &core.ErrorResponse{
 			Code:    "internal_error",
 			Message: "internal server error",
 		}
 	}
 
-	status := mapErrorCodeToStatus(errResp.Code)
-
-	if errResp.RetryAfter > 0 {
-		w.Header().Set("Retry-After", strconv.Itoa(errResp.RetryAfter))
-	}
-	if errResp.RequestID != "" {
-		w.Header().Set("X-Request-Id", errResp.RequestID)
-	}
-
+	status := mapErrorCodeToStatus(appErr.Code)
 	w.Header().Set("Content-Type", "application/json")
+	if appErr.RetryAfter > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(appErr.RetryAfter))
+	}
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(errResp)
+	_ = json.NewEncoder(w).Encode(appErr)
 }
 
 func (h *Handler) writeRawError(w http.ResponseWriter, code, message, reqID string) {

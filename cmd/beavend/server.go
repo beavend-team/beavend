@@ -117,9 +117,13 @@ func mountRuntimeRoutes(r chi.Router, handler *runtime.Handler, authMiddleware f
 			if authMiddleware != nil {
 				apps.With(authMiddleware).Post("/{ai_app_id}/chat", handler.HandleChat)
 				apps.With(authMiddleware).Post("/{ai_app_id}/stream", handler.HandleStream)
+				apps.With(authMiddleware).Post("/{ai_app_id}/confirm", handler.HandleConfirm)
+				apps.With(authMiddleware).Post("/{ai_app_id}/tool-results", handler.HandleToolResults)
 			} else {
 				apps.Post("/{ai_app_id}/chat", handler.HandleChat)
 				apps.Post("/{ai_app_id}/stream", handler.HandleStream)
+				apps.Post("/{ai_app_id}/confirm", handler.HandleConfirm)
+				apps.Post("/{ai_app_id}/tool-results", handler.HandleToolResults)
 			}
 		} else {
 			apps.Post("/{ai_app_id}/chat", func(w http.ResponseWriter, _ *http.Request) {
@@ -143,25 +147,25 @@ func mountRuntimeRoutes(r chi.Router, handler *runtime.Handler, authMiddleware f
 					"message": "Stream pipeline not configured",
 				})
 			})
+
+			apps.Post("/{ai_app_id}/confirm", func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotImplemented)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"code":    "not_implemented",
+					"message": "Confirmation handler not configured",
+				})
+			})
+
+			apps.Post("/{ai_app_id}/tool-results", func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotImplemented)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"code":    "not_implemented",
+					"message": "Client-side tools handler not configured",
+				})
+			})
 		}
-
-		apps.Post("/{ai_app_id}/confirm", func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotImplemented)
-			_ = json.NewEncoder(w).Encode(map[string]string{
-				"code":    "not_implemented",
-				"message": "Confirmation will be available in Phase 8",
-			})
-		})
-
-		apps.Post("/{ai_app_id}/tool-results", func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotImplemented)
-			_ = json.NewEncoder(w).Encode(map[string]string{
-				"code":    "not_implemented",
-				"message": "Client-side tools will be available in Phase 8",
-			})
-		})
 
 		apps.Post("/{ai_app_id}/cancel", func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
