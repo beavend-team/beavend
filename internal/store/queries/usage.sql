@@ -182,3 +182,18 @@ SELECT
 FROM usage_events
 WHERE created_at >= $1 AND created_at < $2
 GROUP BY project_id, environment, ai_app_id, user_id, logical_model, provider;
+
+-- name: AggregateRequestErrorsForWindow :many
+SELECT
+    project_id,
+    environment,
+    ai_app_id,
+    user_id,
+    logical_model,
+    provider,
+    COUNT(*)::BIGINT AS error_count
+FROM request_logs
+WHERE created_at >= $1 AND created_at < $2
+  AND status != 'success'
+GROUP BY project_id, environment, ai_app_id, user_id, logical_model, provider;
+

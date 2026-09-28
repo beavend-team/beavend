@@ -45,15 +45,18 @@ func NewPostgresRollupStore(queries *db.Queries) *PostgresRollupStore {
 	return &PostgresRollupStore{queries: queries}
 }
 
-// AggregateWindow aggregates usage events within [start, end).
+// AggregateWindow aggregates usage events and error logs within [start, end).
 func (s *PostgresRollupStore) AggregateWindow(ctx context.Context, start, end time.Time) ([]AggregatedUsageRow, error) {
 	if s.queries == nil {
 		return nil, fmt.Errorf("postgres rollup store: uninitialized queries")
 	}
 
+	startTz := timeToTimestamptz(start)
+	endTz := timeToTimestamptz(end)
+
 	params := db.AggregateUsageEventsForWindowParams{
-		CreatedAt:   timeToTimestamptz(start),
-		CreatedAt_2: timeToTimestamptz(end),
+		CreatedAt:   startTz,
+		CreatedAt_2: endTz,
 	}
 
 	rows, err := s.queries.AggregateUsageEventsForWindow(ctx, params)
@@ -61,9 +64,40 @@ func (s *PostgresRollupStore) AggregateWindow(ctx context.Context, start, end ti
 		return nil, fmt.Errorf("aggregate usage events for window [%v, %v): %w", start, end, err)
 	}
 
-	result := make([]AggregatedUsageRow, len(rows))
-	for i, r := range rows {
-		result[i] = AggregatedUsageRow{
+	errParams := db.AggregateRequestErrorsForWindowParams{
+		CreatedAt:   startTz,
+		CreatedAt_2: endTz,
+	}
+
+	errRows, err := s.queries.AggregateRequestErrorsForWindow(ctx, errParams)
+	if err != nil {
+		return nil, fmt.Errorf("aggregate request errors for window [%v, %v): %w", start, end, err)
+	}
+
+	type groupKey struct {
+		projectID    string
+		environment  string
+		aiAppID      string
+		userID       string
+		logicalModel string
+		provider     string
+	}
+
+	keyOf := func(projectID, environment, aiAppID, userID, logicalModel, provider string) groupKey {
+		return groupKey{
+			projectID:    projectID,
+			environment:  environment,
+			aiAppID:      aiAppID,
+			userID:       userID,
+			logicalModel: logicalModel,
+			provider:     provider,
+		}
+	}
+
+	merged := make(map[groupKey]*AggregatedUsageRow, len(rows))
+	for _, r := range rows {
+		k := keyOf(r.ProjectID, r.Environment, r.AiAppID, r.UserID, r.LogicalModel, r.Provider)
+		merged[k] = &AggregatedUsageRow{
 			ProjectID:    r.ProjectID,
 			Environment:  r.Environment,
 			AIAppID:      r.AiAppID,
@@ -76,6 +110,29 @@ func (s *PostgresRollupStore) AggregateWindow(ctx context.Context, start, end ti
 			TotalTokens:  r.TotalTokens,
 			CostUSD:      numericToFloat(r.CostUsd),
 		}
+	}
+
+	for _, er := range errRows {
+		k := keyOf(er.ProjectID, er.Environment, er.AiAppID, er.UserID, er.LogicalModel, er.Provider)
+		if row, exists := merged[k]; exists {
+			row.ErrorCount = er.ErrorCount
+		} else {
+			merged[k] = &AggregatedUsageRow{
+				ProjectID:    er.ProjectID,
+				Environment:  er.Environment,
+				AIAppID:      er.AiAppID,
+				UserID:       er.UserID,
+				LogicalModel: er.LogicalModel,
+				Provider:     er.Provider,
+				RequestCount: er.ErrorCount,
+				ErrorCount:   er.ErrorCount,
+			}
+		}
+	}
+
+	result := make([]AggregatedUsageRow, 0, len(merged))
+	for _, v := range merged {
+		result = append(result, *v)
 	}
 
 	return result, nil

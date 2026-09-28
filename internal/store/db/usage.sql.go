@@ -11,6 +11,64 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const aggregateRequestErrorsForWindow = `-- name: AggregateRequestErrorsForWindow :many
+SELECT
+    project_id,
+    environment,
+    ai_app_id,
+    user_id,
+    logical_model,
+    provider,
+    COUNT(*)::BIGINT AS error_count
+FROM request_logs
+WHERE created_at >= $1 AND created_at < $2
+  AND status != 'success'
+GROUP BY project_id, environment, ai_app_id, user_id, logical_model, provider
+`
+
+type AggregateRequestErrorsForWindowParams struct {
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
+}
+
+type AggregateRequestErrorsForWindowRow struct {
+	ProjectID    string `json:"project_id"`
+	Environment  string `json:"environment"`
+	AiAppID      string `json:"ai_app_id"`
+	UserID       string `json:"user_id"`
+	LogicalModel string `json:"logical_model"`
+	Provider     string `json:"provider"`
+	ErrorCount   int64  `json:"error_count"`
+}
+
+func (q *Queries) AggregateRequestErrorsForWindow(ctx context.Context, arg AggregateRequestErrorsForWindowParams) ([]AggregateRequestErrorsForWindowRow, error) {
+	rows, err := q.db.Query(ctx, aggregateRequestErrorsForWindow, arg.CreatedAt, arg.CreatedAt_2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AggregateRequestErrorsForWindowRow{}
+	for rows.Next() {
+		var i AggregateRequestErrorsForWindowRow
+		if err := rows.Scan(
+			&i.ProjectID,
+			&i.Environment,
+			&i.AiAppID,
+			&i.UserID,
+			&i.LogicalModel,
+			&i.Provider,
+			&i.ErrorCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const aggregateUsageEventsForWindow = `-- name: AggregateUsageEventsForWindow :many
 SELECT
     project_id,

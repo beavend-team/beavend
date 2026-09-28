@@ -136,7 +136,14 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	origChan := state.StreamChan
+	if origChan == nil {
+		h.writeRawError(w, "internal_error", "stream channel not initialized", state.RequestID)
+		h.recordUsage(state)
+		return
+	}
+
 	monitoredChan := make(chan core.StreamEvent, 16)
+	done := make(chan struct{})
 
 	var (
 		usageMu       sync.Mutex
@@ -145,6 +152,7 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 	)
 
 	go func() {
+		defer close(done)
 		defer close(monitoredChan)
 		for ev := range origChan {
 			if ev.Type == "usage" && ev.Usage != nil {
@@ -157,7 +165,19 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 				capturedErr = ev.Error
 				usageMu.Unlock()
 			}
-			monitoredChan <- ev
+			select {
+			case monitoredChan <- ev:
+			case <-r.Context().Done():
+				// Client disconnected; drain origChan to capture final usage without blocking on monitoredChan
+				for ev := range origChan {
+					if ev.Type == "usage" && ev.Usage != nil {
+						usageMu.Lock()
+						capturedUsage = *ev.Usage
+						usageMu.Unlock()
+					}
+				}
+				return
+			}
 		}
 	}()
 
@@ -169,6 +189,11 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 			"ai_app_id", state.AIAppID,
 			"error", err,
 		)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
 	}
 
 	usageMu.Lock()
@@ -370,7 +395,14 @@ func (h *Handler) executeResumption(w http.ResponseWriter, r *http.Request, stat
 		}
 
 		origChan := state.StreamChan
+		if origChan == nil {
+			h.writeRawError(w, "internal_error", "stream channel not initialized", state.RequestID)
+			h.recordUsage(state)
+			return
+		}
+
 		monitoredChan := make(chan core.StreamEvent, 16)
+		done := make(chan struct{})
 
 		var (
 			usageMu       sync.Mutex
@@ -379,6 +411,7 @@ func (h *Handler) executeResumption(w http.ResponseWriter, r *http.Request, stat
 		)
 
 		go func() {
+			defer close(done)
 			defer close(monitoredChan)
 			for ev := range origChan {
 				if ev.Type == "usage" && ev.Usage != nil {
@@ -391,7 +424,19 @@ func (h *Handler) executeResumption(w http.ResponseWriter, r *http.Request, stat
 					capturedErr = ev.Error
 					usageMu.Unlock()
 				}
-				monitoredChan <- ev
+				select {
+				case monitoredChan <- ev:
+				case <-r.Context().Done():
+					// Client disconnected; drain origChan to capture final usage without blocking on monitoredChan
+					for ev := range origChan {
+						if ev.Type == "usage" && ev.Usage != nil {
+							usageMu.Lock()
+							capturedUsage = *ev.Usage
+							usageMu.Unlock()
+						}
+					}
+					return
+				}
 			}
 		}()
 
@@ -400,6 +445,11 @@ func (h *Handler) executeResumption(w http.ResponseWriter, r *http.Request, stat
 				"request_id", state.RequestID,
 				"error", err,
 			)
+		}
+
+		select {
+		case <-done:
+		case <-time.After(500 * time.Millisecond):
 		}
 
 		usageMu.Lock()
