@@ -180,7 +180,7 @@ func (s *PostgresRollupStore) UpsertRollup(ctx context.Context, row AggregatedUs
 		InputTokens:  row.InputTokens,
 		OutputTokens: row.OutputTokens,
 		TotalTokens:  row.TotalTokens,
-		CostUsd:      floatToNumeric(row.CostUSD),
+		CostUsd:      floatToNumericWithMax(row.CostUSD, 99999999.999999),
 		ErrorCount:   row.ErrorCount,
 	}
 
@@ -305,9 +305,11 @@ func (a *RollupAggregator) Start(ctx context.Context) {
 	defer ticker.Stop()
 
 	// Initial run on startup
-	if err := a.RunOnce(ctx); err != nil {
-		slog.WarnContext(ctx, "initial rollup aggregation encountered error", "error", err)
+	initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	if err := a.RunOnce(initCtx); err != nil {
+		slog.WarnContext(initCtx, "initial rollup aggregation encountered error", "error", err)
 	}
+	cancel()
 
 	for {
 		select {
@@ -316,9 +318,11 @@ func (a *RollupAggregator) Start(ctx context.Context) {
 		case <-a.stopCh:
 			return
 		case <-ticker.C:
-			if err := a.RunOnce(ctx); err != nil {
-				slog.WarnContext(ctx, "periodic rollup aggregation failed", "error", err)
+			tickCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			if err := a.RunOnce(tickCtx); err != nil {
+				slog.WarnContext(tickCtx, "periodic rollup aggregation failed", "error", err)
 			}
+			cancel()
 		}
 	}
 }

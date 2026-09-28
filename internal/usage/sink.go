@@ -190,11 +190,15 @@ func (s *PostgresSink) WriteBatch(ctx context.Context, logs []LogEvent, usage []
 }
 
 func floatToNumeric(val float64) pgtype.Numeric {
+	return floatToNumericWithMax(val, 999999.999999)
+}
+
+func floatToNumericWithMax(val float64, maxVal float64) pgtype.Numeric {
 	if math.IsNaN(val) || math.IsInf(val, 0) || val < 0 {
 		val = 0.0
 	}
-	if val > 999999.999999 {
-		val = 999999.999999
+	if maxVal > 0 && val > maxVal {
+		val = maxVal
 	}
 	var num pgtype.Numeric
 	_ = num.Scan(strconv.FormatFloat(val, 'f', 6, 64))
