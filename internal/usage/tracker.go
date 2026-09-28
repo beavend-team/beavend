@@ -178,24 +178,32 @@ func (t *Tracker) extractEvents(state *core.ReqState) (*LogEvent, *Event) {
 
 	// Extract tool call summaries from chat request messages and response
 	toolCalls := make([]ToolCallSummary, 0)
+	seenToolIDs := make(map[string]struct{})
+	addToolCall := func(id, name, status string) {
+		if id == "" {
+			return
+		}
+		if _, exists := seenToolIDs[id]; exists {
+			return
+		}
+		seenToolIDs[id] = struct{}{}
+		toolCalls = append(toolCalls, ToolCallSummary{
+			ID:     id,
+			Name:   name,
+			Status: status,
+		})
+	}
+
 	if state.ChatRequest != nil {
 		for _, msg := range state.ChatRequest.Messages {
 			for _, tc := range msg.ToolCalls {
-				toolCalls = append(toolCalls, ToolCallSummary{
-					ID:     tc.ID,
-					Name:   tc.Name,
-					Status: "success",
-				})
+				addToolCall(tc.ID, tc.Name, "success")
 			}
 		}
 	}
 	if state.ChatResponse != nil && len(state.ChatResponse.Message.ToolCalls) > 0 {
 		for _, tc := range state.ChatResponse.Message.ToolCalls {
-			toolCalls = append(toolCalls, ToolCallSummary{
-				ID:     tc.ID,
-				Name:   tc.Name,
-				Status: "success",
-			})
+			addToolCall(tc.ID, tc.Name, "success")
 		}
 	}
 

@@ -627,6 +627,13 @@ func continuationErrorCode(err error) string {
 func (h *Handler) recordUsage(state *core.ReqState) {
 	if h.usageStore != nil && state != nil {
 		stateCopy := *state
+		if state.Metadata != nil {
+			metaCopy := make(map[string]any, len(state.Metadata))
+			for k, v := range state.Metadata {
+				metaCopy[k] = v
+			}
+			stateCopy.Metadata = metaCopy
+		}
 		go func() {
 			_ = h.usageStore.RecordUsage(context.Background(), &stateCopy)
 		}()

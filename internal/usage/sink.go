@@ -193,6 +193,9 @@ func floatToNumeric(val float64) pgtype.Numeric {
 	if math.IsNaN(val) || math.IsInf(val, 0) || val < 0 {
 		val = 0.0
 	}
+	if val > 999999.999999 {
+		val = 999999.999999
+	}
 	var num pgtype.Numeric
 	_ = num.Scan(strconv.FormatFloat(val, 'f', 6, 64))
 	return num

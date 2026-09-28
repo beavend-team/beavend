@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -191,5 +192,93 @@ func TestTracker_RecordUsage_ErrorMapping(t *testing.T) {
 	}
 	if rec.Log.ErrorCode != "rate_limited" {
 		t.Errorf("expected error code rate_limited, got %s", rec.Log.ErrorCode)
+	}
+}
+
+func TestTracker_RecordUsage_ToolCallsDeduplication(t *testing.T) {
+	buf := NewBuffer(BufferConfig{Capacity: 10})
+	defer buf.Close()
+
+	tracker := NewTracker(buf, nil)
+
+	state := &core.ReqState{
+		RequestID: "req_tools",
+		ChatRequest: &core.ChatRequest{
+			Messages: []core.ChatMessage{
+				{
+					Role: "assistant",
+					ToolCalls: []core.ToolCall{
+						{ID: "call_1", Name: "get_weather"},
+						{ID: "call_2", Name: "search_db"},
+					},
+				},
+				{
+					Role: "assistant",
+					ToolCalls: []core.ToolCall{
+						{ID: "call_1", Name: "get_weather"}, // Duplicate
+					},
+				},
+			},
+		},
+		ChatResponse: &core.ChatResponse{
+			Message: core.ChatMessage{
+				ToolCalls: []core.ToolCall{
+					{ID: "call_2", Name: "search_db"}, // Duplicate
+					{ID: "call_3", Name: "send_email"},
+				},
+			},
+		},
+	}
+
+	err := tracker.RecordUsage(context.Background(), state)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	rec := <-buf.Events()
+	if rec.Log == nil {
+		t.Fatalf("expected log record")
+	}
+
+	if len(rec.Log.ToolCalls) != 3 {
+		t.Fatalf("expected 3 deduplicated tool calls, got %d", len(rec.Log.ToolCalls))
+	}
+	expectedIDs := []string{"call_1", "call_2", "call_3"}
+	for i, expected := range expectedIDs {
+		if rec.Log.ToolCalls[i].ID != expected {
+			t.Errorf("expected tool call index %d ID=%s, got %s", i, expected, rec.Log.ToolCalls[i].ID)
+		}
+	}
+}
+
+func TestSink_FloatToNumericEdgeCases(t *testing.T) {
+	// NaN should map to 0.0
+	nanNum := floatToNumeric(math.NaN())
+	if numericToFloat(nanNum) != 0.0 {
+		t.Errorf("expected NaN to convert to 0.0, got %f", numericToFloat(nanNum))
+	}
+
+	// +Inf should map to 0.0
+	infNum := floatToNumeric(math.Inf(1))
+	if numericToFloat(infNum) != 0.0 {
+		t.Errorf("expected Inf to convert to 0.0, got %f", numericToFloat(infNum))
+	}
+
+	// Negative should map to 0.0
+	negNum := floatToNumeric(-50.5)
+	if numericToFloat(negNum) != 0.0 {
+		t.Errorf("expected negative to convert to 0.0, got %f", numericToFloat(negNum))
+	}
+
+	// Normal positive should preserve precision
+	normNum := floatToNumeric(12.345678)
+	if val := numericToFloat(normNum); val < 12.345 || val > 12.346 {
+		t.Errorf("expected normal value ~12.345678, got %f", val)
+	}
+
+	// Large value should cap at 999999.999999
+	hugeNum := floatToNumeric(1e12)
+	if val := numericToFloat(hugeNum); val < 999999.99 || val > 1000000.0 {
+		t.Errorf("expected capped value ~999999.999999, got %f", val)
 	}
 }
