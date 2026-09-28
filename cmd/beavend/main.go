@@ -26,6 +26,7 @@ import (
 	"github.com/beavend/beavend/internal/store"
 	"github.com/beavend/beavend/internal/telemetry"
 	"github.com/beavend/beavend/internal/tools"
+	"github.com/beavend/beavend/internal/usage"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -89,8 +90,9 @@ func main() {
 	}()
 
 	var (
-		st       *store.Store
-		registry *snapshot.Registry
+		st          *store.Store
+		registry    *snapshot.Registry
+		batchWriter *usage.BatchWriter
 	)
 
 	if cfg.Database.URL != "" {
@@ -138,6 +140,16 @@ func main() {
 					}()
 					slog.Info("snapshot syncer started with postgres listener fallback and polling backstop")
 				}
+			}
+
+			// Start periodic rollup aggregator for control plane or combined node
+			if cfg.Role == config.RoleAll || cfg.Role == config.RoleControl {
+				rollupStore := usage.NewPostgresRollupStore(st.Queries())
+				rollupAgg := usage.NewRollupAggregator(rollupStore, usage.RollupAggregatorConfig{
+					Interval: cfg.Usage.RollupInterval,
+				})
+				go rollupAgg.Start(ctx)
+				slog.Info("usage rollup aggregator background service started", slog.Duration("interval", cfg.Usage.RollupInterval))
 			}
 		}
 	}
@@ -190,11 +202,33 @@ func main() {
 		routingStage, _ := stages.NewModelRoutingStage(modelResolver)
 		execStage, _ := stages.NewExecutionStage(modelResolver, loop)
 
+		// Setup usage tracking buffer, batch writer, and tracker
+		usageBuf := usage.NewBuffer(usage.BufferConfig{
+			Capacity: cfg.Usage.BufferSize,
+			Policy:   usage.DropOnFull,
+		})
+
+		var usageSink usage.Sink
+		if st != nil {
+			usageSink = usage.NewPostgresSink(st.Pool(), st.Queries())
+		} else {
+			usageSink = usage.NewInMemorySink()
+		}
+
+		batchWriter = usage.NewBatchWriter(usageSink, usageBuf, usage.BatchWriterConfig{
+			BatchSize:     cfg.Usage.BatchSize,
+			FlushInterval: cfg.Usage.FlushInterval,
+		})
+		batchWriter.Start()
+
+		usageTracker := usage.NewTracker(usageBuf, limitStore)
+
 		pipeline := runtime.NewStandardPipeline(authzStage, limitsStage, promptStage, routingStage, execStage)
 		runtimeHandler := runtime.NewHandler(registry, pipeline, runtime.HandlerOptions{
 			DefaultEnvironment: cfg.Env,
 			ContinuationMgr:    continuationMgr,
 			ExecutorRegistry:   execRegistry,
+			UsageStore:         usageTracker,
 		})
 		routerOpts.RuntimeHandler = runtimeHandler
 
@@ -225,13 +259,21 @@ func main() {
 		os.Exit(1)
 	case sig := <-quit:
 		slog.Info("shutting down server gracefully", slog.String("signal", sig.String()))
+		cancel()
 
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer shutdownCancel()
 
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			slog.Error("failed to shut down server cleanly", slog.String("error", err.Error()))
-			os.Exit(1)
+		}
+
+		if batchWriter != nil {
+			if err := batchWriter.Close(shutdownCtx); err != nil {
+				slog.Warn("batch writer shutdown encountered error", slog.String("error", err.Error()))
+			} else {
+				slog.Info("usage batch writer flushed all pending events cleanly")
+			}
 		}
 		slog.Info("server exited cleanly")
 	}

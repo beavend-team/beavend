@@ -36,6 +36,7 @@ type Config struct {
 	Security SecurityConfig `json:"security" yaml:"security"`
 	Admin    AdminConfig    `json:"admin" yaml:"admin"`
 	Log      LogConfig      `json:"log" yaml:"log"`
+	Usage    UsageConfig    `json:"usage" yaml:"usage"`
 }
 
 // HTTPConfig holds web server settings.
@@ -84,6 +85,14 @@ type LogConfig struct {
 	Format string `json:"format" yaml:"format"`
 }
 
+// UsageConfig holds usage tracking and async logging settings.
+type UsageConfig struct {
+	BufferSize     int           `json:"buffer_size" yaml:"buffer_size"`
+	BatchSize      int           `json:"batch_size" yaml:"batch_size"`
+	FlushInterval  time.Duration `json:"flush_interval" yaml:"flush_interval"`
+	RollupInterval time.Duration `json:"rollup_interval" yaml:"rollup_interval"`
+}
+
 // DefaultConfig returns a new Config with standard development defaults.
 func DefaultConfig() *Config {
 	return &Config{
@@ -120,6 +129,12 @@ func DefaultConfig() *Config {
 		Log: LogConfig{
 			Level:  "info",
 			Format: "json",
+		},
+		Usage: UsageConfig{
+			BufferSize:     10000,
+			BatchSize:      100,
+			FlushInterval:  500 * time.Millisecond,
+			RollupInterval: 1 * time.Minute,
 		},
 	}
 }
@@ -220,6 +235,26 @@ func LoadFileWithLookup(filePath string, lookup func(string) string) (*Config, e
 	}
 	if val := lookup("BEAVEND_LOG_FORMAT"); val != "" {
 		cfg.Log.Format = strings.TrimSpace(val)
+	}
+	if val := lookup("BEAVEND_USAGE_BUFFER_SIZE"); val != "" {
+		if size, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
+			cfg.Usage.BufferSize = size
+		}
+	}
+	if val := lookup("BEAVEND_USAGE_BATCH_SIZE"); val != "" {
+		if size, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
+			cfg.Usage.BatchSize = size
+		}
+	}
+	if val := lookup("BEAVEND_USAGE_FLUSH_INTERVAL"); val != "" {
+		if d, err := time.ParseDuration(strings.TrimSpace(val)); err == nil {
+			cfg.Usage.FlushInterval = d
+		}
+	}
+	if val := lookup("BEAVEND_USAGE_ROLLUP_INTERVAL"); val != "" {
+		if d, err := time.ParseDuration(strings.TrimSpace(val)); err == nil {
+			cfg.Usage.RollupInterval = d
+		}
 	}
 
 	if err := cfg.Validate(); err != nil {

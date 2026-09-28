@@ -1,0 +1,260 @@
+package usage
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/beavend/beavend/internal/core"
+)
+
+// Tracker extracts operational metrics and usage records from core.ReqState
+// and enqueues them into the asynchronous buffer while reconciling token limits.
+type Tracker struct {
+	buffer     *Buffer
+	limitStore core.LimitStore
+}
+
+// NewTracker creates a new Tracker.
+func NewTracker(buffer *Buffer, limitStore core.LimitStore) *Tracker {
+	return &Tracker{
+		buffer:     buffer,
+		limitStore: limitStore,
+	}
+}
+
+// RecordUsage extracts logs and usage from the finished ReqState and enqueues them.
+// It also reconciles actual token consumption with pre-request estimates on the LimitStore.
+func (t *Tracker) RecordUsage(ctx context.Context, state *core.ReqState) error {
+	if state == nil {
+		return nil
+	}
+
+	// 1. Asynchronous token reconciliation
+	t.reconcileLimits(ctx, state)
+
+	// 2. Build LogEvent and UsageEvent
+	logEv, usageEv := t.extractEvents(state)
+
+	// 3. Enqueue into bounded in-process buffer
+	if t.buffer != nil {
+		rec := Record{
+			Log:   logEv,
+			Usage: usageEv,
+		}
+		if !t.buffer.Enqueue(rec) {
+			slog.WarnContext(ctx, "usage buffer full; event dropped under backpressure",
+				"request_id", state.RequestID,
+				"project_id", state.ProjectID,
+				"ai_app_id", state.AIAppID,
+			)
+		}
+	}
+
+	return nil
+}
+
+func (t *Tracker) reconcileLimits(ctx context.Context, state *core.ReqState) {
+	if t.limitStore == nil || state.Metadata == nil {
+		return
+	}
+
+	rawKey, exists := state.Metadata["limit_user_key"]
+	if !exists {
+		return
+	}
+	userKey, ok := rawKey.(string)
+	if !ok || userKey == "" {
+		return
+	}
+
+	var estimatedTokens int64
+	if rawEst, ok := state.Metadata["estimated_tokens"]; ok {
+		if est, ok := rawEst.(int64); ok {
+			estimatedTokens = est
+		}
+	}
+
+	actualTokens := int64(state.Usage.TotalTokens)
+	if actualTokens == 0 && state.Usage.InputTokens+state.Usage.OutputTokens > 0 {
+		actualTokens = int64(state.Usage.InputTokens + state.Usage.OutputTokens)
+	}
+
+	if err := t.limitStore.ReconcileTokens(ctx, userKey, estimatedTokens, actualTokens); err != nil {
+		slog.WarnContext(ctx, "failed to reconcile tokens with limit store",
+			"request_id", state.RequestID,
+			"user_key", userKey,
+			"estimated", estimatedTokens,
+			"actual", actualTokens,
+			"error", err,
+		)
+	}
+}
+
+func (t *Tracker) extractEvents(state *core.ReqState) (*LogEvent, *Event) {
+	now := time.Now()
+	createdAt := state.StartTime
+	if createdAt.IsZero() {
+		createdAt = now
+	}
+	latencyMS := now.Sub(createdAt).Milliseconds()
+	if latencyMS < 0 {
+		latencyMS = 0
+	}
+
+	var (
+		userID      string
+		userSubject string
+		userIssuer  string
+	)
+	if state.Identity != nil {
+		userSubject = state.Identity.Subject
+		userIssuer = state.Identity.Issuer
+		userID = state.Identity.Subject
+		if state.Identity.Issuer != "" {
+			userID = fmt.Sprintf("%s:%s", state.Identity.Issuer, state.Identity.Subject)
+		}
+	}
+
+	var (
+		logicalModel    string
+		provider        string
+		modelDeployment string
+	)
+	if state.ResolvedModel != nil {
+		logicalModel = state.ResolvedModel.LogicalModel
+		provider = state.ResolvedModel.Adapter
+		modelDeployment = state.ResolvedModel.Deployment
+	} else if state.ChatRequest != nil && state.ChatRequest.Model != "" {
+		logicalModel = state.ChatRequest.Model
+	}
+
+	var (
+		status       = "success"
+		statusCode   = 200
+		errorCode    string
+		errorMessage string
+	)
+
+	if state.Error != nil {
+		errorCode = state.Error.Code
+		errorMessage = state.Error.Message
+		status = "error"
+		if errorCode == "rate_limited" {
+			status = "rate_limited"
+			statusCode = 429
+		} else if errorCode == "unauthenticated" {
+			statusCode = 401
+		} else if errorCode == "forbidden" {
+			statusCode = 403
+		} else if errorCode == "not_found" {
+			statusCode = 404
+		} else if errorCode == "invalid_argument" || errorCode == "invalid_request" {
+			statusCode = 400
+		} else if errorCode == "provider_error" {
+			statusCode = 502
+		} else if errorCode == "provider_timeout" {
+			statusCode = 504
+		} else {
+			statusCode = 500
+		}
+	}
+
+	// Calculate tokens
+	inputTokens := state.Usage.InputTokens
+	outputTokens := state.Usage.OutputTokens
+	totalTokens := state.Usage.TotalTokens
+	if totalTokens == 0 && (inputTokens > 0 || outputTokens > 0) {
+		totalTokens = inputTokens + outputTokens
+	}
+
+	var costUSD float64
+	if state.Usage.CostUSD != nil {
+		costUSD = *state.Usage.CostUSD
+	}
+
+	// Extract tool call summaries from chat request messages and response
+	toolCalls := make([]ToolCallSummary, 0)
+	if state.ChatRequest != nil {
+		for _, msg := range state.ChatRequest.Messages {
+			for _, tc := range msg.ToolCalls {
+				toolCalls = append(toolCalls, ToolCallSummary{
+					ID:     tc.ID,
+					Name:   tc.Name,
+					Status: "success",
+				})
+			}
+		}
+	}
+	if state.ChatResponse != nil && len(state.ChatResponse.Message.ToolCalls) > 0 {
+		for _, tc := range state.ChatResponse.Message.ToolCalls {
+			toolCalls = append(toolCalls, ToolCallSummary{
+				ID:     tc.ID,
+				Name:   tc.Name,
+				Status: "success",
+			})
+		}
+	}
+
+	// Clone metadata so we don't hold references
+	meta := make(map[string]any)
+	for k, v := range state.Metadata {
+		meta[k] = v
+	}
+
+	logID := generateRandomID("log_")
+	logEv := &LogEvent{
+		ID:              logID,
+		RequestID:       state.RequestID,
+		ProjectID:       state.ProjectID,
+		Environment:     state.Environment,
+		AIAppID:         state.AIAppID,
+		UserID:          userID,
+		UserSubject:     userSubject,
+		UserIssuer:      userIssuer,
+		LogicalModel:    logicalModel,
+		Provider:        provider,
+		ModelDeployment: modelDeployment,
+		Status:          status,
+		StatusCode:      statusCode,
+		LatencyMS:       latencyMS,
+		InputTokens:     inputTokens,
+		OutputTokens:    outputTokens,
+		TotalTokens:     totalTokens,
+		CostUSD:         costUSD,
+		IsStreaming:     state.IsStreaming,
+		ToolCalls:       toolCalls,
+		ErrorCode:       errorCode,
+		ErrorMessage:    errorMessage,
+		Metadata:        meta,
+		CreatedAt:       createdAt,
+	}
+
+	usageID := generateRandomID("usg_")
+	usageEv := &Event{
+		ID:           usageID,
+		RequestID:    state.RequestID,
+		ProjectID:    state.ProjectID,
+		Environment:  state.Environment,
+		AIAppID:      state.AIAppID,
+		UserID:       userID,
+		LogicalModel: logicalModel,
+		Provider:     provider,
+		InputTokens:  inputTokens,
+		OutputTokens: outputTokens,
+		TotalTokens:  totalTokens,
+		CostUSD:      costUSD,
+		CreatedAt:    createdAt,
+	}
+
+	return logEv, usageEv
+}
+
+func generateRandomID(prefix string) string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return prefix + hex.EncodeToString(b)
+}

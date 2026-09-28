@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -362,4 +363,107 @@ func TestHandler_HandleToolResults(t *testing.T) {
 	err = json.Unmarshal(rec.Body.Bytes(), &resp)
 	require.NoError(t, err)
 	assert.Contains(t, resp.Message.Content, "photo_taken")
+}
+
+type mockUsageStore struct {
+	mu       sync.Mutex
+	recorded []*core.ReqState
+}
+
+func (m *mockUsageStore) RecordUsage(_ context.Context, state *core.ReqState) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	clone := *state
+	m.recorded = append(m.recorded, &clone)
+	return nil
+}
+
+func (m *mockUsageStore) Recorded() []*core.ReqState {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]*core.ReqState, len(m.recorded))
+	copy(out, m.recorded)
+	return out
+}
+
+func TestHandler_UsageRecording(t *testing.T) {
+	resolver := &mockSnapshotResolver{
+		snapshots: make(map[string]*core.Snapshot),
+	}
+	snap := core.NewSnapshot("proj_1", "development", 1)
+	snap.Apps["assistant"] = &core.AIApp{
+		ID:             "assistant",
+		ModelRoutingID: "fast",
+	}
+	snap.Models["fast"] = &core.ModelRouting{
+		ID:           "fast",
+		LogicalModel: "fast",
+		Deployment:   "gpt-4o",
+		Adapter:      "litellm",
+	}
+	resolver.snapshots["proj_1:development"] = snap
+
+	adapter := &mockAdapter{
+		chatFn: func(_ context.Context, _ core.ChatRequest) (*core.ChatResponse, error) {
+			return &core.ChatResponse{
+				ID:      "chat_usage",
+				Message: core.ChatMessage{Role: "assistant", Content: "Hello"},
+				Usage:   core.UsageStats{InputTokens: 5, OutputTokens: 10, TotalTokens: 15},
+			}, nil
+		},
+		streamFn: func(_ context.Context, _ core.ChatRequest) (<-chan core.StreamEvent, error) {
+			ch := make(chan core.StreamEvent, 4)
+			go func() {
+				ch <- core.StreamEvent{Type: "delta", Delta: "Hello"}
+				ch <- core.StreamEvent{Type: "usage", Usage: &core.UsageStats{InputTokens: 5, OutputTokens: 10, TotalTokens: 15}}
+				ch <- core.StreamEvent{Type: "done"}
+				close(ch)
+			}()
+			return ch, nil
+		},
+	}
+	modelResolver := routing.NewResolver()
+	modelResolver.RegisterAdapter("litellm", adapter)
+
+	routingStage, _ := stages.NewModelRoutingStage(modelResolver)
+	execStage, _ := stages.NewExecutionStage(modelResolver)
+	pipeline := NewPipeline(routingStage, execStage)
+
+	usageStore := &mockUsageStore{}
+	handler := NewHandler(resolver, pipeline, HandlerOptions{
+		UsageStore: usageStore,
+	})
+
+	t.Run("HandleChat invokes usageStore", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/chat", strings.NewReader(`{}`))
+		req.Header.Set("X-Project-ID", "proj_1")
+		rec := httptest.NewRecorder()
+
+		handler.HandleChat(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+
+		// Wait briefly for async record
+		require.Eventually(t, func() bool {
+			return len(usageStore.Recorded()) == 1
+		}, 1*time.Second, 10*time.Millisecond)
+
+		recorded := usageStore.Recorded()
+		assert.Equal(t, "assistant", recorded[0].AIAppID)
+	})
+
+	t.Run("HandleStream invokes usageStore and captures streamed usage", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/stream", strings.NewReader(`{}`))
+		req.Header.Set("X-Project-ID", "proj_1")
+		rec := httptest.NewRecorder()
+
+		handler.HandleStream(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+
+		require.Eventually(t, func() bool {
+			return len(usageStore.Recorded()) == 2
+		}, 1*time.Second, 10*time.Millisecond)
+
+		recorded := usageStore.Recorded()
+		assert.Equal(t, 15, recorded[1].Usage.TotalTokens)
+	})
 }

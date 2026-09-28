@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -36,6 +38,7 @@ type Handler struct {
 	continuationMgr *tools.ContinuationManager
 	execRegistry    agent.ExecutorRegistry
 	sanitizer       *tools.Sanitizer
+	usageStore      core.UsageStore
 	defaultEnv      string
 }
 
@@ -45,6 +48,7 @@ type HandlerOptions struct {
 	HeartbeatInterval  time.Duration
 	ContinuationMgr    *tools.ContinuationManager
 	ExecutorRegistry   agent.ExecutorRegistry
+	UsageStore         core.UsageStore
 }
 
 // NewHandler creates a new runtime Handler.
@@ -53,6 +57,7 @@ func NewHandler(resolver SnapshotResolver, pipeline *Pipeline, opts ...HandlerOp
 	heartbeat := 15 * time.Second
 	var continuationMgr *tools.ContinuationManager
 	var execRegistry agent.ExecutorRegistry
+	var usageStore core.UsageStore
 
 	if len(opts) > 0 {
 		if opts[0].DefaultEnvironment != "" {
@@ -63,6 +68,7 @@ func NewHandler(resolver SnapshotResolver, pipeline *Pipeline, opts ...HandlerOp
 		}
 		continuationMgr = opts[0].ContinuationMgr
 		execRegistry = opts[0].ExecutorRegistry
+		usageStore = opts[0].UsageStore
 	}
 
 	if continuationMgr == nil {
@@ -79,6 +85,7 @@ func NewHandler(resolver SnapshotResolver, pipeline *Pipeline, opts ...HandlerOp
 		continuationMgr: continuationMgr,
 		execRegistry:    execRegistry,
 		sanitizer:       tools.NewSanitizer(),
+		usageStore:      usageStore,
 		defaultEnv:      defaultEnv,
 	}
 }
@@ -97,6 +104,7 @@ func (h *Handler) HandleChat(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.pipeline.Execute(r.Context(), state); err != nil {
 		h.writeError(w, state.Error)
+		h.recordUsage(state)
 		return
 	}
 
@@ -107,6 +115,7 @@ func (h *Handler) HandleChat(w http.ResponseWriter, r *http.Request) {
 	} else {
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
 	}
+	h.recordUsage(state)
 }
 
 // HandleStream handles Server-Sent Events streaming chat requests (POST /v1/apps/{ai_app_id}/stream).
@@ -122,10 +131,37 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.pipeline.Execute(r.Context(), state); err != nil {
 		h.writeError(w, state.Error)
+		h.recordUsage(state)
 		return
 	}
 
-	if err := h.streamWriter.Stream(r.Context(), w, state.StreamChan); err != nil {
+	origChan := state.StreamChan
+	monitoredChan := make(chan core.StreamEvent, 16)
+
+	var (
+		usageMu       sync.Mutex
+		capturedUsage core.UsageStats
+		capturedErr   *core.ErrorResponse
+	)
+
+	go func() {
+		defer close(monitoredChan)
+		for ev := range origChan {
+			if ev.Type == "usage" && ev.Usage != nil {
+				usageMu.Lock()
+				capturedUsage = *ev.Usage
+				usageMu.Unlock()
+			}
+			if ev.Type == "error" && ev.Error != nil {
+				usageMu.Lock()
+				capturedErr = ev.Error
+				usageMu.Unlock()
+			}
+			monitoredChan <- ev
+		}
+	}()
+
+	if err := h.streamWriter.Stream(r.Context(), w, monitoredChan); err != nil {
 		slog.WarnContext(r.Context(), "sse streaming ended with error",
 			"request_id", state.RequestID,
 			"project_id", state.ProjectID,
@@ -134,6 +170,17 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 			"error", err,
 		)
 	}
+
+	usageMu.Lock()
+	if capturedUsage.TotalTokens > 0 || capturedUsage.InputTokens > 0 || capturedUsage.OutputTokens > 0 {
+		state.Usage = capturedUsage
+	}
+	if capturedErr != nil {
+		state.Error = capturedErr
+	}
+	usageMu.Unlock()
+
+	h.recordUsage(state)
 }
 
 // ConfirmRequestBody represents the payload to confirm or deny tool execution.
@@ -318,18 +365,57 @@ func (h *Handler) executeResumption(w http.ResponseWriter, r *http.Request, stat
 
 		if err := h.pipeline.Execute(r.Context(), state); err != nil {
 			h.writeError(w, state.Error)
+			h.recordUsage(state)
 			return
 		}
 
-		if err := h.streamWriter.Stream(r.Context(), w, state.StreamChan); err != nil {
+		origChan := state.StreamChan
+		monitoredChan := make(chan core.StreamEvent, 16)
+
+		var (
+			usageMu       sync.Mutex
+			capturedUsage core.UsageStats
+			capturedErr   *core.ErrorResponse
+		)
+
+		go func() {
+			defer close(monitoredChan)
+			for ev := range origChan {
+				if ev.Type == "usage" && ev.Usage != nil {
+					usageMu.Lock()
+					capturedUsage = *ev.Usage
+					usageMu.Unlock()
+				}
+				if ev.Type == "error" && ev.Error != nil {
+					usageMu.Lock()
+					capturedErr = ev.Error
+					usageMu.Unlock()
+				}
+				monitoredChan <- ev
+			}
+		}()
+
+		if err := h.streamWriter.Stream(r.Context(), w, monitoredChan); err != nil {
 			slog.WarnContext(r.Context(), "resumed sse stream ended with error",
 				"request_id", state.RequestID,
 				"error", err,
 			)
 		}
+
+		usageMu.Lock()
+		if capturedUsage.TotalTokens > 0 || capturedUsage.InputTokens > 0 || capturedUsage.OutputTokens > 0 {
+			state.Usage = capturedUsage
+		}
+		if capturedErr != nil {
+			state.Error = capturedErr
+		}
+		usageMu.Unlock()
+
+		h.recordUsage(state)
 	} else {
 		if err := h.pipeline.Execute(r.Context(), state); err != nil {
 			h.writeError(w, state.Error)
+			h.recordUsage(state)
 			return
 		}
 
@@ -340,6 +426,7 @@ func (h *Handler) executeResumption(w http.ResponseWriter, r *http.Request, stat
 		} else {
 			_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
 		}
+		h.recordUsage(state)
 	}
 }
 
@@ -485,4 +572,13 @@ func continuationErrorCode(err error) string {
 		return "forbidden"
 	}
 	return "invalid_argument"
+}
+
+func (h *Handler) recordUsage(state *core.ReqState) {
+	if h.usageStore != nil && state != nil {
+		stateCopy := *state
+		go func() {
+			_ = h.usageStore.RecordUsage(context.Background(), &stateCopy)
+		}()
+	}
 }

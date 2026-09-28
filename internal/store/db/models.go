@@ -188,6 +188,60 @@ type RateLimitCounters struct {
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
 }
 
+type RequestLogs struct {
+	ID              string             `json:"id"`
+	RequestID       string             `json:"request_id"`
+	ProjectID       string             `json:"project_id"`
+	Environment     string             `json:"environment"`
+	AiAppID         string             `json:"ai_app_id"`
+	UserID          string             `json:"user_id"`
+	UserSubject     string             `json:"user_subject"`
+	UserIssuer      string             `json:"user_issuer"`
+	LogicalModel    string             `json:"logical_model"`
+	Provider        string             `json:"provider"`
+	ModelDeployment string             `json:"model_deployment"`
+	Status          string             `json:"status"`
+	StatusCode      int32              `json:"status_code"`
+	LatencyMs       int64              `json:"latency_ms"`
+	InputTokens     int32              `json:"input_tokens"`
+	OutputTokens    int32              `json:"output_tokens"`
+	TotalTokens     int32              `json:"total_tokens"`
+	CostUsd         pgtype.Numeric     `json:"cost_usd"`
+	IsStreaming     bool               `json:"is_streaming"`
+	ToolCalls       []byte             `json:"tool_calls"`
+	ErrorCode       string             `json:"error_code"`
+	ErrorMessage    string             `json:"error_message"`
+	Metadata        []byte             `json:"metadata"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type RequestLogsDefault struct {
+	ID              string             `json:"id"`
+	RequestID       string             `json:"request_id"`
+	ProjectID       string             `json:"project_id"`
+	Environment     string             `json:"environment"`
+	AiAppID         string             `json:"ai_app_id"`
+	UserID          string             `json:"user_id"`
+	UserSubject     string             `json:"user_subject"`
+	UserIssuer      string             `json:"user_issuer"`
+	LogicalModel    string             `json:"logical_model"`
+	Provider        string             `json:"provider"`
+	ModelDeployment string             `json:"model_deployment"`
+	Status          string             `json:"status"`
+	StatusCode      int32              `json:"status_code"`
+	LatencyMs       int64              `json:"latency_ms"`
+	InputTokens     int32              `json:"input_tokens"`
+	OutputTokens    int32              `json:"output_tokens"`
+	TotalTokens     int32              `json:"total_tokens"`
+	CostUsd         pgtype.Numeric     `json:"cost_usd"`
+	IsStreaming     bool               `json:"is_streaming"`
+	ToolCalls       []byte             `json:"tool_calls"`
+	ErrorCode       string             `json:"error_code"`
+	ErrorMessage    string             `json:"error_message"`
+	Metadata        []byte             `json:"metadata"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
 type ToolSecrets struct {
 	ID              string             `json:"id"`
 	ProjectID       string             `json:"project_id"`
@@ -229,4 +283,54 @@ type Tools struct {
 	ActiveVersion int32              `json:"active_version"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UsageEvents struct {
+	ID           string             `json:"id"`
+	RequestID    string             `json:"request_id"`
+	ProjectID    string             `json:"project_id"`
+	Environment  string             `json:"environment"`
+	AiAppID      string             `json:"ai_app_id"`
+	UserID       string             `json:"user_id"`
+	LogicalModel string             `json:"logical_model"`
+	Provider     string             `json:"provider"`
+	InputTokens  int32              `json:"input_tokens"`
+	OutputTokens int32              `json:"output_tokens"`
+	TotalTokens  int32              `json:"total_tokens"`
+	CostUsd      pgtype.Numeric     `json:"cost_usd"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type UsageEventsDefault struct {
+	ID           string             `json:"id"`
+	RequestID    string             `json:"request_id"`
+	ProjectID    string             `json:"project_id"`
+	Environment  string             `json:"environment"`
+	AiAppID      string             `json:"ai_app_id"`
+	UserID       string             `json:"user_id"`
+	LogicalModel string             `json:"logical_model"`
+	Provider     string             `json:"provider"`
+	InputTokens  int32              `json:"input_tokens"`
+	OutputTokens int32              `json:"output_tokens"`
+	TotalTokens  int32              `json:"total_tokens"`
+	CostUsd      pgtype.Numeric     `json:"cost_usd"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type UsageRollups struct {
+	ProjectID    string             `json:"project_id"`
+	Environment  string             `json:"environment"`
+	AiAppID      string             `json:"ai_app_id"`
+	UserID       string             `json:"user_id"`
+	LogicalModel string             `json:"logical_model"`
+	Provider     string             `json:"provider"`
+	Granularity  string             `json:"granularity"`
+	BucketStart  pgtype.Timestamptz `json:"bucket_start"`
+	RequestCount int64              `json:"request_count"`
+	InputTokens  int64              `json:"input_tokens"`
+	OutputTokens int64              `json:"output_tokens"`
+	TotalTokens  int64              `json:"total_tokens"`
+	CostUsd      pgtype.Numeric     `json:"cost_usd"`
+	ErrorCount   int64              `json:"error_count"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }

@@ -26,9 +26,9 @@ Phase 4: Policy Engine (CEL) [Done] │                              │
                                   │
                    Phase 8: Tool Engine & Downstream Auth [Done]
                                   │
-                   Phase 9: Usage Tracking & Async Logging [Next]
+                   Phase 9: Usage Tracking & Async Logging [Done]
                                   │
-                   Phase 10: Control Plane & Embedded Dashboard
+                   Phase 10: Control Plane & Embedded Dashboard [Next]
 ```
 
 ---
@@ -168,8 +168,15 @@ Phase 4: Policy Engine (CEL) [Done] │                              │
 
 ---
 
-## Phase 9: Usage Tracking & Async Logging
+## Phase 9: Usage Tracking & Async Logging [Completed]
+* **Status:** Completed
 * **Goal:** Implement asynchronous bounded channel logging and usage tracking writing to partitioned PostgreSQL tables.
+* **Tasks:**
+  * `tasks/phase-09-usage-tracking/T036-usage-schema-and-partitions.md` — PostgreSQL partitioned tables for request logs & usage events
+  * `tasks/phase-09-usage-tracking/T037-bounded-event-buffer-and-batch-writer.md` — Bounded event buffer & batch writer
+  * `tasks/phase-09-usage-tracking/T038-usage-recording-and-token-reconciliation.md` — Runtime usage recording & token reconciliation
+  * `tasks/phase-09-usage-tracking/T039-usage-rollups-and-aggregation.md` — Usage rollup background aggregator
+  * `tasks/phase-09-usage-tracking/T040-server-wiring-and-end-to-end-tests.md` — Server wiring & end-to-end validation
 * **Major Deliverables:**
   * Bounded in-process event channel with configurable drop/backpressure policies.
   * Batch writer persisting request metadata logs and usage events.
