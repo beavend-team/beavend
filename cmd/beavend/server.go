@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/beavend/beavend/internal/config"
+	"github.com/beavend/beavend/internal/runtime"
 	"github.com/beavend/beavend/internal/telemetry"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -31,9 +32,20 @@ func (d *DefaultReadyChecker) IsReady(_ context.Context) (bool, map[string]any) 
 	}
 }
 
+// RouterOptions holds optional runtime dependencies for BuildRouter.
+type RouterOptions struct {
+	RuntimeHandler *runtime.Handler
+	AuthMiddleware func(http.Handler) http.Handler
+}
+
 // BuildRouter configures the chi HTTP router with middlewares, health probes, and role routes.
-func BuildRouter(cfg *config.Config, tel *telemetry.Telemetry, checker ReadyChecker) http.Handler {
+func BuildRouter(cfg *config.Config, tel *telemetry.Telemetry, checker ReadyChecker, opts ...RouterOptions) http.Handler {
 	r := chi.NewRouter()
+
+	var rOpts RouterOptions
+	if len(opts) > 0 {
+		rOpts = opts[0]
+	}
 
 	// Global Middlewares
 	r.Use(middleware.RequestID)
@@ -52,7 +64,7 @@ func BuildRouter(cfg *config.Config, tel *telemetry.Telemetry, checker ReadyChec
 
 	// Mount role-specific routes
 	if cfg.Role == config.RoleAll || cfg.Role == config.RoleRuntime {
-		mountRuntimeRoutes(r)
+		mountRuntimeRoutes(r, rOpts.RuntimeHandler, rOpts.AuthMiddleware)
 	}
 
 	if cfg.Role == config.RoleAll || cfg.Role == config.RoleControl {
@@ -89,7 +101,7 @@ func handleReadyz(checker ReadyChecker) http.HandlerFunc {
 	}
 }
 
-func mountRuntimeRoutes(r chi.Router) {
+func mountRuntimeRoutes(r chi.Router, handler *runtime.Handler, authMiddleware func(http.Handler) http.Handler) {
 	r.Route("/v1/apps", func(apps chi.Router) {
 		apps.Get("/{ai_app_id}", func(w http.ResponseWriter, r *http.Request) {
 			appID := chi.URLParam(r, "ai_app_id")
@@ -101,27 +113,37 @@ func mountRuntimeRoutes(r chi.Router) {
 			})
 		})
 
-		apps.Post("/{ai_app_id}/chat", func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotImplemented)
-			_ = json.NewEncoder(w).Encode(map[string]string{
-				"code":    "not_implemented",
-				"message": "Chat pipeline will be available in Phase 7",
+		if handler != nil {
+			if authMiddleware != nil {
+				apps.With(authMiddleware).Post("/{ai_app_id}/chat", handler.HandleChat)
+				apps.With(authMiddleware).Post("/{ai_app_id}/stream", handler.HandleStream)
+			} else {
+				apps.Post("/{ai_app_id}/chat", handler.HandleChat)
+				apps.Post("/{ai_app_id}/stream", handler.HandleStream)
+			}
+		} else {
+			apps.Post("/{ai_app_id}/chat", func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotImplemented)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"code":    "not_implemented",
+					"message": "Chat pipeline not configured",
+				})
 			})
-		})
 
-		apps.Post("/{ai_app_id}/stream", func(w http.ResponseWriter, _ *http.Request) {
-			// Bypass default write timeout for long-lived SSE streaming
-			rc := http.NewResponseController(w)
-			_ = rc.SetWriteDeadline(time.Time{})
+			apps.Post("/{ai_app_id}/stream", func(w http.ResponseWriter, _ *http.Request) {
+				// Bypass default write timeout for long-lived SSE streaming
+				rc := http.NewResponseController(w)
+				_ = rc.SetWriteDeadline(time.Time{})
 
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotImplemented)
-			_ = json.NewEncoder(w).Encode(map[string]string{
-				"code":    "not_implemented",
-				"message": "Stream pipeline will be available in Phase 7",
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotImplemented)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"code":    "not_implemented",
+					"message": "Stream pipeline not configured",
+				})
 			})
-		})
+		}
 
 		apps.Post("/{ai_app_id}/confirm", func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")

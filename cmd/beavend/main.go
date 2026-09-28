@@ -13,6 +13,12 @@ import (
 	"time"
 
 	"github.com/beavend/beavend/internal/config"
+	"github.com/beavend/beavend/internal/identity"
+	"github.com/beavend/beavend/internal/limits"
+	"github.com/beavend/beavend/internal/providers/litellm"
+	"github.com/beavend/beavend/internal/routing"
+	"github.com/beavend/beavend/internal/runtime"
+	"github.com/beavend/beavend/internal/runtime/stages"
 	"github.com/beavend/beavend/internal/snapshot"
 	synckit "github.com/beavend/beavend/internal/snapshot/sync"
 	"github.com/beavend/beavend/internal/store"
@@ -132,8 +138,43 @@ func main() {
 		}
 	}
 
+	var routerOpts RouterOptions
+	if cfg.Role == config.RoleAll || cfg.Role == config.RoleRuntime {
+		if registry == nil {
+			registry = snapshot.NewRegistry()
+		}
+
+		modelResolver := routing.NewResolver()
+		litellmAdapter, err := litellm.NewAdapter(litellm.Config{
+			BaseURL:   cfg.LiteLLM.URL,
+			MasterKey: cfg.LiteLLM.Key,
+		})
+		if err == nil {
+			modelResolver.RegisterAdapter("litellm", litellmAdapter)
+		} else {
+			slog.Warn("failed to initialize litellm adapter", slog.String("error", err.Error()))
+		}
+
+		limitStore := limits.NewMemoryLimitStore(nil)
+		authzStage, _ := stages.NewAuthZStage(nil)
+		limitsStage, _ := stages.NewLimitsStage(limitStore, nil, nil)
+		promptStage, _ := stages.NewPromptStage(nil)
+		routingStage, _ := stages.NewModelRoutingStage(modelResolver)
+		execStage, _ := stages.NewExecutionStage(modelResolver)
+
+		pipeline := runtime.NewStandardPipeline(authzStage, limitsStage, promptStage, routingStage, execStage)
+		runtimeHandler := runtime.NewHandler(registry, pipeline, runtime.HandlerOptions{
+			DefaultEnvironment: cfg.Env,
+		})
+		routerOpts.RuntimeHandler = runtimeHandler
+
+		verifier := identity.NewVerifier(nil)
+		authMw := identity.AuthMiddleware(registry, verifier, identity.WithDefaultEnvironment(cfg.Env))
+		routerOpts.AuthMiddleware = authMw
+	}
+
 	checker := &DefaultReadyChecker{Role: cfg.Role}
-	router := BuildRouter(cfg, tel, checker)
+	router := BuildRouter(cfg, tel, checker, routerOpts)
 	server := NewHTTPServer(cfg, router)
 
 	serverErr := make(chan error, 1)

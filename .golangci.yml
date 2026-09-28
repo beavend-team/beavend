@@ -17,13 +17,20 @@ linters:
 linters-settings:
   depguard:
     rules:
-      prevent_control_runtime:
+      prevent_control_from_outside:
         list-mode: lax
         files:
           - "!**/cmd/**"
+          - "!**/internal/control/**"
         deny:
           - pkg: "github.com/beavend/beavend/internal/control"
             desc: "Only cmd may import internal/control"
+      prevent_runtime_from_outside:
+        list-mode: lax
+        files:
+          - "!**/cmd/**"
+          - "!**/internal/runtime/**"
+        deny:
           - pkg: "github.com/beavend/beavend/internal/runtime"
             desc: "Only cmd may import internal/runtime"
       core_isolation:

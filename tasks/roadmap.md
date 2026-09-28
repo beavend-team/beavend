@@ -22,9 +22,9 @@ Phase 4: Policy Engine (CEL) [Done] │                              │
    └──────────────────────────────┴──────────────────────────────┘
                                   │
                                   ▼
-                   Phase 7: Runtime Pipeline & Agent Loop [Next]
+                   Phase 7: Runtime Pipeline & Agent Loop [Done]
                                   │
-                   Phase 8: Tool Engine & Downstream Auth
+                   Phase 8: Tool Engine & Downstream Auth [Next]
                                   │
                    Phase 9: Usage Tracking & Async Logging
                                   │
@@ -128,8 +128,15 @@ Phase 4: Policy Engine (CEL) [Done] │                              │
 
 ---
 
-## Phase 7: AI Runtime Pipeline & Agent Loop [Next]
+## Phase 7: AI Runtime Pipeline & Agent Loop [Completed]
+* **Status:** Completed
 * **Goal:** Implement the sequential stage execution pipeline, prompt templating, and Server-Sent Events (SSE) streaming delivery.
+* **Tasks:**
+  * `tasks/phase-07-runtime-pipeline/T026-prompt-templating-engine.md` — Prompt templating engine
+  * `tasks/phase-07-runtime-pipeline/T027-prompt-pipeline-stage.md` — Prompt pipeline stage
+  * `tasks/phase-07-runtime-pipeline/T028-sse-stream-flusher.md` — SSE stream flusher & heartbeat engine
+  * `tasks/phase-07-runtime-pipeline/T029-pipeline-orchestrator-and-execution-stage.md` — Pipeline orchestrator & execution stage
+  * `tasks/phase-07-runtime-pipeline/T030-runtime-http-handlers-and-server-wiring.md` — Runtime HTTP handlers & server wiring
 * **Major Deliverables:**
   * Stage pipeline orchestrator (`Stage` interface).
   * Prompt engine with variable interpolation from configuration and identity claims.
@@ -137,6 +144,7 @@ Phase 4: Policy Engine (CEL) [Done] │                              │
   * `POST /v1/apps/{id}/chat` and `POST /v1/apps/{id}/stream` handlers.
 * **Dependencies:** Phase 2, Phase 3, Phase 4, Phase 5, Phase 6.
 * **Expected Outcome:** Working end-to-end unary and streaming chat completions.
+
 
 ---
 

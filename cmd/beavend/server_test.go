@@ -1,14 +1,22 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/beavend/beavend/internal/config"
+	"github.com/beavend/beavend/internal/core"
+	"github.com/beavend/beavend/internal/prompts"
+	"github.com/beavend/beavend/internal/routing"
+	"github.com/beavend/beavend/internal/runtime"
+	"github.com/beavend/beavend/internal/runtime/stages"
+	"github.com/beavend/beavend/internal/snapshot"
 )
 
 type mockReadyChecker struct {
@@ -167,5 +175,107 @@ func TestRequestIDHeaderPropagation(t *testing.T) {
 
 	if got := recAuto.Header().Get("X-Request-Id"); got == "" {
 		t.Errorf("expected server-generated X-Request-Id header in response, got empty")
+	}
+}
+
+type mockServerAdapter struct{}
+
+func (m *mockServerAdapter) Chat(_ context.Context, _ core.ChatRequest) (*core.ChatResponse, error) {
+	return &core.ChatResponse{
+		ID: "chat_resp_1",
+		Message: core.ChatMessage{
+			Role:    "assistant",
+			Content: "Hello from server!",
+		},
+		Usage: core.UsageStats{TotalTokens: 42},
+	}, nil
+}
+
+func (m *mockServerAdapter) Stream(_ context.Context, _ core.ChatRequest) (<-chan core.StreamEvent, error) {
+	ch := make(chan core.StreamEvent, 3)
+	go func() {
+		ch <- core.StreamEvent{Type: "delta", Delta: "Streaming token"}
+		ch <- core.StreamEvent{Type: "done"}
+		close(ch)
+	}()
+	return ch, nil
+}
+
+func (m *mockServerAdapter) Embed(_ context.Context, _ core.EmbedRequest) (*core.EmbedResponse, error) {
+	return nil, nil
+}
+
+func (m *mockServerAdapter) Health(_ context.Context) error {
+	return nil
+}
+
+func TestRuntimeEndpointsWiring(t *testing.T) {
+	cfg := testConfig(config.RoleAll)
+
+	registry := snapshot.NewRegistry()
+	snap := core.NewSnapshot("proj_test", "development", 1)
+	snap.Apps["assistant"] = &core.AIApp{
+		ID:             "assistant",
+		ModelRoutingID: "fast",
+	}
+	snap.Models["fast"] = &core.ModelRouting{
+		ID:           "mr_fast",
+		LogicalModel: "fast",
+		Deployment:   "gpt-4o",
+		Adapter:      "litellm",
+	}
+	registry.Swap(snap)
+
+	modelResolver := routing.NewResolver()
+	modelResolver.RegisterAdapter("litellm", &mockServerAdapter{})
+
+	promptStage, _ := stages.NewPromptStage(prompts.NewEngine())
+	routingStage, _ := stages.NewModelRoutingStage(modelResolver)
+	execStage, _ := stages.NewExecutionStage(modelResolver)
+	pipeline := runtime.NewStandardPipeline(nil, nil, promptStage, routingStage, execStage)
+
+	runtimeHandler := runtime.NewHandler(registry, pipeline)
+	router := BuildRouter(cfg, nil, &DefaultReadyChecker{Role: config.RoleAll}, RouterOptions{
+		RuntimeHandler: runtimeHandler,
+	})
+
+	// 1. Unary Chat
+	chatBody := `{"messages":[{"role":"user","content":"Hello"}]}`
+	reqChat := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/chat", bytes.NewBufferString(chatBody))
+	reqChat.Header.Set("X-Project-ID", "proj_test")
+	reqChat.Header.Set("X-Environment", "development")
+	recChat := httptest.NewRecorder()
+
+	router.ServeHTTP(recChat, reqChat)
+
+	if recChat.Code != http.StatusOK {
+		t.Fatalf("expected 200 for chat completion, got %d: %s", recChat.Code, recChat.Body.String())
+	}
+
+	var chatResp core.ChatResponse
+	if err := json.Unmarshal(recChat.Body.Bytes(), &chatResp); err != nil {
+		t.Fatalf("failed to decode chat response: %v", err)
+	}
+	if chatResp.Message.Content != "Hello from server!" {
+		t.Errorf("unexpected content: %q", chatResp.Message.Content)
+	}
+	if chatResp.Usage.TotalTokens != 42 {
+		t.Errorf("expected 42 tokens, got %d", chatResp.Usage.TotalTokens)
+	}
+
+	// 2. Stream
+	streamBody := `{"messages":[{"role":"user","content":"Stream me"}]}`
+	reqStream := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/stream", bytes.NewBufferString(streamBody))
+	reqStream.Header.Set("X-Project-ID", "proj_test")
+	reqStream.Header.Set("X-Environment", "development")
+	recStream := httptest.NewRecorder()
+
+	router.ServeHTTP(recStream, reqStream)
+
+	if recStream.Code != http.StatusOK {
+		t.Fatalf("expected 200 for stream completion, got %d: %s", recStream.Code, recStream.Body.String())
+	}
+	if !strings.Contains(recStream.Body.String(), "event: delta\ndata: {\"text\":\"Streaming token\"}\n\n") {
+		t.Errorf("expected delta event chunk in body: %s", recStream.Body.String())
 	}
 }
