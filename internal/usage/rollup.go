@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -135,6 +136,25 @@ func (s *PostgresRollupStore) AggregateWindow(ctx context.Context, start, end ti
 		result = append(result, *v)
 	}
 
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].ProjectID != result[j].ProjectID {
+			return result[i].ProjectID < result[j].ProjectID
+		}
+		if result[i].Environment != result[j].Environment {
+			return result[i].Environment < result[j].Environment
+		}
+		if result[i].AIAppID != result[j].AIAppID {
+			return result[i].AIAppID < result[j].AIAppID
+		}
+		if result[i].UserID != result[j].UserID {
+			return result[i].UserID < result[j].UserID
+		}
+		if result[i].LogicalModel != result[j].LogicalModel {
+			return result[i].LogicalModel < result[j].LogicalModel
+		}
+		return result[i].Provider < result[j].Provider
+	})
+
 	return result, nil
 }
 
@@ -260,8 +280,11 @@ func (a *RollupAggregator) RunOnce(ctx context.Context) error {
 		return err
 	}
 
-	// Aggregate today's daily rollup
+	// Aggregate today's and yesterday's daily rollup to capture midnight transitions cleanly
 	if err := a.AggregateDaily(ctx, now); err != nil {
+		return err
+	}
+	if err := a.AggregateDaily(ctx, now.Add(-24*time.Hour)); err != nil {
 		return err
 	}
 
