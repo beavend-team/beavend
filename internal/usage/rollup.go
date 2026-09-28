@@ -117,6 +117,9 @@ func (s *PostgresRollupStore) AggregateWindow(ctx context.Context, start, end ti
 		k := keyOf(er.ProjectID, er.Environment, er.AiAppID, er.UserID, er.LogicalModel, er.Provider)
 		if row, exists := merged[k]; exists {
 			row.ErrorCount = er.ErrorCount
+			if row.RequestCount < row.ErrorCount {
+				row.RequestCount = row.ErrorCount
+			}
 		} else {
 			merged[k] = &AggregatedUsageRow{
 				ProjectID:    er.ProjectID,

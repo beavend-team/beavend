@@ -282,3 +282,15 @@ func TestSink_FloatToNumericEdgeCases(t *testing.T) {
 		t.Errorf("expected capped value ~999999.999999, got %f", val)
 	}
 }
+
+func TestTracker_TruncateString(t *testing.T) {
+	if truncateString("short", 10) != "short" {
+		t.Errorf("expected short string untouched")
+	}
+	if truncateString("toolongstring", 5) != "toolo" {
+		t.Errorf("expected string truncated to 5 chars, got %s", truncateString("toolongstring", 5))
+	}
+	if truncateString("", 5) != "" {
+		t.Errorf("expected empty string untouched")
+	}
+}

@@ -216,17 +216,17 @@ func (t *Tracker) extractEvents(state *core.ReqState) (*LogEvent, *Event) {
 	logID := generateRandomID("log_")
 	logEv := &LogEvent{
 		ID:              logID,
-		RequestID:       state.RequestID,
-		ProjectID:       state.ProjectID,
-		Environment:     state.Environment,
-		AIAppID:         state.AIAppID,
-		UserID:          userID,
-		UserSubject:     userSubject,
-		UserIssuer:      userIssuer,
-		LogicalModel:    logicalModel,
-		Provider:        provider,
-		ModelDeployment: modelDeployment,
-		Status:          status,
+		RequestID:       truncateString(state.RequestID, 64),
+		ProjectID:       truncateString(state.ProjectID, 64),
+		Environment:     truncateString(state.Environment, 64),
+		AIAppID:         truncateString(state.AIAppID, 64),
+		UserID:          truncateString(userID, 255),
+		UserSubject:     truncateString(userSubject, 255),
+		UserIssuer:      truncateString(userIssuer, 255),
+		LogicalModel:    truncateString(logicalModel, 128),
+		Provider:        truncateString(provider, 64),
+		ModelDeployment: truncateString(modelDeployment, 255),
+		Status:          truncateString(status, 32),
 		StatusCode:      statusCode,
 		LatencyMS:       latencyMS,
 		InputTokens:     inputTokens,
@@ -235,7 +235,7 @@ func (t *Tracker) extractEvents(state *core.ReqState) (*LogEvent, *Event) {
 		CostUSD:         costUSD,
 		IsStreaming:     state.IsStreaming,
 		ToolCalls:       toolCalls,
-		ErrorCode:       errorCode,
+		ErrorCode:       truncateString(errorCode, 64),
 		ErrorMessage:    errorMessage,
 		Metadata:        meta,
 		CreatedAt:       createdAt,
@@ -244,13 +244,13 @@ func (t *Tracker) extractEvents(state *core.ReqState) (*LogEvent, *Event) {
 	usageID := generateRandomID("usg_")
 	usageEv := &Event{
 		ID:           usageID,
-		RequestID:    state.RequestID,
-		ProjectID:    state.ProjectID,
-		Environment:  state.Environment,
-		AIAppID:      state.AIAppID,
-		UserID:       userID,
-		LogicalModel: logicalModel,
-		Provider:     provider,
+		RequestID:    truncateString(state.RequestID, 64),
+		ProjectID:    truncateString(state.ProjectID, 64),
+		Environment:  truncateString(state.Environment, 64),
+		AIAppID:      truncateString(state.AIAppID, 64),
+		UserID:       truncateString(userID, 255),
+		LogicalModel: truncateString(logicalModel, 128),
+		Provider:     truncateString(provider, 64),
 		InputTokens:  inputTokens,
 		OutputTokens: outputTokens,
 		TotalTokens:  totalTokens,
@@ -259,6 +259,13 @@ func (t *Tracker) extractEvents(state *core.ReqState) (*LogEvent, *Event) {
 	}
 
 	return logEv, usageEv
+}
+
+func truncateString(s string, maxLen int) string {
+	if len(s) > maxLen {
+		return s[:maxLen]
+	}
+	return s
 }
 
 func generateRandomID(prefix string) string {
