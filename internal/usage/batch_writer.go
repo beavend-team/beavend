@@ -173,6 +173,35 @@ func (w *BatchWriter) flushCurrentBatch(ctx context.Context) {
 	w.pendingUsage = make([]Event, 0, w.cfg.BatchSize)
 	w.mu.Unlock()
 
+	batchSize := w.cfg.BatchSize
+	if batchSize <= 0 {
+		batchSize = 100
+	}
+
+	for len(logs) > 0 || len(usage) > 0 {
+		var chunkLogs []LogEvent
+		if len(logs) > batchSize {
+			chunkLogs = logs[:batchSize]
+			logs = logs[batchSize:]
+		} else {
+			chunkLogs = logs
+			logs = nil
+		}
+
+		var chunkUsage []Event
+		if len(usage) > batchSize {
+			chunkUsage = usage[:batchSize]
+			usage = usage[batchSize:]
+		} else {
+			chunkUsage = usage
+			usage = nil
+		}
+
+		w.writeChunkWithRetry(ctx, chunkLogs, chunkUsage)
+	}
+}
+
+func (w *BatchWriter) writeChunkWithRetry(ctx context.Context, logs []LogEvent, usage []Event) {
 	var err error
 	for attempt := 0; attempt < w.cfg.MaxRetries; attempt++ {
 		writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)

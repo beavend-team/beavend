@@ -206,7 +206,7 @@ func timeToTimestamptz(t time.Time) pgtype.Timestamptz {
 		t = time.Now()
 	}
 	return pgtype.Timestamptz{
-		Time:  t,
+		Time:  t.UTC(),
 		Valid: true,
 	}
 }

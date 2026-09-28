@@ -247,6 +247,41 @@ func TestBatchWriter_GracefulShutdownDrains(t *testing.T) {
 	}
 }
 
+func TestBatchWriter_ChunksLargeBatches(t *testing.T) {
+	sink := NewInMemorySink()
+	buf := NewBuffer(BufferConfig{Capacity: 100})
+	writer := NewBatchWriter(sink, buf, BatchWriterConfig{
+		BatchSize:     10,
+		FlushInterval: 1 * time.Minute, // Long interval
+	})
+	writer.Start()
+
+	const count = 25
+	for i := 0; i < count; i++ {
+		buf.Enqueue(Record{
+			Log:   &LogEvent{ID: "chunk_log"},
+			Usage: &Event{ID: "chunk_usage"},
+		})
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	if err := writer.Close(ctx); err != nil {
+		t.Fatalf("close failed: %v", err)
+	}
+
+	if len(sink.Logs()) != count || len(sink.Usage()) != count {
+		t.Fatalf("expected %d logs and usage records, got logs=%d, usage=%d",
+			count, len(sink.Logs()), len(sink.Usage()))
+	}
+
+	// 25 items chunked by 10 should yield 3 WriteBatch calls (10 + 10 + 5)
+	if sink.CallCount() != 3 {
+		t.Errorf("expected 3 WriteBatch calls for 25 items with batchSize 10, got %d", sink.CallCount())
+	}
+}
+
 func TestBatchWriter_ConcurrentEnqueues(t *testing.T) {
 	sink := NewInMemorySink()
 	buf := NewBuffer(BufferConfig{Capacity: 5000})
