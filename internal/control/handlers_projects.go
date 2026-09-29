@@ -86,6 +86,10 @@ func (h *Handler) HandleCreateProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleGetProject(w http.ResponseWriter, r *http.Request) {
+	if h.svc.queries == nil {
+		writeError(w, http.StatusInternalServerError, "database_unavailable", "database not configured")
+		return
+	}
 	projectID := chi.URLParam(r, "project_id")
 	if projectID == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "project id required")
@@ -102,6 +106,10 @@ func (h *Handler) HandleGetProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleUpdateProject(w http.ResponseWriter, r *http.Request) {
+	if h.svc.queries == nil {
+		writeError(w, http.StatusInternalServerError, "database_unavailable", "database not configured")
+		return
+	}
 	projectID := chi.URLParam(r, "project_id")
 	var req CreateProjectRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -124,6 +132,10 @@ func (h *Handler) HandleUpdateProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleDeleteProject(w http.ResponseWriter, r *http.Request) {
+	if h.svc.queries == nil {
+		writeError(w, http.StatusInternalServerError, "database_unavailable", "database not configured")
+		return
+	}
 	projectID := chi.URLParam(r, "project_id")
 
 	if err := h.svc.queries.DeleteProject(r.Context(), projectID); err != nil {
@@ -143,6 +155,10 @@ type CreateEnvironmentRequest struct {
 }
 
 func (h *Handler) HandleListEnvironments(w http.ResponseWriter, r *http.Request) {
+	if h.svc.queries == nil {
+		writeError(w, http.StatusInternalServerError, "database_unavailable", "database not configured")
+		return
+	}
 	projectID := chi.URLParam(r, "project_id")
 	envs, err := h.svc.queries.ListEnvironments(r.Context(), projectID)
 	if err != nil {
@@ -154,6 +170,10 @@ func (h *Handler) HandleListEnvironments(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *Handler) HandleCreateEnvironment(w http.ResponseWriter, r *http.Request) {
+	if h.svc.queries == nil {
+		writeError(w, http.StatusInternalServerError, "database_unavailable", "database not configured")
+		return
+	}
 	projectID := chi.URLParam(r, "project_id")
 	var req CreateEnvironmentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -182,6 +202,10 @@ func (h *Handler) HandleCreateEnvironment(w http.ResponseWriter, r *http.Request
 }
 
 func (h *Handler) HandleDeleteEnvironment(w http.ResponseWriter, r *http.Request) {
+	if h.svc.queries == nil {
+		writeError(w, http.StatusInternalServerError, "database_unavailable", "database not configured")
+		return
+	}
 	projectID := chi.URLParam(r, "project_id")
 	name := chi.URLParam(r, "name")
 

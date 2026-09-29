@@ -111,12 +111,16 @@ func (w *BatchWriter) run() {
 
 			w.appendRecord(rec)
 			if w.shouldFlush() {
-				w.flushCurrentBatch(context.Background())
+				flushCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				w.flushCurrentBatch(flushCtx)
+				cancel()
 			}
 
 		case <-ticker.C:
 			if w.hasPending() {
-				w.flushCurrentBatch(context.Background())
+				flushCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				w.flushCurrentBatch(flushCtx)
+				cancel()
 			}
 		}
 	}

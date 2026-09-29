@@ -218,6 +218,7 @@ type ConfirmRequestBody struct {
 func (h *Handler) HandleConfirm(w http.ResponseWriter, r *http.Request) {
 	reqID := getOrGenerateRequestID(r)
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req ConfirmRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeRawError(w, "invalid_argument", "invalid request body", reqID)
@@ -326,6 +327,7 @@ type ToolResultsRequestBody struct {
 func (h *Handler) HandleToolResults(w http.ResponseWriter, r *http.Request) {
 	reqID := getOrGenerateRequestID(r)
 
+	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 	var req ToolResultsRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeRawError(w, "invalid_argument", "invalid request body", reqID)
@@ -524,8 +526,18 @@ func (h *Handler) buildRequestState(w http.ResponseWriter, r *http.Request, isSt
 
 	var chatReq core.ChatRequest
 	if r.Body != nil {
-		b, err := io.ReadAll(r.Body)
-		if err == nil && len(b) > 0 {
+		const maxBodySize = 10 << 20 // 10MB limit
+		b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodySize))
+		if err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				h.writeRawError(w, "payload_too_large", "request payload exceeds 10MB limit", reqID)
+				return nil, false
+			}
+			h.writeRawError(w, "invalid_argument", fmt.Sprintf("failed to read request body: %v", err), reqID)
+			return nil, false
+		}
+		if len(b) > 0 {
 			if err := json.Unmarshal(b, &chatReq); err != nil {
 				h.writeRawError(w, "invalid_argument", fmt.Sprintf("invalid json payload: %v", err), reqID)
 				return nil, false
@@ -586,6 +598,8 @@ func mapErrorCodeToStatus(code string) int {
 		return http.StatusForbidden
 	case "not_found":
 		return http.StatusNotFound
+	case "payload_too_large":
+		return http.StatusRequestEntityTooLarge
 	case "rate_limited":
 		return http.StatusTooManyRequests
 	case "provider_error":

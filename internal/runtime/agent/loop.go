@@ -258,6 +258,9 @@ func (l *Loop) runUnaryTurn(ctx context.Context, _ int, state *core.ReqState, ad
 				},
 				FinishReason: "client_tool",
 			}
+			if state.ChatRequest.Metadata == nil {
+				state.ChatRequest.Metadata = make(map[string]string)
+			}
 			state.ChatRequest.Metadata["continuation_token"] = token
 			return true, true, nil
 		}
