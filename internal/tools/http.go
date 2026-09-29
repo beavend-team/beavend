@@ -210,7 +210,8 @@ func (e *HTTPExecutor) Execute(ctx context.Context, call core.ToolCall, id core.
 		}
 
 		respStatus = resp.StatusCode
-		b, readErr := io.ReadAll(resp.Body)
+		const maxToolResponseBytes = 5 << 20 // 5MB max downstream tool response read
+		b, readErr := io.ReadAll(io.LimitReader(resp.Body, maxToolResponseBytes))
 		_ = resp.Body.Close()
 		if readErr != nil {
 			lastErr = readErr

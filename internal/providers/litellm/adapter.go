@@ -113,7 +113,8 @@ func (a *Adapter) Chat(ctx context.Context, req core.ChatRequest) (*core.ChatRes
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	const maxChatResponseBytes = 32 << 20 // 32MB limit
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxChatResponseBytes))
 	if err != nil {
 		return nil, fmt.Errorf("read litellm response body: %w", err)
 	}
@@ -179,7 +180,7 @@ func (a *Adapter) Stream(ctx context.Context, req core.ChatRequest) (<-chan core
 
 	reqID := req.Metadata["request_id"]
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		_ = resp.Body.Close()
 		return nil, providers.NormalizeHTTPError(resp.StatusCode, respBody, resp.Header, reqID)
 	}
@@ -226,7 +227,8 @@ func (a *Adapter) Embed(ctx context.Context, req core.EmbedRequest) (*core.Embed
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	const maxEmbedResponseBytes = 64 << 20 // 64MB limit
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxEmbedResponseBytes))
 	if err != nil {
 		return nil, fmt.Errorf("read embed response: %w", err)
 	}

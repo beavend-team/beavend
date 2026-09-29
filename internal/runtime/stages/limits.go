@@ -163,9 +163,10 @@ func (s *LimitsStage) Handle(ctx context.Context, state *core.ReqState) error {
 	}
 
 	userKey := limits.UserKey(state.ProjectID, state.Environment, state.Identity)
-	if state.Metadata != nil {
-		state.Metadata["limit_user_key"] = userKey
+	if state.Metadata == nil {
+		state.Metadata = make(map[string]any)
 	}
+	state.Metadata["limit_user_key"] = userKey
 
 	allowed, retryAfter, err := s.store.CheckAndDebit(ctx, userKey, activeRules, estimatedTokens)
 	if err != nil {
