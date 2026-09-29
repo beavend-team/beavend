@@ -75,6 +75,8 @@ func MountRoutes(
 		admin.With(requireOwner).Delete("/projects/{project_id}/environments/{name}", ctrlHandler.HandleDeleteEnvironment)
 		admin.With(requireViewer).Get("/projects/{project_id}/environments/{name}/auth", ctrlHandler.HandleGetEnvironmentAuthConfig)
 		admin.With(requireEditor).Put("/projects/{project_id}/environments/{name}/auth", ctrlHandler.HandleUpdateEnvironmentAuthConfig)
+		admin.With(requireViewer).Get("/projects/{project_id}/environments/{name}/export", ctrlHandler.HandleExportConfig)
+		admin.With(requireEditor).Post("/projects/{project_id}/environments/{name}/import", ctrlHandler.HandleImportConfig)
 		admin.With(requireViewer).Post("/auth/test-token", ctrlHandler.HandleTestToken)
 
 		// AI Apps

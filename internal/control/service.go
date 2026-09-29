@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/beavend/beavend/internal/cache"
+	"github.com/beavend/beavend/internal/configcode"
 	"github.com/beavend/beavend/internal/control/audit"
 	"github.com/beavend/beavend/internal/control/auth"
 	"github.com/beavend/beavend/internal/core"
@@ -25,6 +26,7 @@ type Service struct {
 	cacheStore     core.CacheStore
 	memoryProvider core.MemoryProvider
 	threadStore    core.ThreadStore
+	configEngine   *configcode.Engine
 }
 
 // NewService constructs a new control plane service.
@@ -35,13 +37,28 @@ func NewService(
 	masterKey []byte,
 ) *Service {
 	compiler, _ := policy.NewCompiler()
+	var engine *configcode.Engine
+	if queries != nil {
+		engine = configcode.NewEngine(queries, publisher, masterKey)
+	}
 	return &Service{
 		queries:        queries,
 		publisher:      publisher,
 		auditor:        auditor,
 		policyCompiler: compiler,
 		masterKey:      masterKey,
+		configEngine:   engine,
 	}
+}
+
+// SetConfigEngine sets or overrides the configcode Engine.
+func (s *Service) SetConfigEngine(engine *configcode.Engine) {
+	s.configEngine = engine
+}
+
+// ConfigEngine returns the configured configcode Engine.
+func (s *Service) ConfigEngine() *configcode.Engine {
+	return s.configEngine
 }
 
 // SetCacheStore sets the cache store for subject cache purges.

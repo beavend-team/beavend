@@ -510,6 +510,54 @@ class APIClient {
       method: 'DELETE',
     });
   }
+
+  // Configuration as Code (Export & Import)
+  async exportConfig(projectId: string, env: string): Promise<string> {
+    const res = await fetch(`/v1/admin/projects/${encodeURIComponent(projectId)}/environments/${encodeURIComponent(env)}/export`, {
+      headers: this.token ? { Authorization: `Bearer ${this.token}` } : {},
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(err.message || 'Export failed');
+    }
+    return res.text();
+  }
+
+  async importConfig(projectId: string, env: string, content: string, dryRun = false): Promise<DiffReport> {
+    const res = await fetch(`/v1/admin/projects/${encodeURIComponent(projectId)}/environments/${encodeURIComponent(env)}/import?dry_run=${dryRun}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-yaml',
+        ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+      },
+      credentials: 'include',
+      body: content,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(err.message || 'Import failed');
+    }
+    return res.json();
+  }
+}
+
+export interface ResourceDiff {
+  type: string;
+  id: string;
+  action: 'create' | 'update' | 'unchanged';
+  changes?: string[];
+}
+
+export interface DiffReport {
+  project_id: string;
+  environment: string;
+  resources: ResourceDiff[];
+  summary: {
+    total_created: number;
+    total_updated: number;
+    total_unchanged: number;
+  };
 }
 
 export const api = new APIClient();

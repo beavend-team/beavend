@@ -1,5 +1,5 @@
 # Binaries
-beavend
+/beavend
 *.exe
 *.exe~
 *.dll

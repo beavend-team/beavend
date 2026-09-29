@@ -641,6 +641,85 @@ paths:
         "200":
           description: Updated auth configuration
 
+  /v1/admin/projects/{project_id}/environments/{name}/export:
+    get:
+      summary: Export project environment configuration as declarative YAML
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Declarative YAML configuration document
+          content:
+            application/x-yaml:
+              schema:
+                type: string
+
+  /v1/admin/projects/{project_id}/environments/{name}/import:
+    post:
+      summary: Import and reconcile declarative YAML or JSON project configuration
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: dry_run
+          in: query
+          required: false
+          schema:
+            type: boolean
+          description: When true, returns the computed diff plan without modifying the database.
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/x-yaml:
+            schema:
+              type: string
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Computed diff report or apply result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  project_id:
+                    type: string
+                  environment:
+                    type: string
+                  summary:
+                    type: object
+                    properties:
+                      total_created:
+                        type: integer
+                      total_updated:
+                        type: integer
+                      total_unchanged:
+                        type: integer
+
   /v1/admin/auth/test-token:
     post:
       summary: Test and verify end-user JWT token against environment auth provider

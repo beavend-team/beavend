@@ -46,6 +46,15 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "export":
+			return runExport(os.Args[2:])
+		case "import":
+			return runImport(os.Args[2:])
+		}
+	}
+
 	var (
 		roleFlag   = flag.String("role", "", "Role to run: all, runtime, or control (defaults to BEAVEND_ROLE)")
 		portFlag   = flag.Int("port", 0, "HTTP port to listen on (defaults to BEAVEND_HTTP_PORT)")

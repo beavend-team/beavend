@@ -37,6 +37,8 @@ Phase 4: Policy Engine (CEL) [Done] │                              │
                    Phase 13: Identity Provider Config, Per-App Settings & User Limits [Done]
                                   │
                    Phase 14: Context, Threads & Memory Engine [Done]
+                                  │
+                   Phase 15: Configuration as Code (Export, Import & Promotion) [Done]
 ```
 
 ---
@@ -294,6 +296,29 @@ Phase 4: Policy Engine (CEL) [Done] │                              │
   * ADR-012 in `docs/decisions/ADR-012-conversation-threads-and-vector-memory-engine.md`.
 * **Dependencies:** Phase 2, Phase 7, Phase 10, Phase 12.
 * **Expected Outcome:** Client applications seamlessly conduct multi-turn conversations using server-side threads and receive personalized responses via user-scoped semantic memory recall with strict privacy compliance.
+
+---
+
+## Phase 15: Configuration as Code (Export, Import & Environment Promotion) [Completed]
+* **Status:** Completed
+* **Goal:** Implement declarative Configuration as Code (`beavend_version: "0.1"` YAML), secret sanitization, dry-run diffing, CLI subcommands (`beavend export` and `beavend import`), control plane export/import endpoints, and a dedicated dashboard UI for GitOps workflows and multi-environment promotion.
+* **Tasks:**
+  * `tasks/phase-15-config-as-code/T066-config-code-schemas-and-serializers.md` — Config-as-code schemas, YAML serialization & secret masking
+  * `tasks/phase-15-config-as-code/T067-export-import-engine-and-secret-handling.md` — Export/Import engine, dry-run diff calculation & transactional apply
+  * `tasks/phase-15-config-as-code/T068-control-plane-export-import-endpoints.md` — Control plane export/import HTTP endpoints & OpenAPI contract
+  * `tasks/phase-15-config-as-code/T069-cli-export-import-commands.md` — CLI commands `beavend export` and `beavend import`
+  * `tasks/phase-15-config-as-code/T070-dashboard-config-code-ui-and-e2e.md` — Dashboard Config-as-Code UI, ADR-013 & end-to-end verification
+* **Major Deliverables:**
+  * Strict declarative schema in `internal/configcode` covering Project, AuthConfig, AI Apps, Prompts, Models, Tools, Policies, and Limits.
+  * Secret sanitization and environment variable interpolation (`${VAR}`, `env:NAME`).
+  * Dry-run diff engine computing detailed Create/Update/Unchanged plans.
+  * CLI commands `beavend export` and `beavend import` supporting `--dry-run` and direct database operation.
+  * Management endpoints `GET /v1/admin/projects/{project_id}/environments/{env}/export` and `POST /v1/admin/projects/{project_id}/environments/{env}/import`.
+  * Dashboard Config-as-Code panel with YAML download, editor/upload, and interactive diff preview.
+  * ADR-013 in `docs/decisions/ADR-013-configuration-as-code-export-import.md`.
+* **Dependencies:** Phase 2, Phase 10, Phase 13.
+* **Expected Outcome:** Developers can export their entire project configuration into version-controlled YAML, review changes via dry-run diffs, promote configurations across environments, and automate deployments via CI/CD.
+
 
 
 

@@ -6,6 +6,7 @@ import {
   Environment,
   AuthConfig,
   TestTokenResult,
+  DiffReport,
 } from '../api/client';
 import {
   Settings,
@@ -21,6 +22,12 @@ import {
   Save,
   Search,
   ExternalLink,
+  FileCode,
+  Download,
+  Upload,
+  Copy,
+  Check,
+  RefreshCw,
 } from 'lucide-react';
 
 interface SettingsPageProps {
@@ -31,7 +38,7 @@ interface SettingsPageProps {
   onRefreshProjects: () => void;
 }
 
-type SettingsTab = 'auth' | 'projects' | 'users' | 'compliance';
+type SettingsTab = 'auth' | 'projects' | 'configcode' | 'users' | 'compliance';
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({
   currentUser,
@@ -79,7 +86,102 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   const [purgeSubject, setPurgeSubject] = useState('');
   const [purgeSuccess, setPurgeSuccess] = useState<string | null>(null);
 
+  // Config as Code State
+  const [exportedYAML, setExportedYAML] = useState('');
+  const [loadingExport, setLoadingExport] = useState(false);
+  const [importYAML, setImportYAML] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [diffReport, setDiffReport] = useState<DiffReport | null>(null);
+  const [importSuccess, setImportSuccess] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [copiedYAML, setCopiedYAML] = useState(false);
+
   const isOwner = currentUser?.role === 'owner';
+
+  const handleExport = async () => {
+    setLoadingExport(true);
+    setImportError(null);
+    try {
+      const yml = await api.exportConfig(currentProject, currentEnv);
+      setExportedYAML(yml);
+    } catch (err: any) {
+      setImportError(err.message || 'Failed to export configuration');
+    } finally {
+      setLoadingExport(false);
+    }
+  };
+
+  const handleDownloadYAML = () => {
+    if (!exportedYAML) return;
+    const blob = new Blob([exportedYAML], { type: 'application/x-yaml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${currentProject}-${currentEnv}.yaml`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCopyYAML = async () => {
+    if (!exportedYAML) return;
+    await navigator.clipboard.writeText(exportedYAML);
+    setCopiedYAML(true);
+    setTimeout(() => setCopiedYAML(false), 2000);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      setImportYAML(text);
+      setDiffReport(null);
+      setImportSuccess(null);
+      setImportError(null);
+    };
+    reader.readAsText(file);
+  };
+
+  const handlePreviewDiff = async () => {
+    if (!importYAML.trim()) {
+      setImportError('Please provide YAML configuration to preview');
+      return;
+    }
+    setImporting(true);
+    setImportError(null);
+    setImportSuccess(null);
+    try {
+      const report = await api.importConfig(currentProject, currentEnv, importYAML, true);
+      setDiffReport(report);
+    } catch (err: any) {
+      setImportError(err.message || 'Failed to generate diff plan');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleApplyImport = async () => {
+    if (!importYAML.trim()) return;
+    if (!confirm(`Apply configuration to project "${currentProject}" environment "${currentEnv}"?`)) {
+      return;
+    }
+    setImporting(true);
+    setImportError(null);
+    setImportSuccess(null);
+    try {
+      const report = await api.importConfig(currentProject, currentEnv, importYAML, false);
+      setDiffReport(report);
+      setImportSuccess(
+        `Successfully applied configuration! Created: ${report.summary.total_created}, Updated: ${report.summary.total_updated}, Unchanged: ${report.summary.total_unchanged}. Active snapshot invalidated.`
+      );
+      onRefreshProjects();
+    } catch (err: any) {
+      setImportError(err.message || 'Failed to apply configuration');
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const loadAuthConfig = async () => {
     try {
@@ -295,6 +397,17 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
           >
             <Layers className="w-3.5 h-3.5 text-blue-400" />
             Projects & Envs
+          </button>
+          <button
+            onClick={() => setActiveTab('configcode')}
+            className={`px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${
+              activeTab === 'configcode'
+                ? 'bg-slate-800 text-slate-100 font-semibold shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <FileCode className="w-3.5 h-3.5 text-emerald-400" />
+            Config as Code
           </button>
           {isOwner && (
             <button
@@ -678,6 +791,197 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                 <span className="text-slate-500">{new Date(p.created_at).toLocaleDateString()}</span>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Tab: Config as Code (GitOps & Multi-Environment Promotion) */}
+      {activeTab === 'configcode' && (
+        <div className="space-y-6">
+          {/* Header Card */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+            <div className="flex items-start justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-slate-100 flex items-center gap-2">
+                  <FileCode className="w-5 h-5 text-emerald-400" />
+                  Configuration as Code & GitOps
+                </h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  Export and reconcile complete declarative project specifications (<code>beavend_version: "0.1"</code>).
+                  Promote configurations from development to production or version control your entire stack in Git.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs px-2.5 py-1 bg-slate-800 border border-slate-700 text-slate-300 rounded-lg font-mono">
+                  Project: <strong className="text-emerald-400">{currentProject}</strong> / <strong className="text-blue-400">{currentEnv}</strong>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Feedback Banners */}
+          {importSuccess && (
+            <div className="p-4 bg-emerald-950/40 border border-emerald-800/60 rounded-xl text-xs text-emerald-300 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>{importSuccess}</span>
+            </div>
+          )}
+          {importError && (
+            <div className="p-4 bg-rose-950/40 border border-rose-800/60 rounded-xl text-xs text-rose-300 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>{importError}</span>
+            </div>
+          )}
+
+          {/* Two-Column Grid: Export & Import */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Left: Export */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                  <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                    <Download className="w-4 h-4 text-emerald-400" />
+                    Export Configuration
+                  </h3>
+                  <button
+                    onClick={handleExport}
+                    disabled={loadingExport}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors"
+                  >
+                    {loadingExport ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Download className="w-3.5 h-3.5" />
+                    )}
+                    Generate YAML
+                  </button>
+                </div>
+                <p className="text-xs text-slate-400 mt-3">
+                  Generates deterministic YAML containing all AI Apps, Prompts, Models, Tools, Policies, Limits, and Auth settings. Sensitive secrets are safely masked with <code>[SECRET_MASKED]</code> or environment references.
+                </p>
+
+                {exportedYAML && (
+                  <div className="mt-4 relative">
+                    <pre className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-[11px] font-mono text-slate-300 max-h-96 overflow-y-auto leading-relaxed">
+                      {exportedYAML}
+                    </pre>
+                    <div className="absolute top-2 right-2 flex items-center gap-1.5">
+                      <button
+                        onClick={handleCopyYAML}
+                        className="px-2 py-1 bg-slate-800/80 hover:bg-slate-700 text-slate-200 rounded text-[10px] flex items-center gap-1 backdrop-blur-sm transition-colors"
+                      >
+                        {copiedYAML ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        {copiedYAML ? 'Copied!' : 'Copy'}
+                      </button>
+                      <button
+                        onClick={handleDownloadYAML}
+                        className="px-2 py-1 bg-emerald-600/80 hover:bg-emerald-500 text-white rounded text-[10px] flex items-center gap-1 backdrop-blur-sm transition-colors"
+                      >
+                        <Download className="w-3 h-3" />
+                        Download
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Right: Import & Reconcile */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <h3 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                  <Upload className="w-4 h-4 text-blue-400" />
+                  Import & Reconcile
+                </h3>
+                <label className="cursor-pointer px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors border border-slate-700">
+                  <Upload className="w-3.5 h-3.5 text-blue-400" />
+                  Upload .yaml
+                  <input
+                    type="file"
+                    accept=".yaml,.yml,.json"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+
+              <textarea
+                value={importYAML}
+                onChange={(e) => setImportYAML(e.target.value)}
+                placeholder="Paste YAML configuration document here..."
+                rows={10}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs font-mono text-slate-100 focus:outline-none focus:border-blue-500 transition-colors leading-relaxed"
+              />
+
+              <div className="flex items-center justify-between pt-1">
+                <button
+                  onClick={handlePreviewDiff}
+                  disabled={importing || !importYAML.trim()}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 rounded-xl text-xs font-medium flex items-center gap-1.5 border border-slate-700 transition-colors"
+                >
+                  <Search className="w-3.5 h-3.5 text-blue-400" />
+                  Preview Changes (Dry Run)
+                </button>
+                <button
+                  onClick={handleApplyImport}
+                  disabled={importing || !importYAML.trim()}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white rounded-xl text-xs font-medium flex items-center gap-1.5 transition-colors shadow-sm"
+                >
+                  {importing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                  Apply Configuration
+                </button>
+              </div>
+
+              {/* Diff Plan Card */}
+              {diffReport && (
+                <div className="mt-4 p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-200">Diff Plan</span>
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <span className="px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800/60">
+                        {diffReport.summary.total_created} to create
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-amber-950/80 text-amber-400 border border-amber-800/60">
+                        {diffReport.summary.total_updated} to update
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-400">
+                        {diffReport.summary.total_unchanged} unchanged
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="divide-y divide-slate-800/60 max-h-60 overflow-y-auto pr-1">
+                    {diffReport.resources.map((res, idx) => (
+                      <div key={idx} className="py-2 text-xs flex flex-col gap-1">
+                        <div className="flex items-center justify-between font-mono">
+                          <span className="text-slate-300 font-medium">
+                            {res.type}: <strong className="text-slate-100">{res.id}</strong>
+                          </span>
+                          <span
+                            className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ${
+                              res.action === 'create'
+                                ? 'bg-emerald-900/60 text-emerald-300 border border-emerald-700/60'
+                                : res.action === 'update'
+                                ? 'bg-amber-900/60 text-amber-300 border border-amber-700/60'
+                                : 'bg-slate-800/80 text-slate-400'
+                            }`}
+                          >
+                            {res.action}
+                          </span>
+                        </div>
+                        {res.changes && res.changes.length > 0 && (
+                          <div className="pl-3 border-l-2 border-slate-800 text-[11px] text-slate-400 font-mono space-y-0.5">
+                            {res.changes.map((c, i) => (
+                              <div key={i}>{c}</div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

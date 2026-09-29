@@ -17,7 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/santhosh-tekuri/jsonschema/v5"
+	jsonschema "github.com/santhosh-tekuri/jsonschema/v5"
 
 	"github.com/beavend/beavend/internal/cache"
 	"github.com/beavend/beavend/internal/core"
