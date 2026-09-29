@@ -68,6 +68,36 @@ func TestInputGuardrailStage_SizeExceeded(t *testing.T) {
 	assert.Contains(t, state.Error.Message, "size exceeds")
 }
 
+func TestInputGuardrailStage_AttachmentsExceedSize(t *testing.T) {
+	ctx := context.Background()
+	stage := NewInputGuardrailStage()
+
+	app := &core.AIApp{
+		ID: "app-1",
+		Guardrails: core.GuardrailConfig{
+			MaxInputBytes: 100,
+		},
+	}
+
+	state := &core.ReqState{
+		RequestID: "req-1",
+		AIApp:     app,
+		ChatRequest: &core.ChatRequest{
+			Messages: []core.ChatMessage{
+				{Role: "user", Content: "Hello"},
+			},
+			Attachments: []core.Attachment{
+				{Type: "image", MimeType: "image/png", Data: make([]byte, 150)},
+			},
+		},
+	}
+
+	err := stage.Handle(ctx, state)
+	require.ErrorIs(t, err, ErrGuardrailBlocked)
+	require.NotNil(t, state.Error)
+	assert.Equal(t, "guardrail_blocked", state.Error.Code)
+}
+
 func TestInputGuardrailStage_PIIRedacted(t *testing.T) {
 	ctx := context.Background()
 	stage := NewInputGuardrailStage()
@@ -215,4 +245,31 @@ func TestOutputGuardrailStage_PIIRedaction(t *testing.T) {
 	assert.Contains(t, state.ChatResponse.Message.Content, "[REDACTED_EMAIL]")
 	assert.Contains(t, state.ChatResponse.Message.Content, "[REDACTED_PHONE]")
 	assert.NotContains(t, state.ChatResponse.Message.Content, "support@beavend.com")
+}
+
+func TestOutputGuardrailStage_MalformedSchemaFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	stage := NewOutputGuardrailStage()
+
+	app := &core.AIApp{
+		ID:             "app-bad-schema",
+		ResponseSchema: "{invalid_json_schema",
+	}
+
+	state := &core.ReqState{
+		RequestID: "req-bad-schema",
+		AIApp:     app,
+		ChatResponse: &core.ChatResponse{
+			Message: core.ChatMessage{
+				Role:    "assistant",
+				Content: `{"ok": true}`,
+			},
+		},
+	}
+
+	err := stage.Handle(ctx, state)
+	require.ErrorIs(t, err, ErrGuardrailBlocked)
+	require.NotNil(t, state.Error)
+	assert.Equal(t, "guardrail_blocked", state.Error.Code)
+	assert.Contains(t, state.Error.Message, "invalid application response schema configuration")
 }

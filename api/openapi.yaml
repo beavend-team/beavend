@@ -112,6 +112,8 @@ paths:
           $ref: "#/components/responses/401Error"
         "403":
           $ref: "#/components/responses/403Error"
+        "422":
+          $ref: "#/components/responses/422Error"
         "429":
           $ref: "#/components/responses/429Error"
         "502":
@@ -145,10 +147,14 @@ paths:
             text/event-stream:
               schema:
                 type: string
+        "400":
+          $ref: "#/components/responses/400Error"
         "401":
           $ref: "#/components/responses/401Error"
         "403":
           $ref: "#/components/responses/403Error"
+        "422":
+          $ref: "#/components/responses/422Error"
         "429":
           $ref: "#/components/responses/429Error"
 

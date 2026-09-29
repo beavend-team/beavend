@@ -76,6 +76,10 @@ func (s *InputGuardrailStage) Handle(ctx context.Context, state *core.ReqState) 
 
 	// Calculate cumulative input bytes and check messages
 	totalInputBytes := 0
+	for _, att := range state.ChatRequest.Attachments {
+		totalInputBytes += len(att.Data) + len(att.URL)
+	}
+
 	for i := range state.ChatRequest.Messages {
 		msg := &state.ChatRequest.Messages[i]
 		totalInputBytes += len(msg.Content)
@@ -91,8 +95,8 @@ func (s *InputGuardrailStage) Handle(ctx context.Context, state *core.ReqState) 
 			}
 		}
 
-		// Redact PII in user messages if enabled
-		if cfg.PIIRedaction && msg.Role == "user" {
+		// Redact PII in user/system input messages if enabled
+		if cfg.PIIRedaction && (msg.Role == "user" || msg.Role == "system") {
 			redacted, _ := engine.RedactInput(msg.Content)
 			msg.Content = redacted
 		}

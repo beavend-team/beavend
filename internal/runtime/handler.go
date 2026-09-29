@@ -184,6 +184,17 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 
 			if bufferedMode {
 				bufferedEvents = append(bufferedEvents, ev)
+				if err := r.Context().Err(); err != nil {
+					// Client disconnected; drain origChan to capture final usage without blocking
+					for ev := range origChan {
+						if ev.Type == "usage" && ev.Usage != nil {
+							usageMu.Lock()
+							capturedUsage = *ev.Usage
+							usageMu.Unlock()
+						}
+					}
+					return
+				}
 				continue
 			}
 
@@ -209,7 +220,8 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if bufferedMode {
-			if capturedErr == nil && fullTextBuilder.Len() > 0 {
+			shouldEvaluate := fullTextBuilder.Len() > 0 || (state.AIApp != nil && state.AIApp.ResponseSchema != "")
+			if capturedErr == nil && shouldEvaluate {
 				sanitized, err := h.evaluateOutputGuardrails(r.Context(), state, fullTextBuilder.String())
 				if err != nil {
 					usageMu.Lock()
@@ -251,7 +263,8 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		} else if postCheckMode {
-			if capturedErr == nil && fullTextBuilder.Len() > 0 {
+			shouldEvaluate := fullTextBuilder.Len() > 0 || (state.AIApp != nil && state.AIApp.ResponseSchema != "")
+			if capturedErr == nil && shouldEvaluate {
 				_, err := h.evaluateOutputGuardrails(r.Context(), state, fullTextBuilder.String())
 				if err != nil {
 					usageMu.Lock()
@@ -337,6 +350,7 @@ func (h *Handler) evaluateOutputGuardrails(ctx context.Context, state *core.ReqS
 			schema, err = guardrails.CompileSchema(app.ID, app.ResponseSchema)
 			if err != nil {
 				slog.Error("failed to compile response schema on the fly", slog.String("app_id", app.ID), slog.String("error", err.Error()))
+				return "", fmt.Errorf("invalid application response schema configuration: %w", err)
 			}
 		}
 		if schema != nil {

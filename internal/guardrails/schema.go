@@ -77,6 +77,17 @@ func (sg *SchemaGuardrail) CheckOutput(_ context.Context, text string) error {
 		}
 	}
 
+	var trailing any
+	if err := dec.Decode(&trailing); err == nil {
+		return &Violation{
+			Type:    "schema",
+			Message: "response contains multiple JSON values or trailing data",
+			Details: map[string]any{
+				"clean_json": cleanJSON,
+			},
+		}
+	}
+
 	if err := sg.schema.Validate(parsed); err != nil {
 		return &Violation{
 			Type:    "schema",

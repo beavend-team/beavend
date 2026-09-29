@@ -52,6 +52,14 @@ func TestSchemaGuardrail(t *testing.T) {
 	notJSON := "Here is the answer: Paris"
 	errNotJSON := sg.CheckOutput(ctx, notJSON)
 	require.Error(t, errNotJSON)
+
+	// Trailing data or multiple JSON payloads
+	multiJSON := `{"answer": "Paris", "confidence": 0.9} {"answer": "London", "confidence": 0.8}`
+	errMulti := sg.CheckOutput(ctx, multiJSON)
+	require.Error(t, errMulti)
+	var vMulti *Violation
+	require.ErrorAs(t, errMulti, &vMulti)
+	assert.Contains(t, vMulti.Message, "after top-level value")
 }
 
 func TestExtractCleanJSON(t *testing.T) {

@@ -95,12 +95,15 @@ func (p *PIIGuardrail) Detect(text string) []PIIMatch {
 	// 2. SSN
 	ssnMatches := ssnRegex.FindAllStringIndex(text, -1)
 	for _, loc := range ssnMatches {
-		matches = append(matches, PIIMatch{
-			Type:  PIISSN,
-			Value: text[loc[0]:loc[1]],
-			Start: loc[0],
-			End:   loc[1],
-		})
+		val := text[loc[0]:loc[1]]
+		if isValidSSN(val) {
+			matches = append(matches, PIIMatch{
+				Type:  PIISSN,
+				Value: val,
+				Start: loc[0],
+				End:   loc[1],
+			})
+		}
 	}
 
 	// 3. Email
@@ -173,8 +176,13 @@ func (p *PIIGuardrail) Redact(text string) (string, []PIIMatch) {
 		}
 	}
 
-	// Redact SSN
-	result = ssnRegex.ReplaceAllString(result, "[REDACTED_SSN]")
+	// Redact SSN with validation
+	result = ssnRegex.ReplaceAllStringFunc(result, func(s string) string {
+		if isValidSSN(s) {
+			return "[REDACTED_SSN]"
+		}
+		return s
+	})
 
 	// Redact Email
 	result = emailRegex.ReplaceAllString(result, "[REDACTED_EMAIL]")
@@ -258,4 +266,28 @@ func isValidLuhn(number string) bool {
 	}
 
 	return sum%10 == 0
+}
+
+// isValidSSN verifies that a candidate SSN matches valid US Social Security Number rules:
+// Area number (first 3) cannot be 000, 666, or 900-999.
+// Group number (middle 2) cannot be 00.
+// Serial number (last 4) cannot be 0000.
+func isValidSSN(s string) bool {
+	if len(s) != 11 || s[3] != '-' || s[6] != '-' {
+		return false
+	}
+	area := s[:3]
+	group := s[4:6]
+	serial := s[7:]
+
+	if area == "000" || area == "666" || area[0] == '9' {
+		return false
+	}
+	if group == "00" {
+		return false
+	}
+	if serial == "0000" {
+		return false
+	}
+	return true
 }

@@ -35,7 +35,7 @@ func NewInjectionGuardrail() *InjectionGuardrail {
 		},
 		{
 			Name:    "system_delimiter_spoofing",
-			Pattern: regexp.MustCompile(`(?i)(---|===|<\/?[a-z_]+>|\[\[|\{\{)\s*(system|instruction|admin|root|developer)\s*(---|===|<\/?[a-z_]+>|\]\]|\}\})`),
+			Pattern: regexp.MustCompile(`(?i)(---|===|\[\[?|<|\{\{?)\s*(system|instruction|admin|root|developer)\s*(---|===|\]\]?|>|\}\}?)`),
 		},
 		{
 			Name:    "roleplay_hijack",

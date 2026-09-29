@@ -45,6 +45,31 @@ func TestPIIGuardrail_SSN_Email_Phone_Token(t *testing.T) {
 	assert.NotContains(t, redacted, "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9")
 }
 
+func TestPIIGuardrail_SSN_Validation(t *testing.T) {
+	g := NewPIIGuardrail(PIIModeRedact)
+
+	// Valid SSN
+	valid := "SSN is 219-45-6789"
+	redacted, matches := g.Redact(valid)
+	assert.Len(t, matches, 1)
+	assert.Equal(t, "[REDACTED_SSN]", redacted[7:])
+
+	// Invalid area 000, 666, 900+ or group 00 or serial 0000
+	invalidInputs := []string{
+		"Code 000-45-6789",
+		"Code 666-45-6789",
+		"Code 950-45-6789",
+		"Code 123-00-6789",
+		"Code 123-45-0000",
+	}
+
+	for _, inv := range invalidInputs {
+		red, m := g.Redact(inv)
+		assert.Empty(t, m, "should not match invalid SSN: %s", inv)
+		assert.Equal(t, inv, red)
+	}
+}
+
 func TestPIIGuardrail_BlockMode(t *testing.T) {
 	ctx := context.Background()
 	g := NewPIIGuardrail(PIIModeBlock)

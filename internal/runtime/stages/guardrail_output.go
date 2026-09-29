@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
@@ -67,22 +68,7 @@ func (s *OutputGuardrailStage) Handle(ctx context.Context, state *core.ReqState)
 		PIIRedaction:   cfg.PIIRedaction,
 	})
 
-	content := state.ChatResponse.Message.Content
-
-	// 1. Enforce output byte size limit
-	if cfg.MaxOutputBytes > 0 && len(content) > cfg.MaxOutputBytes {
-		v := &guardrails.Violation{
-			Type:    "size",
-			Message: "model response size exceeds maximum allowed bytes",
-			Details: map[string]any{
-				"actual_bytes": len(content),
-				"max_bytes":    cfg.MaxOutputBytes,
-			},
-		}
-		return s.fail(ctx, state, v)
-	}
-
-	// 2. Enforce structured JSON Schema if defined on AI App
+	// Enforce structured JSON Schema if defined on AI App
 	if app.ResponseSchema != "" {
 		var schema *jsonschema.Schema
 
@@ -101,33 +87,29 @@ func (s *OutputGuardrailStage) Handle(ctx context.Context, state *core.ReqState)
 			schema, err = guardrails.CompileSchema(app.ID, app.ResponseSchema)
 			if err != nil {
 				slog.Error("failed to compile response schema on the fly", slog.String("app_id", app.ID), slog.String("error", err.Error()))
+				v := &guardrails.Violation{
+					Type:    "schema",
+					Message: fmt.Sprintf("invalid application response schema configuration: %v", err),
+				}
+				return s.fail(ctx, state, v)
 			}
 		}
 
 		if schema != nil {
-			sg := guardrails.NewSchemaGuardrail(schema)
-			if err := sg.CheckOutput(ctx, content); err != nil {
-				var v *guardrails.Violation
-				if errors.As(err, &v) {
-					return s.fail(ctx, state, v)
-				}
-				return err
-			}
-
-			// Clean and standardize JSON formatting in response
-			if cleanJSON, err := guardrails.ExtractCleanJSON(content); err == nil {
-				state.ChatResponse.Message.Content = cleanJSON
-				content = cleanJSON
-			}
+			engine.SetSchemaGuardrail(guardrails.NewSchemaGuardrail(schema))
 		}
 	}
 
-	// 3. Redact PII in output if enabled
-	if cfg.PIIRedaction {
-		redacted, _ := engine.RedactOutput(content)
-		state.ChatResponse.Message.Content = redacted
+	sanitized, err := engine.EvaluateOutput(ctx, state.ChatResponse.Message.Content)
+	if err != nil {
+		var v *guardrails.Violation
+		if errors.As(err, &v) {
+			return s.fail(ctx, state, v)
+		}
+		return err
 	}
 
+	state.ChatResponse.Message.Content = sanitized
 	return nil
 }
 
