@@ -358,6 +358,22 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 		if a.Name != "" && a.Name != a.AppID {
 			snap.Apps[a.Name] = appObj
 		}
+
+		if strings.TrimSpace(a.ResponseSchema) != "" {
+			jsCompiler := jsonschema.NewCompiler()
+			schemaURL := fmt.Sprintf("schema://beavend/app/%s.json", a.AppID)
+			if err := jsCompiler.AddResource(schemaURL, strings.NewReader(a.ResponseSchema)); err != nil {
+				return nil, fmt.Errorf("add json schema resource for app %s: %w", a.AppID, err)
+			}
+			compiledSchema, err := jsCompiler.Compile(schemaURL)
+			if err != nil {
+				return nil, fmt.Errorf("compile response json schema for app %s: %w", a.AppID, err)
+			}
+			snap.CompiledSchemas["app_response:"+a.AppID] = compiledSchema
+			if a.Name != "" && a.Name != a.AppID {
+				snap.CompiledSchemas["app_response:"+a.Name] = compiledSchema
+			}
+		}
 	}
 
 	return snap, nil

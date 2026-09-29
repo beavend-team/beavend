@@ -17,7 +17,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/santhosh-tekuri/jsonschema/v5"
+
 	"github.com/beavend/beavend/internal/core"
+	"github.com/beavend/beavend/internal/guardrails"
 	"github.com/beavend/beavend/internal/identity"
 	"github.com/beavend/beavend/internal/runtime/agent"
 	"github.com/beavend/beavend/internal/runtime/stream"
@@ -151,9 +154,19 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		capturedErr   *core.ErrorResponse
 	)
 
+	bufferedMode := state.AIApp != nil && state.AIApp.Guardrails.StreamMode == "buffered"
+	postCheckMode := state.AIApp != nil && state.AIApp.Guardrails.StreamMode == "passthrough_with_post_check"
+
 	go func() {
 		defer close(done)
 		defer close(monitoredChan)
+
+		var (
+			fullTextBuilder strings.Builder
+			bufferedEvents  []core.StreamEvent
+			pendingDone     *core.StreamEvent
+		)
+
 		for ev := range origChan {
 			if ev.Type == "usage" && ev.Usage != nil {
 				usageMu.Lock()
@@ -165,6 +178,21 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 				capturedErr = ev.Error
 				usageMu.Unlock()
 			}
+			if ev.Type == "delta" {
+				fullTextBuilder.WriteString(ev.Delta)
+			}
+
+			if bufferedMode {
+				bufferedEvents = append(bufferedEvents, ev)
+				continue
+			}
+
+			if postCheckMode && ev.Type == "done" {
+				evCopy := ev
+				pendingDone = &evCopy
+				continue
+			}
+
 			select {
 			case monitoredChan <- ev:
 			case <-r.Context().Done():
@@ -177,6 +205,81 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 				return
+			}
+		}
+
+		if bufferedMode {
+			if capturedErr == nil && fullTextBuilder.Len() > 0 {
+				sanitized, err := h.evaluateOutputGuardrails(r.Context(), state, fullTextBuilder.String())
+				if err != nil {
+					usageMu.Lock()
+					capturedErr = &core.ErrorResponse{
+						Code:      "guardrail_blocked",
+						Message:   err.Error(),
+						RequestID: state.RequestID,
+					}
+					usageMu.Unlock()
+
+					if state.Metadata == nil {
+						state.Metadata = make(map[string]any)
+					}
+					state.Metadata["guardrail_blocked"] = true
+
+					select {
+					case monitoredChan <- core.StreamEvent{Type: "error", Error: capturedErr, RequestID: state.RequestID}:
+					case <-r.Context().Done():
+					}
+					return
+				}
+
+				if sanitized != fullTextBuilder.String() {
+					var nonDeltas []core.StreamEvent
+					for _, ev := range bufferedEvents {
+						if ev.Type != "delta" {
+							nonDeltas = append(nonDeltas, ev)
+						}
+					}
+					bufferedEvents = append([]core.StreamEvent{{Type: "delta", Delta: sanitized}}, nonDeltas...)
+				}
+			}
+
+			for _, ev := range bufferedEvents {
+				select {
+				case monitoredChan <- ev:
+				case <-r.Context().Done():
+					return
+				}
+			}
+		} else if postCheckMode {
+			if capturedErr == nil && fullTextBuilder.Len() > 0 {
+				_, err := h.evaluateOutputGuardrails(r.Context(), state, fullTextBuilder.String())
+				if err != nil {
+					usageMu.Lock()
+					capturedErr = &core.ErrorResponse{
+						Code:      "guardrail_blocked",
+						Message:   err.Error(),
+						RequestID: state.RequestID,
+					}
+					usageMu.Unlock()
+
+					if state.Metadata == nil {
+						state.Metadata = make(map[string]any)
+					}
+					state.Metadata["guardrail_blocked"] = true
+
+					select {
+					case monitoredChan <- core.StreamEvent{Type: "error", Error: capturedErr, RequestID: state.RequestID}:
+					case <-r.Context().Done():
+					}
+					return
+				}
+			}
+
+			if pendingDone != nil {
+				select {
+				case monitoredChan <- *pendingDone:
+				case <-r.Context().Done():
+				}
 			}
 		}
 	}()
@@ -206,6 +309,42 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 	usageMu.Unlock()
 
 	h.recordUsage(state)
+}
+
+func (h *Handler) evaluateOutputGuardrails(ctx context.Context, state *core.ReqState, content string) (string, error) {
+	if state == nil || state.AIApp == nil {
+		return content, nil
+	}
+
+	app := state.AIApp
+	cfg := app.Guardrails
+	engine := guardrails.NewEngine(guardrails.Config{
+		MaxOutputBytes: cfg.MaxOutputBytes,
+		PIIRedaction:   cfg.PIIRedaction,
+	})
+
+	if app.ResponseSchema != "" {
+		var schema *jsonschema.Schema
+		if state.Snapshot != nil && state.Snapshot.CompiledSchemas != nil {
+			if raw, ok := state.Snapshot.CompiledSchemas["app_response:"+app.ID]; ok {
+				if s, ok2 := raw.(*jsonschema.Schema); ok2 && s != nil {
+					schema = s
+				}
+			}
+		}
+		if schema == nil {
+			var err error
+			schema, err = guardrails.CompileSchema(app.ID, app.ResponseSchema)
+			if err != nil {
+				slog.Error("failed to compile response schema on the fly", slog.String("app_id", app.ID), slog.String("error", err.Error()))
+			}
+		}
+		if schema != nil {
+			engine.SetSchemaGuardrail(guardrails.NewSchemaGuardrail(schema))
+		}
+	}
+
+	return engine.EvaluateOutput(ctx, content)
 }
 
 // ConfirmRequestBody represents the payload to confirm or deny tool execution.
@@ -600,6 +739,8 @@ func mapErrorCodeToStatus(code string) int {
 		return http.StatusNotFound
 	case "payload_too_large":
 		return http.StatusRequestEntityTooLarge
+	case "guardrail_blocked":
+		return http.StatusUnprocessableEntity
 	case "rate_limited":
 		return http.StatusTooManyRequests
 	case "provider_error":

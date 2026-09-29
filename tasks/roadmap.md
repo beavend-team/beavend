@@ -29,6 +29,10 @@ Phase 4: Policy Engine (CEL) [Done] │                              │
                    Phase 9: Usage Tracking & Async Logging [Done]
                                   │
                    Phase 10: Control Plane & Embedded Dashboard [Done]
+                                  │
+                   Phase 11: Guardrails, Safety & Structured Output [Done]
+                                  │
+                   Phase 12: Ephemeral Caching & Response Acceleration [Pending]
 ```
 
 ---
@@ -203,3 +207,33 @@ Phase 4: Policy Engine (CEL) [Done] │                              │
   * React + TypeScript + Vite SPA embedded in Go binary via `embed.FS`.
 * **Dependencies:** Phase 2.
 * **Expected Outcome:** Administrators can configure Beavend entirely through a web browser UI or management API.
+
+---
+
+## Phase 11: Guardrails, Content Safety & Structured Output [Completed]
+* **Status:** Completed
+* **Goal:** Implement the runtime input/output guardrail engine, PII detection and redaction, prompt injection defense, structured JSON schema validation, and streaming safety modes (`buffered` vs `passthrough_with_post_check`).
+* **Tasks:**
+  * `tasks/phase-11-guardrails-safety/T046-guardrail-engine-and-pii.md` — Guardrail engine, PII detection & redaction (Luhn credit cards, SSNs, emails, phones, tokens)
+  * `tasks/phase-11-guardrails-safety/T047-prompt-injection-defense-and-size-limits.md` — Prompt injection defense & payload size bounds
+  * `tasks/phase-11-guardrails-safety/T048-structured-output-validation.md` — Structured output JSON Schema validation & snapshot pre-compilation
+  * `tasks/phase-11-guardrails-safety/T049-guardrails-pipeline-stages-and-streaming.md` — Input/Output guardrail pipeline stages & streaming execution modes
+  * `tasks/phase-11-guardrails-safety/T050-server-wiring-error-taxonomy-and-e2e-tests.md` — Server wiring, HTTP 422 mapping, metrics & end-to-end tests
+* **Major Deliverables:**
+  * Fast modular guardrail engine in `internal/guardrails` satisfying `core.Guardrail`.
+  * Luhn-validated credit card, SSN, email, phone, and token detection/redaction.
+  * Multi-heuristic prompt injection defense preventing jailbreaks and system prompt overrides.
+  * Structured output JSON Schema validator with markdown code-fence stripping.
+  * `InputGuardrailStage` and `OutputGuardrailStage` in `internal/runtime/stages`.
+  * Streaming delivery modes: safe `buffered` mode and low-latency `passthrough_with_post_check` mode.
+  * Standardized HTTP 422 `guardrail_blocked` error handling and Prometheus violation metrics.
+* **Dependencies:** Phase 7, Phase 10.
+* **Expected Outcome:** AI Apps enforce strict content safety, zero-PII leakage, injection resilience, and guaranteed structured output without database queries on the request hot path.
+
+---
+
+## Phase 12: Ephemeral Caching & Response Acceleration [Pending]
+* **Status:** Pending
+* **Goal:** Build tenant and identity-scoped Redis response and tool caching with TTL invalidation to reduce model latency and upstream token costs.
+
+

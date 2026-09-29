@@ -128,12 +128,29 @@ func NewStandardPipeline(
 	routing *stages.ModelRoutingStage,
 	execution *stages.ExecutionStage,
 ) *Pipeline {
+	return NewFullStandardPipeline(authz, limits, nil, prompt, routing, execution, nil)
+}
+
+// NewFullStandardPipeline builds the complete Beavend AI runtime pipeline with guardrails:
+// Ingress AuthZ -> Rate Limits -> Input Guardrails -> Prompt Templating -> Model Routing -> Execution -> Output Guardrails
+func NewFullStandardPipeline(
+	authz *stages.AuthZStage,
+	limits *stages.LimitsStage,
+	inputGuard *stages.InputGuardrailStage,
+	prompt *stages.PromptStage,
+	routing *stages.ModelRoutingStage,
+	execution *stages.ExecutionStage,
+	outputGuard *stages.OutputGuardrailStage,
+) *Pipeline {
 	p := NewPipeline()
 	if authz != nil {
 		p.AddStage(authz)
 	}
 	if limits != nil {
 		p.AddStage(limits)
+	}
+	if inputGuard != nil {
+		p.AddStage(inputGuard)
 	}
 	if prompt != nil {
 		p.AddStage(prompt)
@@ -143,6 +160,9 @@ func NewStandardPipeline(
 	}
 	if execution != nil {
 		p.AddStage(execution)
+	}
+	if outputGuard != nil {
+		p.AddStage(outputGuard)
 	}
 	return p
 }

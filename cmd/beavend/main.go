@@ -206,9 +206,11 @@ func run() error {
 		limitStore := limits.NewMemoryLimitStore(nil)
 		authzStage, _ := stages.NewAuthZStage(nil)
 		limitsStage, _ := stages.NewLimitsStage(limitStore, nil, nil)
+		inputGuardStage := stages.NewInputGuardrailStage()
 		promptStage, _ := stages.NewPromptStage(nil)
 		routingStage, _ := stages.NewModelRoutingStage(modelResolver)
 		execStage, _ := stages.NewExecutionStage(modelResolver, loop)
+		outputGuardStage := stages.NewOutputGuardrailStage()
 
 		// Setup usage tracking buffer, batch writer, and tracker
 		usageBuf := usage.NewBuffer(usage.BufferConfig{
@@ -231,7 +233,7 @@ func run() error {
 
 		usageTracker := usage.NewTracker(usageBuf, limitStore)
 
-		pipeline := runtime.NewStandardPipeline(authzStage, limitsStage, promptStage, routingStage, execStage)
+		pipeline := runtime.NewFullStandardPipeline(authzStage, limitsStage, inputGuardStage, promptStage, routingStage, execStage, outputGuardStage)
 		runtimeHandler := runtime.NewHandler(registry, pipeline, runtime.HandlerOptions{
 			DefaultEnvironment: cfg.Env,
 			ContinuationMgr:    continuationMgr,
