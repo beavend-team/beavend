@@ -54,8 +54,7 @@ func (h *Handler) HandleListTools(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleCreateTool(w http.ResponseWriter, r *http.Request) {
 	projectID, env := getProjectAndEnv(r)
 	var req CreateToolRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid request body")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -182,8 +181,7 @@ func (h *Handler) HandleUpdateTool(w http.ResponseWriter, r *http.Request) {
 	projectID, env := getProjectAndEnv(r)
 
 	var req CreateToolRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid request body")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -293,8 +291,7 @@ func (h *Handler) HandleUpsertToolSecret(w http.ResponseWriter, r *http.Request)
 	projectID, env := getProjectAndEnv(r)
 
 	var req UpsertToolSecretRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid request body")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 

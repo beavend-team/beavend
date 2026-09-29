@@ -1,7 +1,6 @@
 package control
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -48,8 +47,7 @@ func (h *Handler) HandleListPolicies(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleCreatePolicy(w http.ResponseWriter, r *http.Request) {
 	projectID, env := getProjectAndEnv(r)
 	var req CreatePolicyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid request body")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -137,8 +135,7 @@ func (h *Handler) HandleCreatePolicyVersion(w http.ResponseWriter, r *http.Reque
 	projectID, env := getProjectAndEnv(r)
 
 	var req CreatePolicyVersionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid request body")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 

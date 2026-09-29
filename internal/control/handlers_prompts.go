@@ -54,8 +54,7 @@ func (h *Handler) HandleCreatePrompt(w http.ResponseWriter, r *http.Request) {
 	}
 	projectID, env := getProjectAndEnv(r)
 	var req CreatePromptRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid request body")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -137,8 +136,7 @@ func (h *Handler) HandleCreatePromptVersion(w http.ResponseWriter, r *http.Reque
 	projectID, env := getProjectAndEnv(r)
 
 	var req CreatePromptVersionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid request body")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 

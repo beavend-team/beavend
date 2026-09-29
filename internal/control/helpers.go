@@ -2,6 +2,7 @@ package control
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 )
@@ -40,4 +41,19 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 		"code":    code,
 		"message": message,
 	})
+}
+
+// decodeJSON decodes JSON request bodies, gracefully returning 413 for oversized payloads or 400 for bad JSON.
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	err := json.NewDecoder(r.Body).Decode(dst)
+	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) || strings.Contains(err.Error(), "http: request body too large") {
+			writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", "request body exceeds maximum allowed size")
+			return false
+		}
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid request body")
+		return false
+	}
+	return true
 }

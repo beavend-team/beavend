@@ -244,8 +244,13 @@ func (l *Loop) runUnaryTurn(ctx context.Context, _ int, state *core.ReqState, ad
 		// Check client-side tool
 		if toolDef.Executor.Type == "client_side" {
 			susp := l.createSuspendedState(state, toolCall, toolDef.ID)
-			_ = l.cfg.ContinuationMgr.Store().Save(ctx, susp, tools.DefaultSuspensionTTL)
-			token, _ := l.cfg.ContinuationMgr.IssueConfirmationToken(susp, toolCall, tools.DefaultSuspensionTTL)
+			if err := l.cfg.ContinuationMgr.Store().Save(ctx, susp, tools.DefaultSuspensionTTL); err != nil {
+				return false, false, fmt.Errorf("save suspended state: %w", err)
+			}
+			token, err := l.cfg.ContinuationMgr.IssueConfirmationToken(susp, toolCall, tools.DefaultSuspensionTTL)
+			if err != nil {
+				return false, false, fmt.Errorf("issue continuation token: %w", err)
+			}
 
 			state.ChatResponse = &core.ChatResponse{
 				ID:        fmt.Sprintf("chatcmpl_%s", state.RequestID),
@@ -409,8 +414,13 @@ func (l *Loop) runStreamingTurn(ctx context.Context, _ int, state *core.ReqState
 		// Confirmation check
 		if requiresConfirmation(toolDef) {
 			susp := l.createSuspendedState(state, toolCall, toolDef.ID)
-			_ = l.cfg.ContinuationMgr.Store().Save(ctx, susp, tools.DefaultSuspensionTTL)
-			token, _ := l.cfg.ContinuationMgr.IssueConfirmationToken(susp, toolCall, tools.DefaultSuspensionTTL)
+			if err := l.cfg.ContinuationMgr.Store().Save(ctx, susp, tools.DefaultSuspensionTTL); err != nil {
+				return false, false, fmt.Errorf("save suspended state: %w", err)
+			}
+			token, err := l.cfg.ContinuationMgr.IssueConfirmationToken(susp, toolCall, tools.DefaultSuspensionTTL)
+			if err != nil {
+				return false, false, fmt.Errorf("issue confirmation token: %w", err)
+			}
 
 			tc := toolCall
 			// Emit SSE confirmation event and terminate stream
@@ -436,8 +446,13 @@ func (l *Loop) runStreamingTurn(ctx context.Context, _ int, state *core.ReqState
 		// Client-side tool
 		if toolDef.Executor.Type == "client_side" {
 			susp := l.createSuspendedState(state, toolCall, toolDef.ID)
-			_ = l.cfg.ContinuationMgr.Store().Save(ctx, susp, tools.DefaultSuspensionTTL)
-			token, _ := l.cfg.ContinuationMgr.IssueConfirmationToken(susp, toolCall, tools.DefaultSuspensionTTL)
+			if err := l.cfg.ContinuationMgr.Store().Save(ctx, susp, tools.DefaultSuspensionTTL); err != nil {
+				return false, false, fmt.Errorf("save suspended state: %w", err)
+			}
+			token, err := l.cfg.ContinuationMgr.IssueConfirmationToken(susp, toolCall, tools.DefaultSuspensionTTL)
+			if err != nil {
+				return false, false, fmt.Errorf("issue continuation token: %w", err)
+			}
 
 			tc := toolCall
 			select {

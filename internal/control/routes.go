@@ -8,6 +8,16 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// maxBodySizeMiddleware limits the maximum request body size read by downstream handlers.
+func maxBodySizeMiddleware(maxBytes int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // MountRoutes registers all administrative and management endpoints under the given chi Router.
 func MountRoutes(
 	r chi.Router,
@@ -15,6 +25,9 @@ func MountRoutes(
 	ctrlHandler *Handler,
 	tokenManager *auth.TokenManager,
 ) {
+	const maxAdminBodyBytes = 5 << 20 // 5 MB max body size for administrative requests
+	limitBody := maxBodySizeMiddleware(maxAdminBodyBytes)
+
 	// Health probe (unauthenticated)
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -25,7 +38,7 @@ func MountRoutes(
 	})
 
 	if authHandler != nil {
-		r.Post("/auth/login", authHandler.HandleLogin)
+		r.With(limitBody).Post("/auth/login", authHandler.HandleLogin)
 		r.Post("/auth/logout", authHandler.HandleLogout)
 	}
 
@@ -40,6 +53,7 @@ func MountRoutes(
 
 	// Protected routes (require valid admin session)
 	r.Group(func(admin chi.Router) {
+		admin.Use(limitBody)
 		admin.Use(authMw)
 
 		// Current Admin Profile

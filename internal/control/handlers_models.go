@@ -45,8 +45,7 @@ func (h *Handler) HandleUpsertModelRouting(w http.ResponseWriter, r *http.Reques
 	projectID, env := getProjectAndEnv(r)
 
 	var req UpsertModelRoutingRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid request body")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -156,8 +155,7 @@ func (h *Handler) HandleUpsertProviderConfig(w http.ResponseWriter, r *http.Requ
 	projectID, env := getProjectAndEnv(r)
 
 	var req UpsertProviderConfigRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid request body")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 

@@ -55,8 +55,7 @@ func (h *Handler) HandleCreateAIApp(w http.ResponseWriter, r *http.Request) {
 	}
 	projectID, env := getProjectAndEnv(r)
 	var req CreateAIAppRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid request body")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -158,8 +157,7 @@ func (h *Handler) HandleUpdateAIApp(w http.ResponseWriter, r *http.Request) {
 	projectID, env := getProjectAndEnv(r)
 
 	var req CreateAIAppRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid request body")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 

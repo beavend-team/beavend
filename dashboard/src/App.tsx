@@ -129,7 +129,7 @@ export const App: React.FC = () => {
           onLogout={handleLogout}
         />
 
-        <main className="flex-1 overflow-y-auto p-8">
+        <main key={`${currentProject}-${currentEnv}`} className="flex-1 overflow-y-auto p-8">
           {currentTab === 'overview' && <OverviewPage />}
           {currentTab === 'apps' && <AppsPage />}
           {currentTab === 'prompts' && <PromptsPage />}

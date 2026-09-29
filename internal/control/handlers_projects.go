@@ -1,7 +1,6 @@
 package control
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -44,8 +43,7 @@ func (h *Handler) HandleListProjects(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) HandleCreateProject(w http.ResponseWriter, r *http.Request) {
 	var req CreateProjectRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid request body")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -112,8 +110,7 @@ func (h *Handler) HandleUpdateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	projectID := chi.URLParam(r, "project_id")
 	var req CreateProjectRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid request body")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 
@@ -176,8 +173,7 @@ func (h *Handler) HandleCreateEnvironment(w http.ResponseWriter, r *http.Request
 	}
 	projectID := chi.URLParam(r, "project_id")
 	var req CreateEnvironmentRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "bad_request", "invalid request body")
+	if !decodeJSON(w, r, &req) {
 		return
 	}
 

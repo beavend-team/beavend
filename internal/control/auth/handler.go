@@ -49,6 +49,11 @@ type LoginResponse struct {
 func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) || strings.Contains(err.Error(), "http: request body too large") {
+			writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", "request body exceeds maximum allowed size")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid json request body")
 		return
 	}
@@ -187,6 +192,11 @@ type CreateUserRequest struct {
 func (h *Handler) HandleCreateUser(w http.ResponseWriter, r *http.Request) {
 	var req CreateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) || strings.Contains(err.Error(), "http: request body too large") {
+			writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", "request body exceeds maximum allowed size")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid json request body")
 		return
 	}
