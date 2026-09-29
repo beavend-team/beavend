@@ -362,3 +362,35 @@ func TestToCoreEmbedResponseUnindexedData(t *testing.T) {
 		t.Fatalf("unexpected embeddings content: %+v", res.Embeddings)
 	}
 }
+
+func TestSSEParserToolCallRepeatedNameAndID(t *testing.T) {
+	// Simulates providers that repeatedly send full ID and Name across delta chunks
+	sseData := []byte(`
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_abc123","function":{"name":"search","arguments":"{\"q\":"}}]}}]}
+
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_abc123","function":{"name":"search","arguments":"\"golang\"}"}}]}}]}
+
+data: [DONE]
+`)
+
+	events := ParseSSEBytes(context.Background(), sseData, "req_repeat")
+	var toolCalls []*core.ToolCall
+	for _, e := range events {
+		if e.Type == "tool_call" {
+			toolCalls = append(toolCalls, e.ToolCall)
+		}
+	}
+
+	if len(toolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(toolCalls))
+	}
+	if toolCalls[0].ID != "call_abc123" {
+		t.Fatalf("expected tool call ID call_abc123, got %s", toolCalls[0].ID)
+	}
+	if toolCalls[0].Name != "search" {
+		t.Fatalf("expected tool call Name search, got %s", toolCalls[0].Name)
+	}
+	if toolCalls[0].Arguments != `{"q":"golang"}` {
+		t.Fatalf(`expected arguments {"q":"golang"}, got %s`, toolCalls[0].Arguments)
+	}
+}

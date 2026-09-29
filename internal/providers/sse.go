@@ -206,12 +206,24 @@ func (p *StreamParser) ParseStream(ctx context.Context, reader io.Reader, out ch
 					if tcDelta.ID != "" {
 						if builder.id == "" {
 							builder.id = tcDelta.ID
-						} else {
-							builder.id += tcDelta.ID
+						} else if builder.id != tcDelta.ID && !strings.HasPrefix(builder.id, tcDelta.ID) {
+							if strings.HasPrefix(tcDelta.ID, builder.id) {
+								builder.id = tcDelta.ID
+							} else {
+								builder.id += tcDelta.ID
+							}
 						}
 					}
 					if tcDelta.Function.Name != "" {
-						builder.name += tcDelta.Function.Name
+						if builder.name == "" {
+							builder.name = tcDelta.Function.Name
+						} else if builder.name != tcDelta.Function.Name && !strings.HasPrefix(builder.name, tcDelta.Function.Name) {
+							if strings.HasPrefix(tcDelta.Function.Name, builder.name) {
+								builder.name = tcDelta.Function.Name
+							} else {
+								builder.name += tcDelta.Function.Name
+							}
+						}
 					}
 					if tcDelta.Function.Arguments != "" {
 						builder.arguments.WriteString(tcDelta.Function.Arguments)
