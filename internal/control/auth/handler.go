@@ -11,8 +11,8 @@ import (
 
 	"github.com/beavend/beavend/internal/control/audit"
 	"github.com/beavend/beavend/internal/store/db"
-	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
+	chi "github.com/go-chi/chi/v5"
+	pgx "github.com/jackc/pgx/v5"
 )
 
 // Handler handles admin authentication and user management HTTP endpoints.

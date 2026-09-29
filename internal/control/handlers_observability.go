@@ -4,13 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/beavend/beavend/internal/store/db"
-	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
+	chi "github.com/go-chi/chi/v5"
+	pgx "github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -146,12 +147,14 @@ func (h *Handler) HandleGetLogByID(w http.ResponseWriter, r *http.Request) {
 
 // HandlePrivacyPurgeSubject deletes all request logs, usage events, and rollups for a subject.
 func (h *Handler) HandlePrivacyPurgeSubject(w http.ResponseWriter, r *http.Request) {
-	if h.svc.queries == nil {
-		writeError(w, http.StatusInternalServerError, "database_unavailable", "database not configured")
-		return
-	}
 	issuer := chi.URLParam(r, "issuer")
+	if unescaped, err := url.PathUnescape(issuer); err == nil && unescaped != "" {
+		issuer = unescaped
+	}
 	subject := chi.URLParam(r, "subject")
+	if unescaped, err := url.PathUnescape(subject); err == nil && unescaped != "" {
+		subject = unescaped
+	}
 	projectID, env := getProjectAndEnv(r)
 
 	if subject == "" {
@@ -160,31 +163,43 @@ func (h *Handler) HandlePrivacyPurgeSubject(w http.ResponseWriter, r *http.Reque
 	}
 
 	var purgeErrs []string
-	// Purge request logs
-	if err := h.svc.queries.DeleteRequestLogsBySubject(r.Context(), db.DeleteRequestLogsBySubjectParams{
-		ProjectID:   projectID,
-		Environment: env,
-		UserSubject: subject,
-	}); err != nil {
-		purgeErrs = append(purgeErrs, fmt.Sprintf("request_logs: %v", err))
+	if h.svc.queries != nil {
+		// Purge request logs
+		if err := h.svc.queries.DeleteRequestLogsBySubject(r.Context(), db.DeleteRequestLogsBySubjectParams{
+			ProjectID:   projectID,
+			Environment: env,
+			UserSubject: subject,
+		}); err != nil {
+			purgeErrs = append(purgeErrs, fmt.Sprintf("request_logs: %v", err))
+		}
+
+		// Purge usage events
+		if err := h.svc.queries.DeleteUsageEventsBySubject(r.Context(), db.DeleteUsageEventsBySubjectParams{
+			ProjectID:   projectID,
+			Environment: env,
+			UserID:      subject,
+		}); err != nil {
+			purgeErrs = append(purgeErrs, fmt.Sprintf("usage_events: %v", err))
+		}
+
+		// Purge usage rollups
+		if err := h.svc.queries.DeleteUsageRollupsBySubject(r.Context(), db.DeleteUsageRollupsBySubjectParams{
+			ProjectID:   projectID,
+			Environment: env,
+			UserID:      subject,
+		}); err != nil {
+			purgeErrs = append(purgeErrs, fmt.Sprintf("usage_rollups: %v", err))
+		}
 	}
 
-	// Purge usage events
-	if err := h.svc.queries.DeleteUsageEventsBySubject(r.Context(), db.DeleteUsageEventsBySubjectParams{
-		ProjectID:   projectID,
-		Environment: env,
-		UserID:      subject,
-	}); err != nil {
-		purgeErrs = append(purgeErrs, fmt.Sprintf("usage_events: %v", err))
+	// Purge cached responses and tool results
+	if err := h.svc.PurgeSubjectCache(r.Context(), projectID, env, subject); err != nil {
+		purgeErrs = append(purgeErrs, fmt.Sprintf("cache: %v", err))
 	}
 
-	// Purge usage rollups
-	if err := h.svc.queries.DeleteUsageRollupsBySubject(r.Context(), db.DeleteUsageRollupsBySubjectParams{
-		ProjectID:   projectID,
-		Environment: env,
-		UserID:      subject,
-	}); err != nil {
-		purgeErrs = append(purgeErrs, fmt.Sprintf("usage_rollups: %v", err))
+	// Purge semantic memories and conversation threads
+	if err := h.svc.PurgeSubjectMemory(r.Context(), projectID, env, issuer, subject); err != nil {
+		purgeErrs = append(purgeErrs, fmt.Sprintf("memory_threads: %v", err))
 	}
 
 	if len(purgeErrs) > 0 {

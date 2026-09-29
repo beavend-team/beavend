@@ -13,16 +13,21 @@ import (
 )
 
 type mockQuerySource struct {
-	revision int64
-	apps     []db.GetSnapshotAppsRow
-	prompts  []db.GetSnapshotPromptsRow
-	policies []db.GetSnapshotPoliciesRow
-	tools    []db.GetSnapshotToolsRow
-	models   []db.ModelRoutings
+	revision   int64
+	authConfig []byte
+	apps       []db.GetSnapshotAppsRow
+	prompts    []db.GetSnapshotPromptsRow
+	policies   []db.GetSnapshotPoliciesRow
+	tools      []db.GetSnapshotToolsRow
+	models     []db.ModelRoutings
 }
 
 func (m *mockQuerySource) GetSnapshotRevision(_ context.Context, _ db.GetSnapshotRevisionParams) (int64, error) {
 	return m.revision, nil
+}
+
+func (m *mockQuerySource) GetSnapshotEnvironment(_ context.Context, _ db.GetSnapshotEnvironmentParams) ([]byte, error) {
+	return m.authConfig, nil
 }
 
 func (m *mockQuerySource) GetSnapshotApps(_ context.Context, _ db.GetSnapshotAppsParams) ([]db.GetSnapshotAppsRow, error) {
@@ -273,5 +278,22 @@ func TestCompiler_ToolCELAuthorization(t *testing.T) {
 		prg, ok := snap.CompiledPolicy(`claims.role == "admin"`)
 		require.True(t, ok)
 		require.NotNil(t, prg)
+	})
+
+	t.Run("auth config compiles successfully into snapshot", func(t *testing.T) {
+		mock := &mockQuerySource{
+			revision:   1,
+			authConfig: []byte(`{"provider":"firebase","project_id":"my-firebase-app"}`),
+		}
+
+		compiler, err := snapshot.NewCompiler(mock)
+		require.NoError(t, err)
+
+		snap, err := compiler.Compile(context.Background(), "test-proj", "prod")
+		require.NoError(t, err)
+		require.NotNil(t, snap)
+		require.NotNil(t, snap.AuthConfig)
+		require.Equal(t, "firebase", snap.AuthConfig.Provider)
+		require.Equal(t, "my-firebase-app", snap.AuthConfig.ProjectID)
 	})
 }

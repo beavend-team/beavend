@@ -9,8 +9,8 @@ import (
 
 	"github.com/beavend/beavend/internal/secrets"
 	"github.com/beavend/beavend/internal/store/db"
-	"github.com/go-chi/chi/v5"
-	"github.com/santhosh-tekuri/jsonschema/v5"
+	chi "github.com/go-chi/chi/v5"
+	jsonschema "github.com/santhosh-tekuri/jsonschema/v5"
 )
 
 type CreateToolRequest struct {

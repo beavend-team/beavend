@@ -13,12 +13,15 @@ import (
 	"time"
 
 	"github.com/beavend/beavend/dashboard"
+	"github.com/beavend/beavend/internal/cache"
 	"github.com/beavend/beavend/internal/config"
 	"github.com/beavend/beavend/internal/control"
 	"github.com/beavend/beavend/internal/control/audit"
 	"github.com/beavend/beavend/internal/control/auth"
+	"github.com/beavend/beavend/internal/core"
 	"github.com/beavend/beavend/internal/identity"
 	"github.com/beavend/beavend/internal/limits"
+	"github.com/beavend/beavend/internal/memory"
 	"github.com/beavend/beavend/internal/policy"
 	"github.com/beavend/beavend/internal/providers/litellm"
 	"github.com/beavend/beavend/internal/routing"
@@ -162,6 +165,41 @@ func run() error {
 		}
 	}
 
+	var (
+		cacheStore cache.PurgeableCacheStore
+	)
+	if cfg.Redis.URL != "" {
+		if rOpts, err := redis.ParseURL(cfg.Redis.URL); err == nil {
+			redisClient := redis.NewClient(rOpts)
+			cacheStore = cache.NewRedisCacheStore(redisClient)
+		}
+	}
+	if cacheStore == nil {
+		cacheStore = cache.NewMemoryCacheStore()
+	}
+
+	var (
+		memoryProvider core.MemoryProvider
+		threadStore    core.ThreadStore
+	)
+	if st != nil && st.Queries() != nil {
+		memoryProvider = memory.NewPGVectorMemoryProvider(st.Queries())
+		threadStore = memory.NewPostgresThreadStore(st.Queries())
+	} else {
+		memoryProvider = memory.NewLocalMemoryProvider()
+		threadStore = memory.NewMemoryThreadStore()
+	}
+	if cfg.Redis.URL != "" {
+		if rOpts, err := redis.ParseURL(cfg.Redis.URL); err == nil {
+			redisClient := redis.NewClient(rOpts)
+			threadStore = memory.NewRedisThreadStore(redisClient)
+		}
+	}
+	memEngine := memory.NewEngine(memory.EngineConfig{
+		DefaultProvider: memoryProvider,
+		ThreadStore:     threadStore,
+	})
+
 	var routerOpts RouterOptions
 	if cfg.Role == config.RoleAll || cfg.Role == config.RoleRuntime {
 		if registry == nil {
@@ -201,12 +239,15 @@ func run() error {
 			PolicyEvaluator:  policyEvaluator,
 			ContinuationMgr:  continuationMgr,
 			ExecutorRegistry: execRegistry,
+			CacheStore:       cacheStore,
 		})
 
 		limitStore := limits.NewMemoryLimitStore(nil)
 		authzStage, _ := stages.NewAuthZStage(nil)
 		limitsStage, _ := stages.NewLimitsStage(limitStore, nil, nil)
 		inputGuardStage := stages.NewInputGuardrailStage()
+		cacheStage := stages.NewCacheStage(cacheStore)
+		contextStage := stages.NewContextStage(memEngine, threadStore)
 		promptStage, _ := stages.NewPromptStage(nil)
 		routingStage, _ := stages.NewModelRoutingStage(modelResolver)
 		execStage, _ := stages.NewExecutionStage(modelResolver, loop)
@@ -233,12 +274,15 @@ func run() error {
 
 		usageTracker := usage.NewTracker(usageBuf, limitStore)
 
-		pipeline := runtime.NewFullStandardPipeline(authzStage, limitsStage, inputGuardStage, promptStage, routingStage, execStage, outputGuardStage)
+		pipeline := runtime.NewContextAwarePipeline(authzStage, limitsStage, inputGuardStage, cacheStage, contextStage, promptStage, routingStage, execStage, outputGuardStage)
 		runtimeHandler := runtime.NewHandler(registry, pipeline, runtime.HandlerOptions{
 			DefaultEnvironment: cfg.Env,
 			ContinuationMgr:    continuationMgr,
 			ExecutorRegistry:   execRegistry,
 			UsageStore:         usageTracker,
+			CacheStore:         cacheStore,
+			ThreadStore:        threadStore,
+			MemoryEngine:       memEngine,
 		})
 		routerOpts.RuntimeHandler = runtimeHandler
 
@@ -286,6 +330,9 @@ func run() error {
 		}
 
 		ctrlService := control.NewService(ctrlQueries, publisher, ctrlAuditor, []byte(cfg.Security.MasterKey))
+		ctrlService.SetCacheStore(cacheStore)
+		ctrlService.SetMemoryProvider(memoryProvider)
+		ctrlService.SetThreadStore(threadStore)
 		ctrlHandler := control.NewHandler(ctrlService)
 		routerOpts.ControlHandler = ctrlHandler
 

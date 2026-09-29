@@ -22,6 +22,48 @@ export interface Environment {
   updated_at: string;
 }
 
+export interface LimitRule {
+  resource: string;
+  window: string;
+  max: number;
+  tier_condition?: string;
+}
+
+export interface GuardrailConfig {
+  pii_detection?: boolean;
+  pii_redaction?: boolean;
+  prompt_injection_defense?: boolean;
+  max_input_length?: number;
+  max_output_tokens?: number;
+  streaming_mode?: 'buffered' | 'passthrough_with_post_check';
+}
+
+export interface CacheConfig {
+  enabled?: boolean;
+  ttl_seconds?: number;
+  tool_caching?: boolean;
+  scope?: 'user' | 'shared';
+}
+
+export interface AIAppVersion {
+  id: string;
+  app_id: string;
+  project_id: string;
+  environment: string;
+  version: number;
+  access_policy: string;
+  prompt_id: string;
+  prompt_version: number;
+  model_routing_id: string;
+  tool_ids: string[];
+  limits: LimitRule[];
+  cache_config: CacheConfig;
+  guardrails: GuardrailConfig;
+  response_schema: string;
+  is_active: boolean;
+  created_at: string;
+}
+
 export interface AIApp {
   id: string;
   project_id: string;
@@ -31,6 +73,32 @@ export interface AIApp {
   active_version: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface AIAppDetails {
+  app: AIApp;
+  versions: AIAppVersion[];
+}
+
+export interface AuthConfig {
+  provider: string; // "oidc" | "firebase" | "supabase" | "jwt"
+  issuer?: string;
+  audience?: string[];
+  jwks_url?: string;
+  allowed_algorithms?: string[];
+  project_id?: string;
+  clock_skew?: string | number;
+}
+
+export interface TestTokenResult {
+  valid: boolean;
+  error?: string;
+  subject?: string;
+  issuer?: string;
+  audience?: string;
+  issued_at?: string;
+  expires_at?: string;
+  claims?: Record<string, any>;
 }
 
 export interface Prompt {
@@ -154,6 +222,14 @@ class APIClient {
     return { projectID: this.projectID, environment: this.environment };
   }
 
+  get currentProject(): string {
+    return this.projectID;
+  }
+
+  get currentEnv(): string {
+    return this.environment;
+  }
+
   private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -255,6 +331,45 @@ class APIClient {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+  }
+
+  async getEnvironmentAuthConfig(projectID: string, env: string): Promise<AuthConfig> {
+    return this.request<AuthConfig>(`/projects/${projectID}/environments/${env}/auth`);
+  }
+
+  async updateEnvironmentAuthConfig(projectID: string, env: string, config: AuthConfig): Promise<AuthConfig> {
+    return this.request<AuthConfig>(`/projects/${projectID}/environments/${env}/auth`, {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    });
+  }
+
+  async testToken(payload: { token: string; auth_config?: AuthConfig }): Promise<TestTokenResult> {
+    return this.request<TestTokenResult>('/auth/test-token', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async chatWithApp(appId: string, messages: { role: string; content: string }[], bearerToken?: string): Promise<any> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'X-Project-ID': this.currentProject,
+      'X-Environment': this.currentEnv,
+    };
+    if (bearerToken) {
+      headers['Authorization'] = `Bearer ${bearerToken.replace(/^Bearer\s+/i, '')}`;
+    }
+    const res = await fetch(`/v1/apps/${appId}/chat`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ messages }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(err.message || err.error || `HTTP ${res.status}`);
+    }
+    return res.json();
   }
 
   // Apps

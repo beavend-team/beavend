@@ -1,9 +1,28 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"time"
 )
+
+const (
+	identityContextKey contextKey = "beavend_identity"
+)
+
+// ContextWithIdentity returns a new context containing the Identity.
+func ContextWithIdentity(ctx context.Context, id *Identity) context.Context {
+	return context.WithValue(ctx, identityContextKey, id)
+}
+
+// IdentityFromContext extracts the Identity from context if present.
+func IdentityFromContext(ctx context.Context) (*Identity, bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	id, ok := ctx.Value(identityContextKey).(*Identity)
+	return id, ok
+}
 
 // AuthConfig defines identity provider and JWT verification parameters for a project environment.
 type AuthConfig struct {

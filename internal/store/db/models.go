@@ -6,6 +6,7 @@ package db
 
 import (
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/pgvector/pgvector-go"
 )
 
 type AdminUsers struct {
@@ -34,6 +35,7 @@ type AiAppVersions struct {
 	ResponseSchema string             `json:"response_schema"`
 	IsActive       bool               `json:"is_active"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	MemoryConfig   []byte             `json:"memory_config"`
 }
 
 type AiApps struct {
@@ -59,12 +61,28 @@ type AuditLog struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
+type ConversationThreads struct {
+	ID          string             `json:"id"`
+	ProjectID   string             `json:"project_id"`
+	Environment string             `json:"environment"`
+	AiAppID     string             `json:"ai_app_id"`
+	Issuer      string             `json:"issuer"`
+	Subject     string             `json:"subject"`
+	Messages    []byte             `json:"messages"`
+	Metadata    []byte             `json:"metadata"`
+	TtlSeconds  int32              `json:"ttl_seconds"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+}
+
 type Environments struct {
 	ProjectID   string             `json:"project_id"`
 	Name        string             `json:"name"`
 	Description string             `json:"description"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	AuthConfig  []byte             `json:"auth_config"`
 }
 
 type GuardrailVersions struct {
@@ -240,6 +258,21 @@ type RequestLogsDefault struct {
 	ErrorMessage    string             `json:"error_message"`
 	Metadata        []byte             `json:"metadata"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type SemanticMemories struct {
+	ID          string             `json:"id"`
+	ProjectID   string             `json:"project_id"`
+	Environment string             `json:"environment"`
+	AiAppID     string             `json:"ai_app_id"`
+	Issuer      string             `json:"issuer"`
+	Subject     string             `json:"subject"`
+	Content     string             `json:"content"`
+	Embedding   pgvector.Vector    `json:"embedding"`
+	Metadata    []byte             `json:"metadata"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
 }
 
 type ToolSecrets struct {

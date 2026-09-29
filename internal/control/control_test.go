@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/beavend/beavend/internal/cache"
 	"github.com/beavend/beavend/internal/control/audit"
 	"github.com/beavend/beavend/internal/control/auth"
 	synckit "github.com/beavend/beavend/internal/snapshot/sync"
@@ -167,4 +168,52 @@ func TestMountRoutes_RBAC(t *testing.T) {
 	r.ServeHTTP(recOwnerUsers, reqOwnerUsers)
 	assert.NotEqual(t, http.StatusForbidden, recOwnerUsers.Code)
 	assert.NotEqual(t, http.StatusUnauthorized, recOwnerUsers.Code)
+}
+
+func TestControlService_PurgeSubjectCache(t *testing.T) {
+	cacheStore := cache.NewMemoryCacheStore()
+	svc := NewService(nil, nil, nil, []byte("test-key-32-chars-long-security!"))
+	svc.SetCacheStore(cacheStore)
+
+	ctx := context.Background()
+	_ = cacheStore.Set(ctx, "rc:proj_1:prod:user:alice:hash1", []byte("resp1"), time.Minute)
+	_ = cacheStore.Set(ctx, "tc:proj_1:prod:alice:tool1:argshash1", []byte("tool1"), time.Minute)
+	_ = cacheStore.Set(ctx, "rc:proj_1:prod:user:bob:hash2", []byte("resp2"), time.Minute)
+
+	err := svc.PurgeSubjectCache(ctx, "proj_1", "prod", "alice")
+	require.NoError(t, err)
+
+	val1, _ := cacheStore.Get(ctx, "rc:proj_1:prod:user:alice:hash1")
+	assert.Nil(t, val1, "alice response cache should be purged")
+
+	val2, _ := cacheStore.Get(ctx, "tc:proj_1:prod:alice:tool1:argshash1")
+	assert.Nil(t, val2, "alice tool cache should be purged")
+
+	val3, _ := cacheStore.Get(ctx, "rc:proj_1:prod:user:bob:hash2")
+	assert.Equal(t, []byte("resp2"), val3, "bob cache should remain intact")
+}
+
+func TestHandler_TestToken(t *testing.T) {
+	svc := NewService(nil, nil, nil, []byte("test-key-32-chars-long-security!"))
+	h := NewHandler(svc)
+
+	// 1. Empty token
+	req1 := httptest.NewRequest("POST", "/v1/admin/auth/test-token", bytes.NewReader([]byte(`{"token":""}`)))
+	rec1 := httptest.NewRecorder()
+	h.HandleTestToken(rec1, req1)
+	assert.Equal(t, http.StatusOK, rec1.Code)
+	var resp1 TestTokenResponse
+	require.NoError(t, json.Unmarshal(rec1.Body.Bytes(), &resp1))
+	assert.False(t, resp1.Valid)
+	assert.Contains(t, resp1.Error, "token is required")
+
+	// 2. Token without auth config
+	req2 := httptest.NewRequest("POST", "/v1/admin/auth/test-token", bytes.NewReader([]byte(`{"token":"eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxMjMifQ.sig"}`)))
+	rec2 := httptest.NewRecorder()
+	h.HandleTestToken(rec2, req2)
+	assert.Equal(t, http.StatusOK, rec2.Code)
+	var resp2 TestTokenResponse
+	require.NoError(t, json.Unmarshal(rec2.Body.Bytes(), &resp2))
+	assert.False(t, resp2.Valid)
+	assert.Contains(t, resp2.Error, "no auth configuration")
 }

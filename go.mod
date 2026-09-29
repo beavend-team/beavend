@@ -1,12 +1,13 @@
 module github.com/beavend/beavend
 
-go 1.22.0
+go 1.25.0
 
 require (
 	github.com/go-chi/chi/v5 v5.0.12
 	github.com/google/cel-go v0.20.1
 	github.com/jackc/pgx/v5 v5.6.0
 	github.com/lestrrat-go/jwx/v2 v2.0.21
+	github.com/pgvector/pgvector-go v0.4.1
 	github.com/pressly/goose/v3 v3.20.0
 	github.com/prometheus/client_golang v1.19.0
 	github.com/redis/go-redis/v9 v9.7.0

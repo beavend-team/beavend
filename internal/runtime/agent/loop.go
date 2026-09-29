@@ -8,6 +8,11 @@ import (
 	"log/slog"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+
+	"github.com/beavend/beavend/internal/cache"
 	"github.com/beavend/beavend/internal/core"
 	"github.com/beavend/beavend/internal/policy"
 	"github.com/beavend/beavend/internal/tools"
@@ -18,6 +23,9 @@ var (
 	ErrMaxDepthExceeded = errors.New("agent loop max depth exceeded")
 	// ErrToolNotFound indicates a requested tool is not defined in the active snapshot.
 	ErrToolNotFound = errors.New("tool definition not found in snapshot")
+
+	agentMeter              = otel.Meter("beavend/agent")
+	cacheRequestsCounter, _ = agentMeter.Int64Counter("beavend_cache_requests_total", metric.WithDescription("Total count of cache lookups partitioned by type and hit status"))
 )
 
 const (
@@ -62,6 +70,7 @@ type LoopConfig struct {
 	ContinuationMgr  *tools.ContinuationManager
 	ExecutorRegistry ExecutorRegistry
 	Sanitizer        *tools.Sanitizer
+	CacheStore       core.CacheStore
 	Logger           *slog.Logger
 }
 
@@ -271,36 +280,12 @@ func (l *Loop) runUnaryTurn(ctx context.Context, _ int, state *core.ReqState, ad
 		}
 
 		// Server-side tool execution
-		executor, err := l.cfg.ExecutorRegistry.GetExecutor(*toolDef)
+		toolMsg, err := l.executeServerTool(ctx, state, toolDef, toolCall)
 		if err != nil {
-			l.appendToolError(state, toolCall.ID, fmt.Sprintf("resolve executor: %v", err))
+			l.appendToolError(state, toolCall.ID, err.Error())
 			continue
 		}
-
-		var identity core.Identity
-		if state.Identity != nil {
-			identity = *state.Identity
-		}
-
-		result, err := executor.Execute(ctx, toolCall, identity)
-		if err != nil {
-			result = core.ToolResult{
-				CallID:  toolCall.ID,
-				ToolID:  toolDef.ID,
-				Content: fmt.Sprintf("execution error: %v", err),
-				IsError: true,
-			}
-		}
-
-		// Sanitize untrusted data
-		sanitized := l.cfg.Sanitizer.Sanitize(result, toolDef.Result)
-
-		// Append tool result message turn
-		state.ChatRequest.Messages = append(state.ChatRequest.Messages, core.ChatMessage{
-			Role:       "tool",
-			ToolCallID: toolCall.ID,
-			Content:    sanitized.Content,
-		})
+		state.ChatRequest.Messages = append(state.ChatRequest.Messages, toolMsg)
 	}
 
 	return false, true, nil
@@ -475,34 +460,12 @@ func (l *Loop) runStreamingTurn(ctx context.Context, _ int, state *core.ReqState
 		}
 
 		// Server tool execution
-		executor, err := l.cfg.ExecutorRegistry.GetExecutor(*toolDef)
+		toolMsg, err := l.executeServerTool(ctx, state, toolDef, toolCall)
 		if err != nil {
-			l.appendToolError(state, toolCall.ID, fmt.Sprintf("resolve executor: %v", err))
+			l.appendToolError(state, toolCall.ID, err.Error())
 			continue
 		}
-
-		var identity core.Identity
-		if state.Identity != nil {
-			identity = *state.Identity
-		}
-
-		result, err := executor.Execute(ctx, toolCall, identity)
-		if err != nil {
-			result = core.ToolResult{
-				CallID:  toolCall.ID,
-				ToolID:  toolDef.ID,
-				Content: fmt.Sprintf("execution error: %v", err),
-				IsError: true,
-			}
-		}
-
-		sanitized := l.cfg.Sanitizer.Sanitize(result, toolDef.Result)
-
-		state.ChatRequest.Messages = append(state.ChatRequest.Messages, core.ChatMessage{
-			Role:       "tool",
-			ToolCallID: toolCall.ID,
-			Content:    sanitized.Content,
-		})
+		state.ChatRequest.Messages = append(state.ChatRequest.Messages, toolMsg)
 	}
 
 	return false, true, nil
@@ -549,6 +512,103 @@ func (l *Loop) createSuspendedState(state *core.ReqState, toolCall core.ToolCall
 		CreatedAt:        time.Now().UTC(),
 		IsStreaming:      state.IsStreaming,
 	}
+}
+
+func (l *Loop) executeServerTool(ctx context.Context, state *core.ReqState, toolDef *core.ToolDefinition, toolCall core.ToolCall) (core.ChatMessage, error) {
+	subject := "anonymous"
+	if state.Identity != nil && state.Identity.Subject != "" {
+		subject = state.Identity.Subject
+	}
+
+	// 1. Tool cache check
+	if toolDef.Cache.Enabled && l.cfg.CacheStore != nil {
+		argsHash := cache.ComputeToolArgsHash(toolCall.Arguments)
+		cacheKey := cache.ToolCacheKey(state.ProjectID, state.Environment, subject, toolDef.ID, argsHash)
+
+		cachedBytes, err := l.cfg.CacheStore.Get(ctx, cacheKey)
+		if err == nil && cachedBytes != nil {
+			var cachedRes core.ToolResult
+			if err := json.Unmarshal(cachedBytes, &cachedRes); err == nil {
+				l.cfg.Logger.InfoContext(ctx, "tool result cache hit",
+					"tool", toolDef.Name,
+					"tool_id", toolDef.ID,
+					"cache_key", cacheKey,
+					"request_id", state.RequestID,
+				)
+				if cacheRequestsCounter != nil {
+					cacheRequestsCounter.Add(ctx, 1, metric.WithAttributes(
+						attribute.String("cache_type", "tool"),
+						attribute.String("status", "hit"),
+						attribute.String("tool_id", toolDef.ID),
+					))
+				}
+				return core.ChatMessage{
+					Role:       "tool",
+					ToolCallID: toolCall.ID,
+					Content:    cachedRes.Content,
+				}, nil
+			}
+		}
+
+		if cacheRequestsCounter != nil {
+			cacheRequestsCounter.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("cache_type", "tool"),
+				attribute.String("status", "miss"),
+				attribute.String("tool_id", toolDef.ID),
+			))
+		}
+	}
+
+	// 2. Resolve executor
+	executor, err := l.cfg.ExecutorRegistry.GetExecutor(*toolDef)
+	if err != nil {
+		return core.ChatMessage{}, fmt.Errorf("resolve executor: %w", err)
+	}
+
+	var identity core.Identity
+	if state.Identity != nil {
+		identity = *state.Identity
+	}
+
+	// 3. Execute
+	result, err := executor.Execute(ctx, toolCall, identity)
+	if err != nil {
+		result = core.ToolResult{
+			CallID:  toolCall.ID,
+			ToolID:  toolDef.ID,
+			Content: fmt.Sprintf("execution error: %v", err),
+			IsError: true,
+		}
+	}
+
+	// 4. Sanitize untrusted data
+	sanitized := l.cfg.Sanitizer.Sanitize(result, toolDef.Result)
+
+	// 5. Store in Tool Cache if enabled and execution succeeded without error
+	if toolDef.Cache.Enabled && l.cfg.CacheStore != nil && !sanitized.IsError {
+		argsHash := cache.ComputeToolArgsHash(toolCall.Arguments)
+		cacheKey := cache.ToolCacheKey(state.ProjectID, state.Environment, subject, toolDef.ID, argsHash)
+
+		ttl := time.Duration(toolDef.Cache.TTL) * time.Second
+		if ttl <= 0 {
+			ttl = 300 * time.Second
+		}
+
+		if data, err := json.Marshal(sanitized); err == nil {
+			if setErr := l.cfg.CacheStore.Set(ctx, cacheKey, data, ttl); setErr != nil {
+				l.cfg.Logger.WarnContext(ctx, "failed to cache tool result",
+					"cache_key", cacheKey,
+					"error", setErr,
+				)
+			}
+		}
+	}
+
+	return core.ChatMessage{
+		Role:       "tool",
+		ToolCallID: toolCall.ID,
+		Content:    sanitized.Content,
+	}, nil
 }
 
 func requiresConfirmation(def *core.ToolDefinition) bool {

@@ -33,6 +33,10 @@ func (m *mockQuerySource) GetSnapshotRevision(_ context.Context, _ db.GetSnapsho
 	return m.revision, nil
 }
 
+func (m *mockQuerySource) GetSnapshotEnvironment(_ context.Context, _ db.GetSnapshotEnvironmentParams) ([]byte, error) {
+	return nil, nil
+}
+
 func (m *mockQuerySource) GetSnapshotApps(_ context.Context, _ db.GetSnapshotAppsParams) ([]db.GetSnapshotAppsRow, error) {
 	if m.failComp {
 		return nil, errors.New("db query error")

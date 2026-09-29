@@ -56,7 +56,7 @@ INSERT INTO ai_app_versions (
     limits, cache_config, guardrails, response_schema, is_active, created_at
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
-RETURNING id, app_id, project_id, environment, version, access_policy, prompt_id, prompt_version, model_routing_id, tool_ids, limits, cache_config, guardrails, response_schema, is_active, created_at
+RETURNING id, app_id, project_id, environment, version, access_policy, prompt_id, prompt_version, model_routing_id, tool_ids, limits, cache_config, guardrails, response_schema, is_active, created_at, memory_config
 `
 
 type CreateAIAppVersionParams struct {
@@ -113,6 +113,7 @@ func (q *Queries) CreateAIAppVersion(ctx context.Context, arg CreateAIAppVersion
 		&i.ResponseSchema,
 		&i.IsActive,
 		&i.CreatedAt,
+		&i.MemoryConfig,
 	)
 	return i, err
 }
@@ -149,7 +150,7 @@ func (q *Queries) GetAIApp(ctx context.Context, id string) (AiApps, error) {
 }
 
 const getAIAppVersion = `-- name: GetAIAppVersion :one
-SELECT id, app_id, project_id, environment, version, access_policy, prompt_id, prompt_version, model_routing_id, tool_ids, limits, cache_config, guardrails, response_schema, is_active, created_at FROM ai_app_versions
+SELECT id, app_id, project_id, environment, version, access_policy, prompt_id, prompt_version, model_routing_id, tool_ids, limits, cache_config, guardrails, response_schema, is_active, created_at, memory_config FROM ai_app_versions
 WHERE app_id = $1 AND version = $2
 `
 
@@ -178,12 +179,13 @@ func (q *Queries) GetAIAppVersion(ctx context.Context, arg GetAIAppVersionParams
 		&i.ResponseSchema,
 		&i.IsActive,
 		&i.CreatedAt,
+		&i.MemoryConfig,
 	)
 	return i, err
 }
 
 const getActiveAIAppVersion = `-- name: GetActiveAIAppVersion :one
-SELECT aav.id, aav.app_id, aav.project_id, aav.environment, aav.version, aav.access_policy, aav.prompt_id, aav.prompt_version, aav.model_routing_id, aav.tool_ids, aav.limits, aav.cache_config, aav.guardrails, aav.response_schema, aav.is_active, aav.created_at, a.name, a.description
+SELECT aav.id, aav.app_id, aav.project_id, aav.environment, aav.version, aav.access_policy, aav.prompt_id, aav.prompt_version, aav.model_routing_id, aav.tool_ids, aav.limits, aav.cache_config, aav.guardrails, aav.response_schema, aav.is_active, aav.created_at, aav.memory_config, a.name, a.description
 FROM ai_app_versions aav
 JOIN ai_apps a ON a.id = aav.app_id AND a.active_version = aav.version
 WHERE a.id = $1
@@ -206,6 +208,7 @@ type GetActiveAIAppVersionRow struct {
 	ResponseSchema string             `json:"response_schema"`
 	IsActive       bool               `json:"is_active"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	MemoryConfig   []byte             `json:"memory_config"`
 	Name           string             `json:"name"`
 	Description    string             `json:"description"`
 }
@@ -230,6 +233,7 @@ func (q *Queries) GetActiveAIAppVersion(ctx context.Context, id string) (GetActi
 		&i.ResponseSchema,
 		&i.IsActive,
 		&i.CreatedAt,
+		&i.MemoryConfig,
 		&i.Name,
 		&i.Description,
 	)
@@ -237,7 +241,7 @@ func (q *Queries) GetActiveAIAppVersion(ctx context.Context, id string) (GetActi
 }
 
 const listAIAppVersions = `-- name: ListAIAppVersions :many
-SELECT id, app_id, project_id, environment, version, access_policy, prompt_id, prompt_version, model_routing_id, tool_ids, limits, cache_config, guardrails, response_schema, is_active, created_at FROM ai_app_versions
+SELECT id, app_id, project_id, environment, version, access_policy, prompt_id, prompt_version, model_routing_id, tool_ids, limits, cache_config, guardrails, response_schema, is_active, created_at, memory_config FROM ai_app_versions
 WHERE app_id = $1
 ORDER BY version DESC
 `
@@ -268,6 +272,7 @@ func (q *Queries) ListAIAppVersions(ctx context.Context, appID string) ([]AiAppV
 			&i.ResponseSchema,
 			&i.IsActive,
 			&i.CreatedAt,
+			&i.MemoryConfig,
 		); err != nil {
 			return nil, err
 		}
@@ -320,7 +325,7 @@ func (q *Queries) ListAIApps(ctx context.Context, arg ListAIAppsParams) ([]AiApp
 }
 
 const listActiveAIAppVersions = `-- name: ListActiveAIAppVersions :many
-SELECT aav.id, aav.app_id, aav.project_id, aav.environment, aav.version, aav.access_policy, aav.prompt_id, aav.prompt_version, aav.model_routing_id, aav.tool_ids, aav.limits, aav.cache_config, aav.guardrails, aav.response_schema, aav.is_active, aav.created_at, a.name, a.description
+SELECT aav.id, aav.app_id, aav.project_id, aav.environment, aav.version, aav.access_policy, aav.prompt_id, aav.prompt_version, aav.model_routing_id, aav.tool_ids, aav.limits, aav.cache_config, aav.guardrails, aav.response_schema, aav.is_active, aav.created_at, aav.memory_config, a.name, a.description
 FROM ai_app_versions aav
 JOIN ai_apps a ON a.id = aav.app_id AND a.active_version = aav.version
 WHERE a.project_id = $1 AND a.environment = $2
@@ -348,6 +353,7 @@ type ListActiveAIAppVersionsRow struct {
 	ResponseSchema string             `json:"response_schema"`
 	IsActive       bool               `json:"is_active"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	MemoryConfig   []byte             `json:"memory_config"`
 	Name           string             `json:"name"`
 	Description    string             `json:"description"`
 }
@@ -378,6 +384,7 @@ func (q *Queries) ListActiveAIAppVersions(ctx context.Context, arg ListActiveAIA
 			&i.ResponseSchema,
 			&i.IsActive,
 			&i.CreatedAt,
+			&i.MemoryConfig,
 			&i.Name,
 			&i.Description,
 		); err != nil {

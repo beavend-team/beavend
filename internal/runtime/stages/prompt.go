@@ -51,6 +51,10 @@ func (s *PromptStage) Handle(ctx context.Context, state *core.ReqState) error {
 		return errors.New("nil req state")
 	}
 
+	if state.ChatResponse != nil {
+		return nil
+	}
+
 	ctx, span := s.tracer.Start(ctx, "stage.prompt",
 		trace.WithAttributes(
 			attribute.String("project_id", state.ProjectID),

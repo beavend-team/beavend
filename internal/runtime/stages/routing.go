@@ -57,6 +57,10 @@ func (s *ModelRoutingStage) Handle(ctx context.Context, state *core.ReqState) er
 		return errors.New("nil request state")
 	}
 
+	if state.ChatResponse != nil {
+		return nil
+	}
+
 	ctx, span := s.tracer.Start(ctx, "stages.model_routing",
 		trace.WithAttributes(
 			attribute.String("project_id", state.ProjectID),

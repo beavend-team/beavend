@@ -57,11 +57,21 @@ type Authenticator interface {
 	Authenticate(ctx context.Context, req any, id *Identity, cfg DownstreamAuthConfig) error
 }
 
-// MemoryProvider manages context, threads, and semantic memory.
+// MemoryProvider manages user-scoped semantic memory storage, recall, and vector similarity search.
 type MemoryProvider interface {
-	Search(ctx context.Context, namespace, query string, limit int) ([]string, error)
-	Upsert(ctx context.Context, namespace, key, content string) error
+	Store(ctx context.Context, record MemoryRecord) error
+	Recall(ctx context.Context, filter MemoryFilter) ([]MemoryRecord, error)
+	Search(ctx context.Context, query MemorySearchQuery) ([]MemorySearchResult, error)
 	DeleteBySubject(ctx context.Context, projectID, issuer, subject string) error
+}
+
+// ThreadStore manages server-side conversation sessions with TTL, message history, and thread deletion.
+type ThreadStore interface {
+	GetThread(ctx context.Context, projectID, env, threadID string) (*Thread, error)
+	CreateThread(ctx context.Context, thread *Thread) error
+	AppendMessages(ctx context.Context, projectID, env, threadID string, messages []ChatMessage, ttl time.Duration) error
+	DeleteThread(ctx context.Context, projectID, env, threadID string) error
+	DeleteThreadsBySubject(ctx context.Context, projectID, env, issuer, subject string) error
 }
 
 // Guardrail checks inputs and outputs for security and safety.

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api, AIApp, Prompt, ModelRouting } from '../api/client';
-import { Bot, Plus, Trash2, Edit3, Check, X, Shield, Sparkles } from 'lucide-react';
+import { AppWorkspace } from './AppWorkspace';
+import { Bot, Plus, Trash2, Sliders, X, Sparkles, ChevronRight } from 'lucide-react';
 
 export const AppsPage: React.FC = () => {
   const [apps, setApps] = useState<AIApp[]>([]);
@@ -9,6 +10,7 @@ export const AppsPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
 
   // Form State
   const [appId, setAppId] = useState('');
@@ -53,25 +55,40 @@ export const AppsPage: React.FC = () => {
         access_policy: accessPolicy,
       });
       setShowModal(false);
+      const createdId = appId;
       setAppId('');
       setAppName('');
       setAppDesc('');
       setAccessPolicy('');
-      loadData();
+      await loadData();
+      setSelectedAppId(createdId);
     } catch (err: any) {
       setError(err.message || 'Failed to create AI App');
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
     if (!confirm(`Delete AI App "${id}"? This will invalidate active snapshots.`)) return;
     try {
       await api.deleteApp(id);
+      if (selectedAppId === id) setSelectedAppId(null);
       loadData();
     } catch (err: any) {
       alert(`Error deleting app: ${err.message}`);
     }
   };
+
+  // If an AI App is currently selected, render its dedicated workspace
+  if (selectedAppId) {
+    return (
+      <AppWorkspace
+        appId={selectedAppId}
+        onBack={() => setSelectedAppId(null)}
+        onRefreshApps={loadData}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6 max-w-6xl">
@@ -82,7 +99,7 @@ export const AppsPage: React.FC = () => {
             AI Applications
           </h1>
           <p className="text-sm text-slate-400 mt-1">
-            Configure client-facing AI apps with assigned prompt templates, model routing, and policies.
+            Click an AI App to manage its per-app settings, prompts, rate limits, safety guardrails, tools, and test in the playground.
           </p>
         </div>
 
@@ -114,33 +131,44 @@ export const AppsPage: React.FC = () => {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {apps.map((app) => (
-            <div key={app.id} className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+            <div
+              key={app.id}
+              onClick={() => setSelectedAppId(app.id)}
+              className="group cursor-pointer bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-2xl p-5 space-y-4 transition-all shadow-sm hover:shadow-md"
+            >
               <div className="flex items-start justify-between">
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="font-bold text-slate-100">{app.name}</h3>
+                    <h3 className="font-bold text-slate-100 group-hover:text-emerald-400 transition-colors">
+                      {app.name}
+                    </h3>
                     <span className="text-[10px] bg-slate-800 text-slate-400 font-mono px-2 py-0.5 rounded-full border border-slate-700">
                       v{app.active_version}
                     </span>
                   </div>
                   <span className="text-xs font-mono text-emerald-400 mt-0.5 block">{app.id}</span>
                 </div>
-                <button
-                  onClick={() => handleDelete(app.id)}
-                  className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors"
-                  title="Delete App"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={(e) => handleDelete(app.id, e)}
+                    className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors"
+                    title="Delete App"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
 
               <p className="text-xs text-slate-400 line-clamp-2">
-                {app.description || 'No description provided.'}
+                {app.description || 'No description configured. Click to edit and configure app settings.'}
               </p>
 
               <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-500">
-                <span className="font-mono">Endpoint: /v1/apps/{app.id}/chat</span>
-                <span>Active</span>
+                <span className="font-mono text-[11px]">/v1/apps/{app.id}/chat</span>
+                <span className="flex items-center gap-1 text-emerald-400 group-hover:translate-x-0.5 transition-transform font-medium text-[11px]">
+                  <span>Configure App</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </span>
               </div>
             </div>
           ))}
@@ -210,7 +238,9 @@ export const AppsPage: React.FC = () => {
                   >
                     <option value="">(None / Pass-through)</option>
                     {prompts.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name} ({p.id})</option>
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.id})
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -224,7 +254,9 @@ export const AppsPage: React.FC = () => {
                   >
                     <option value="">(Default: fast)</option>
                     {models.map((m) => (
-                      <option key={m.logical_model} value={m.logical_model}>{m.logical_model} ({m.deployment})</option>
+                      <option key={m.logical_model} value={m.logical_model}>
+                        {m.logical_model} ({m.deployment})
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -253,7 +285,7 @@ export const AppsPage: React.FC = () => {
                   type="submit"
                   className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-medium transition-colors shadow-lg shadow-emerald-900/20"
                 >
-                  Save Application
+                  Save & Configure App
                 </button>
               </div>
             </form>

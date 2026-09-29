@@ -22,6 +22,7 @@ type AIApp struct {
 	Limits         []LimitRule     `json:"limits" yaml:"limits"`
 	Cache          CacheConfig     `json:"cache" yaml:"cache"`
 	Guardrails     GuardrailConfig `json:"guardrails" yaml:"guardrails"`
+	Memory         MemoryConfig    `json:"memory" yaml:"memory"`
 	ResponseSchema string          `json:"response_schema,omitempty" yaml:"response_schema,omitempty"`
 	CreatedAt      time.Time       `json:"created_at" yaml:"created_at"`
 	UpdatedAt      time.Time       `json:"updated_at" yaml:"updated_at"`
@@ -128,4 +129,16 @@ type GuardrailConfig struct {
 	PIIRedaction     bool     `json:"pii_redaction" yaml:"pii_redaction"`
 	InjectionDefense bool     `json:"injection_defense" yaml:"injection_defense"`
 	Rules            []string `json:"rules,omitempty" yaml:"rules,omitempty"`
+}
+
+// MemoryConfig defines memory and conversation context settings for an AI App.
+type MemoryConfig struct {
+	Enabled       bool   `json:"enabled" yaml:"enabled"`
+	MaxHistory    int    `json:"max_history,omitempty" yaml:"max_history,omitempty"`       // Max message turns to retain in context
+	VectorRecall  bool   `json:"vector_recall,omitempty" yaml:"vector_recall,omitempty"`   // Auto recall relevant memories
+	RecallLimit   int    `json:"recall_limit,omitempty" yaml:"recall_limit,omitempty"`     // Number of memories to inject
+	ProviderType  string `json:"provider_type,omitempty" yaml:"provider_type,omitempty"` // "postgres", "http", "local"
+	HTTPURL       string `json:"http_url,omitempty" yaml:"http_url,omitempty"`             // For external implementor-hosted memory
+	HTTPAuthToken string `json:"http_auth_token,omitempty" yaml:"http_auth_token,omitempty"`
+	ThreadTTLSec  int    `json:"thread_ttl_sec,omitempty" yaml:"thread_ttl_sec,omitempty"` // Default TTL for threads in seconds
 }

@@ -32,7 +32,11 @@ Phase 4: Policy Engine (CEL) [Done] │                              │
                                   │
                    Phase 11: Guardrails, Safety & Structured Output [Done]
                                   │
-                   Phase 12: Ephemeral Caching & Response Acceleration [Pending]
+                   Phase 12: Ephemeral Caching & Response Acceleration [Done]
+                                  │
+                   Phase 13: Identity Provider Config, Per-App Settings & User Limits [Done]
+                                  │
+                   Phase 14: Context, Threads & Memory Engine [Done]
 ```
 
 ---
@@ -232,8 +236,65 @@ Phase 4: Policy Engine (CEL) [Done] │                              │
 
 ---
 
-## Phase 12: Ephemeral Caching & Response Acceleration [Pending]
-* **Status:** Pending
+## Phase 12: Ephemeral Caching & Response Acceleration [Completed]
+* **Status:** Completed
 * **Goal:** Build tenant and identity-scoped Redis response and tool caching with TTL invalidation to reduce model latency and upstream token costs.
+* **Tasks:**
+  * `tasks/phase-12-caching/T051-cache-store-implementations-and-subject-purge.md` — Cache store implementations (`RedisCacheStore`, `MemoryCacheStore`), key builders & subject purge
+  * `tasks/phase-12-caching/T052-response-caching-pipeline-stage.md` — Response caching pipeline stage (`CacheStage`) & streaming SSE replay
+  * `tasks/phase-12-caching/T053-tool-result-caching-in-agent-loop.md` — Tool result caching in bounded agent loop
+  * `tasks/phase-12-caching/T054-observability-headers-and-privacy-purge.md` — Observability metrics, `X-Cache` headers, post-execution storage & privacy deletion
+  * `tasks/phase-12-caching/T055-server-wiring-adr-and-e2e-tests.md` — Server wiring, ADR-011 & end-to-end validation suite
+* **Major Deliverables:**
+  * Concurrency-safe `MemoryCacheStore` and production-grade `RedisCacheStore` implementing `core.CacheStore` and `cache.PurgeableCacheStore`.
+  * Canonical key builders adhering to Architecture §7.3 (`rc:{project}:{env}:{scope}:{hash}`, `tc:{project}:{env}:{user}:{tool}:{argshash}`).
+  * `CacheStage` in `internal/runtime/stages` supporting synchronous completion and SSE streaming replay.
+  * Tool execution caching in `internal/runtime/agent/loop.go` with user isolation and TTL expiration.
+  * Standardized `X-Cache: HIT` / `X-Cache: MISS` HTTP response headers and Prometheus `beavend_cache_requests_total` metrics.
+  * Subject privacy purge integration (`DELETE /v1/admin/subjects/{issuer}/{subject}`) removing all user-scoped cache keys.
+  * ADR-011 in `docs/decisions/ADR-011-ephemeral-caching-and-response-acceleration.md`.
+* **Dependencies:** Phase 7, Phase 8, Phase 10.
+* **Expected Outcome:** Repeat queries and idempotent tool calls return in sub-millisecond time with zero upstream token costs, while preserving user isolation and privacy compliance.
+
+---
+
+## Phase 13: Identity Provider Config, Per-App Settings & User Limits [Completed]
+* **Status:** Completed
+* **Goal:** Implement persistent Identity Provider configuration (`AuthConfig`) in PostgreSQL with zero-DB hot-path compilation, dedicated Auth management with live JWT inspection, full Per-App Settings (limits, tiers, guardrails, tools, caching, schemas), and an Interactive Playground.
+* **Tasks:**
+  * `tasks/phase-13-auth-and-app-settings/T056-auth-config-schema-and-snapshot.md` — AuthConfig database schema, sqlc queries & snapshot compilation
+  * `tasks/phase-13-auth-and-app-settings/T057-control-plane-auth-and-app-endpoints.md` — Control plane AuthConfig and AI App management endpoints
+  * `tasks/phase-13-auth-and-app-settings/T058-dashboard-app-detail-and-settings.md` — Dashboard AI App details, per-app settings & interactive playground
+  * `tasks/phase-13-auth-and-app-settings/T059-dashboard-identity-provider-settings.md` — Dashboard Identity Provider configuration & JWT inspector
+  * `tasks/phase-13-auth-and-app-settings/T060-verification-and-roadmap-update.md` — Integration verification & roadmap update
+* **Major Deliverables:**
+  * Migration `00004_auth_config.sql` adding `auth_config JSONB` to `environments` table.
+  * Snapshot compiler populating `snap.AuthConfig` from environment configuration.
+  * Control plane endpoints: `GET/PUT /v1/admin/projects/{project_id}/environments/{name}/auth` and `POST /v1/admin/auth/test-token`.
+  * AI App Workspace with sub-tabs for Overview & SDK snippets, Per-App Settings (Prompts, Model Routing, Attached Tools, Rate Limits with CEL Tiers, Safety & Guardrails, Response Caching, Structured Output Schemas), and an Interactive Test Playground.
+  * Settings page overhaul with dedicated Identity Provider configuration (Firebase, Supabase, Generic OIDC) and live JWT Token Inspector.
+## Phase 14: Context, Threads & Memory Engine [Completed]
+* **Status:** Completed
+* **Goal:** Implement server-side conversation threads with TTL, user-scoped semantic vector memory, pluggable memory providers (pgvector, HTTP, local), and GDPR privacy subject purging.
+* **Tasks:**
+  * `tasks/phase-14-context-threads-memory/T061-memory-provider-and-thread-store-interfaces.md` — Core MemoryProvider & ThreadStore domain interfaces and entities
+  * `tasks/phase-14-context-threads-memory/T062-pgvector-and-sqlc-storage.md` — PostgreSQL + pgvector schema migration, sqlc queries & PGVectorMemoryProvider
+  * `tasks/phase-14-context-threads-memory/T063-http-and-local-memory-providers.md` — Implementor-hosted HTTP memory provider & in-memory local provider
+  * `tasks/phase-14-context-threads-memory/T064-conversation-thread-stores-and-runtime-endpoints.md` — Redis, Postgres & Memory thread stores, turn appending & HTTP endpoints
+  * `tasks/phase-14-context-threads-memory/T065-context-stage-pipeline-integration-and-gdpr-purge.md` — ContextStage pipeline integration, GDPR subject purge hook & ADR-012
+* **Major Deliverables:**
+  * Core interfaces `core.MemoryProvider` (`Store`, `Recall`, `Search`, `DeleteBySubject`) and `core.ThreadStore` (`GetThread`, `CreateThread`, `AppendMessages`, `DeleteThread`, `DeleteThreadsBySubject`).
+  * Migration `00005_context_and_memory.sql` adding `conversation_threads`, `semantic_memories` with pgvector, and `memory_config` on `ai_app_versions`.
+  * Production providers: `PGVectorMemoryProvider` (PostgreSQL + pgvector cosine similarity), `HTTPMemoryProvider` (SSRF-safe implementor-hosted HTTP client), and `LocalMemoryProvider`.
+  * Thread stores: `RedisThreadStore` (native TTL, user sets index), `PostgresThreadStore`, and `MemoryThreadStore`.
+  * `ContextStage` in `internal/runtime/stages` hydrating thread history and recalling semantic memories into request turns.
+  * Runtime REST endpoints: `GET/DELETE /v1/apps/{ai_app_id}/threads/{thread_id}`, `POST /v1/apps/{ai_app_id}/threads`.
+  * Turn appending in `HandleChat` and `HandleStream` saving conversation message turns with configured TTL.
+  * GDPR privacy deletion hook in `DELETE /v1/admin/subjects/{issuer}/{subject}` purging memories and threads.
+  * ADR-012 in `docs/decisions/ADR-012-conversation-threads-and-vector-memory-engine.md`.
+* **Dependencies:** Phase 2, Phase 7, Phase 10, Phase 12.
+* **Expected Outcome:** Client applications seamlessly conduct multi-turn conversations using server-side threads and receive personalized responses via user-scoped semantic memory recall with strict privacy compliance.
+
+
 
 

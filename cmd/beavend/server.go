@@ -126,11 +126,17 @@ func mountRuntimeRoutes(r chi.Router, handler *runtime.Handler, authMiddleware f
 				apps.With(authMiddleware).Post("/{ai_app_id}/stream", handler.HandleStream)
 				apps.With(authMiddleware).Post("/{ai_app_id}/confirm", handler.HandleConfirm)
 				apps.With(authMiddleware).Post("/{ai_app_id}/tool-results", handler.HandleToolResults)
+				apps.With(authMiddleware).Get("/{ai_app_id}/threads/{thread_id}", handler.HandleGetThread)
+				apps.With(authMiddleware).Delete("/{ai_app_id}/threads/{thread_id}", handler.HandleDeleteThread)
+				apps.With(authMiddleware).Post("/{ai_app_id}/threads", handler.HandleCreateThread)
 			} else {
 				apps.Post("/{ai_app_id}/chat", handler.HandleChat)
 				apps.Post("/{ai_app_id}/stream", handler.HandleStream)
 				apps.Post("/{ai_app_id}/confirm", handler.HandleConfirm)
 				apps.Post("/{ai_app_id}/tool-results", handler.HandleToolResults)
+				apps.Get("/{ai_app_id}/threads/{thread_id}", handler.HandleGetThread)
+				apps.Delete("/{ai_app_id}/threads/{thread_id}", handler.HandleDeleteThread)
+				apps.Post("/{ai_app_id}/threads", handler.HandleCreateThread)
 			}
 		} else {
 			apps.Post("/{ai_app_id}/chat", func(w http.ResponseWriter, _ *http.Request) {

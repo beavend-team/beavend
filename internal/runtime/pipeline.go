@@ -132,7 +132,7 @@ func NewStandardPipeline(
 }
 
 // NewFullStandardPipeline builds the complete Beavend AI runtime pipeline with guardrails:
-// Ingress AuthZ -> Rate Limits -> Input Guardrails -> Prompt Templating -> Model Routing -> Execution -> Output Guardrails
+// Ingress AuthZ -> Rate Limits -> Input Guardrails -> Cache -> Prompt Templating -> Model Routing -> Execution -> Output Guardrails
 func NewFullStandardPipeline(
 	authz *stages.AuthZStage,
 	limits *stages.LimitsStage,
@@ -141,6 +141,7 @@ func NewFullStandardPipeline(
 	routing *stages.ModelRoutingStage,
 	execution *stages.ExecutionStage,
 	outputGuard *stages.OutputGuardrailStage,
+	cacheStage ...*stages.CacheStage,
 ) *Pipeline {
 	p := NewPipeline()
 	if authz != nil {
@@ -151,6 +152,9 @@ func NewFullStandardPipeline(
 	}
 	if inputGuard != nil {
 		p.AddStage(inputGuard)
+	}
+	if len(cacheStage) > 0 && cacheStage[0] != nil {
+		p.AddStage(cacheStage[0])
 	}
 	if prompt != nil {
 		p.AddStage(prompt)
@@ -166,3 +170,63 @@ func NewFullStandardPipeline(
 	}
 	return p
 }
+
+// NewAcceleratedPipeline builds the full accelerated Beavend AI runtime pipeline:
+// Ingress AuthZ -> Rate Limits -> Input Guardrails -> Cache -> Prompt Templating -> Model Routing -> Execution -> Output Guardrails
+func NewAcceleratedPipeline(
+	authz *stages.AuthZStage,
+	limits *stages.LimitsStage,
+	inputGuard *stages.InputGuardrailStage,
+	cacheStage *stages.CacheStage,
+	prompt *stages.PromptStage,
+	routing *stages.ModelRoutingStage,
+	execution *stages.ExecutionStage,
+	outputGuard *stages.OutputGuardrailStage,
+) *Pipeline {
+	return NewFullStandardPipeline(authz, limits, inputGuard, prompt, routing, execution, outputGuard, cacheStage)
+}
+
+// NewContextAwarePipeline builds the complete Beavend AI runtime pipeline with Context, Threads, Memory, and Cache:
+// Ingress AuthZ -> Rate Limits -> Input Guardrails -> Cache -> Context (Threads & Memory) -> Prompt -> Model Routing -> Execution -> Output Guardrails
+func NewContextAwarePipeline(
+	authz *stages.AuthZStage,
+	limits *stages.LimitsStage,
+	inputGuard *stages.InputGuardrailStage,
+	cacheStage *stages.CacheStage,
+	contextStage *stages.ContextStage,
+	prompt *stages.PromptStage,
+	routing *stages.ModelRoutingStage,
+	execution *stages.ExecutionStage,
+	outputGuard *stages.OutputGuardrailStage,
+) *Pipeline {
+	p := NewPipeline()
+	if authz != nil {
+		p.AddStage(authz)
+	}
+	if limits != nil {
+		p.AddStage(limits)
+	}
+	if inputGuard != nil {
+		p.AddStage(inputGuard)
+	}
+	if cacheStage != nil {
+		p.AddStage(cacheStage)
+	}
+	if contextStage != nil {
+		p.AddStage(contextStage)
+	}
+	if prompt != nil {
+		p.AddStage(prompt)
+	}
+	if routing != nil {
+		p.AddStage(routing)
+	}
+	if execution != nil {
+		p.AddStage(execution)
+	}
+	if outputGuard != nil {
+		p.AddStage(outputGuard)
+	}
+	return p
+}
+

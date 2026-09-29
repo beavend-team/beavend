@@ -12,7 +12,7 @@ import (
 )
 
 const getSnapshotApps = `-- name: GetSnapshotApps :many
-SELECT aav.id, aav.app_id, aav.project_id, aav.environment, aav.version, aav.access_policy, aav.prompt_id, aav.prompt_version, aav.model_routing_id, aav.tool_ids, aav.limits, aav.cache_config, aav.guardrails, aav.response_schema, aav.is_active, aav.created_at, a.name, a.description
+SELECT aav.id, aav.app_id, aav.project_id, aav.environment, aav.version, aav.access_policy, aav.prompt_id, aav.prompt_version, aav.model_routing_id, aav.tool_ids, aav.limits, aav.cache_config, aav.guardrails, aav.response_schema, aav.is_active, aav.created_at, aav.memory_config, a.name, a.description
 FROM ai_app_versions aav
 JOIN ai_apps a ON a.id = aav.app_id AND a.active_version = aav.version
 WHERE a.project_id = $1 AND a.environment = $2
@@ -40,6 +40,7 @@ type GetSnapshotAppsRow struct {
 	ResponseSchema string             `json:"response_schema"`
 	IsActive       bool               `json:"is_active"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	MemoryConfig   []byte             `json:"memory_config"`
 	Name           string             `json:"name"`
 	Description    string             `json:"description"`
 }
@@ -70,6 +71,7 @@ func (q *Queries) GetSnapshotApps(ctx context.Context, arg GetSnapshotAppsParams
 			&i.ResponseSchema,
 			&i.IsActive,
 			&i.CreatedAt,
+			&i.MemoryConfig,
 			&i.Name,
 			&i.Description,
 		); err != nil {
@@ -81,6 +83,23 @@ func (q *Queries) GetSnapshotApps(ctx context.Context, arg GetSnapshotAppsParams
 		return nil, err
 	}
 	return items, nil
+}
+
+const getSnapshotEnvironment = `-- name: GetSnapshotEnvironment :one
+SELECT auth_config FROM environments
+WHERE project_id = $1 AND name = $2
+`
+
+type GetSnapshotEnvironmentParams struct {
+	ProjectID string `json:"project_id"`
+	Name      string `json:"name"`
+}
+
+func (q *Queries) GetSnapshotEnvironment(ctx context.Context, arg GetSnapshotEnvironmentParams) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getSnapshotEnvironment, arg.ProjectID, arg.Name)
+	var auth_config []byte
+	err := row.Scan(&auth_config)
+	return auth_config, err
 }
 
 const getSnapshotModelRoutings = `-- name: GetSnapshotModelRoutings :many

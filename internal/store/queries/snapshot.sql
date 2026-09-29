@@ -2,6 +2,10 @@
 SELECT revision FROM project_revisions
 WHERE project_id = $1 AND environment = $2;
 
+-- name: GetSnapshotEnvironment :one
+SELECT auth_config FROM environments
+WHERE project_id = $1 AND name = $2;
+
 -- name: GetSnapshotApps :many
 SELECT aav.*, a.name, a.description
 FROM ai_app_versions aav

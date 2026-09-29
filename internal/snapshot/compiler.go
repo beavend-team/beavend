@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/santhosh-tekuri/jsonschema/v5"
+	pgx "github.com/jackc/pgx/v5"
+	jsonschema "github.com/santhosh-tekuri/jsonschema/v5"
 
 	"github.com/beavend/beavend/internal/core"
 	"github.com/beavend/beavend/internal/policy"
@@ -21,6 +21,7 @@ import (
 // Matches the methods generated on *db.Queries.
 type QuerySource interface {
 	GetSnapshotRevision(ctx context.Context, arg db.GetSnapshotRevisionParams) (int64, error)
+	GetSnapshotEnvironment(ctx context.Context, arg db.GetSnapshotEnvironmentParams) ([]byte, error)
 	GetSnapshotApps(ctx context.Context, arg db.GetSnapshotAppsParams) ([]db.GetSnapshotAppsRow, error)
 	GetSnapshotPrompts(ctx context.Context, arg db.GetSnapshotPromptsParams) ([]db.GetSnapshotPromptsRow, error)
 	GetSnapshotPolicies(ctx context.Context, arg db.GetSnapshotPoliciesParams) ([]db.GetSnapshotPoliciesRow, error)
@@ -65,6 +66,18 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 	}
 
 	snap := core.NewSnapshot(projectID, env, rev)
+
+	// 1b. Environment AuthConfig
+	authBytes, err := c.queries.GetSnapshotEnvironment(ctx, db.GetSnapshotEnvironmentParams{
+		ProjectID: projectID,
+		Name:      env,
+	})
+	if err == nil && len(authBytes) > 0 && string(authBytes) != "{}" && string(authBytes) != "null" {
+		var authCfg core.AuthConfig
+		if err := json.Unmarshal(authBytes, &authCfg); err == nil && (authCfg.Provider != "" || authCfg.Issuer != "" || authCfg.JWKSURL != "") {
+			snap.AuthConfig = &authCfg
+		}
+	}
 
 	// 2. Prompts
 	prompts, err := c.queries.GetSnapshotPrompts(ctx, db.GetSnapshotPromptsParams{
@@ -336,6 +349,11 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 			_ = json.Unmarshal(a.Guardrails, &guardrails)
 		}
 
+		var memConfig core.MemoryConfig
+		if len(a.MemoryConfig) > 0 {
+			_ = json.Unmarshal(a.MemoryConfig, &memConfig)
+		}
+
 		appObj := &core.AIApp{
 			ID:             a.AppID,
 			ProjectID:      a.ProjectID,
@@ -350,6 +368,7 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 			Limits:         limits,
 			Cache:          cacheConfig,
 			Guardrails:     guardrails,
+			Memory:         memConfig,
 			ResponseSchema: a.ResponseSchema,
 			CreatedAt:      a.CreatedAt.Time,
 			UpdatedAt:      time.Now().UTC(),

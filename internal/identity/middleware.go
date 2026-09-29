@@ -27,16 +27,12 @@ type SnapshotResolver interface {
 
 // ContextWithIdentity returns a new context containing the validated identity.
 func ContextWithIdentity(ctx context.Context, id *core.Identity) context.Context {
-	return context.WithValue(ctx, identityContextKey, id)
+	return core.ContextWithIdentity(ctx, id)
 }
 
 // FromContext extracts the validated identity from the context if present.
 func FromContext(ctx context.Context) (*core.Identity, bool) {
-	if ctx == nil {
-		return nil, false
-	}
-	id, ok := ctx.Value(identityContextKey).(*core.Identity)
-	return id, ok
+	return core.IdentityFromContext(ctx)
 }
 
 // ContextWithRawToken returns a new context containing the raw token.

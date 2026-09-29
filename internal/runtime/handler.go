@@ -19,9 +19,11 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
 
+	"github.com/beavend/beavend/internal/cache"
 	"github.com/beavend/beavend/internal/core"
 	"github.com/beavend/beavend/internal/guardrails"
 	"github.com/beavend/beavend/internal/identity"
+	"github.com/beavend/beavend/internal/memory"
 	"github.com/beavend/beavend/internal/runtime/agent"
 	"github.com/beavend/beavend/internal/runtime/stream"
 	"github.com/beavend/beavend/internal/telemetry"
@@ -42,6 +44,9 @@ type Handler struct {
 	execRegistry    agent.ExecutorRegistry
 	sanitizer       *tools.Sanitizer
 	usageStore      core.UsageStore
+	cacheStore      core.CacheStore
+	threadStore     core.ThreadStore
+	memoryEngine    *memory.Engine
 	defaultEnv      string
 }
 
@@ -52,6 +57,9 @@ type HandlerOptions struct {
 	ContinuationMgr    *tools.ContinuationManager
 	ExecutorRegistry   agent.ExecutorRegistry
 	UsageStore         core.UsageStore
+	CacheStore         core.CacheStore
+	ThreadStore        core.ThreadStore
+	MemoryEngine       *memory.Engine
 }
 
 // NewHandler creates a new runtime Handler.
@@ -61,6 +69,9 @@ func NewHandler(resolver SnapshotResolver, pipeline *Pipeline, opts ...HandlerOp
 	var continuationMgr *tools.ContinuationManager
 	var execRegistry agent.ExecutorRegistry
 	var usageStore core.UsageStore
+	var cacheStore core.CacheStore
+	var threadStore core.ThreadStore
+	var memoryEngine *memory.Engine
 
 	if len(opts) > 0 {
 		if opts[0].DefaultEnvironment != "" {
@@ -72,6 +83,9 @@ func NewHandler(resolver SnapshotResolver, pipeline *Pipeline, opts ...HandlerOp
 		continuationMgr = opts[0].ContinuationMgr
 		execRegistry = opts[0].ExecutorRegistry
 		usageStore = opts[0].UsageStore
+		cacheStore = opts[0].CacheStore
+		threadStore = opts[0].ThreadStore
+		memoryEngine = opts[0].MemoryEngine
 	}
 
 	if continuationMgr == nil {
@@ -89,6 +103,9 @@ func NewHandler(resolver SnapshotResolver, pipeline *Pipeline, opts ...HandlerOp
 		execRegistry:    execRegistry,
 		sanitizer:       tools.NewSanitizer(),
 		usageStore:      usageStore,
+		cacheStore:      cacheStore,
+		threadStore:     threadStore,
+		memoryEngine:    memoryEngine,
 		defaultEnv:      defaultEnv,
 	}
 }
@@ -112,9 +129,49 @@ func (h *Handler) HandleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	if state.Metadata != nil {
+		if hit, ok := state.Metadata["cache_hit"].(bool); ok && hit {
+			w.Header().Set("X-Cache", "HIT")
+		} else if state.AIApp != nil && state.AIApp.Cache.Enabled {
+			w.Header().Set("X-Cache", "MISS")
+		}
+	}
 	w.WriteHeader(http.StatusOK)
 	if state.ChatResponse != nil {
+		if state.ChatRequest != nil && state.ChatRequest.ThreadID != "" {
+			state.ChatResponse.ThreadID = state.ChatRequest.ThreadID
+			if h.threadStore != nil && state.Error == nil {
+				ttl := 24 * time.Hour
+				if state.AIApp != nil && state.AIApp.Memory.ThreadTTLSec > 0 {
+					ttl = time.Duration(state.AIApp.Memory.ThreadTTLSec) * time.Second
+				}
+
+				historyCount := 0
+				if state.Metadata != nil {
+					if hc, ok := state.Metadata["thread_history_count"].(int); ok {
+						historyCount = hc
+					}
+				}
+
+				var newTurns []core.ChatMessage
+				if historyCount < len(state.ChatRequest.Messages) {
+					for _, m := range state.ChatRequest.Messages[historyCount:] {
+						if m.Role == "user" || m.Role == "tool" {
+							newTurns = append(newTurns, m)
+						}
+					}
+				}
+				newTurns = append(newTurns, state.ChatResponse.Message)
+
+				_ = h.threadStore.AppendMessages(r.Context(), state.ProjectID, state.Environment, state.ChatRequest.ThreadID, newTurns, ttl)
+			}
+		}
 		_ = json.NewEncoder(w).Encode(state.ChatResponse)
+		if h.cacheStore != nil && state.AIApp != nil && state.AIApp.Cache.Enabled && state.Error == nil {
+			if hit, _ := state.Metadata["cache_hit"].(bool); !hit {
+				h.cacheChatResponse(r.Context(), state, state.ChatResponse)
+			}
+		}
 	} else {
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
 	}
@@ -138,6 +195,14 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if state.Metadata != nil {
+		if hit, ok := state.Metadata["cache_hit"].(bool); ok && hit {
+			w.Header().Set("X-Cache", "HIT")
+		} else if state.AIApp != nil && state.AIApp.Cache.Enabled {
+			w.Header().Set("X-Cache", "MISS")
+		}
+	}
+
 	origChan := state.StreamChan
 	if origChan == nil {
 		h.writeRawError(w, "internal_error", "stream channel not initialized", state.RequestID)
@@ -149,9 +214,10 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 	done := make(chan struct{})
 
 	var (
-		usageMu       sync.Mutex
-		capturedUsage core.UsageStats
-		capturedErr   *core.ErrorResponse
+		usageMu         sync.Mutex
+		capturedUsage   core.UsageStats
+		capturedErr     *core.ErrorResponse
+		fullTextBuilder strings.Builder
 	)
 
 	bufferedMode := state.AIApp != nil && state.AIApp.Guardrails.StreamMode == "buffered"
@@ -162,9 +228,8 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		defer close(monitoredChan)
 
 		var (
-			fullTextBuilder strings.Builder
-			bufferedEvents  []core.StreamEvent
-			pendingDone     *core.StreamEvent
+			bufferedEvents []core.StreamEvent
+			pendingDone    *core.StreamEvent
 		)
 
 		for ev := range origChan {
@@ -321,7 +386,87 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 	}
 	usageMu.Unlock()
 
+	// Cache response on miss if stream completed successfully without error
+	if h.cacheStore != nil && state.AIApp != nil && state.AIApp.Cache.Enabled && state.Error == nil {
+		if hit, _ := state.Metadata["cache_hit"].(bool); !hit {
+			text := fullTextBuilder.String()
+			if text != "" {
+				h.cacheChatResponse(r.Context(), state, &core.ChatResponse{
+					Message: core.ChatMessage{
+						Role:    "assistant",
+						Content: text,
+					},
+					Usage: state.Usage,
+				})
+			}
+		}
+	}
+
+	// Append assistant message to thread if thread is active
+	if h.threadStore != nil && state.ChatRequest != nil && state.ChatRequest.ThreadID != "" && state.Error == nil {
+		text := fullTextBuilder.String()
+		if text != "" {
+			ttl := 24 * time.Hour
+			if state.AIApp != nil && state.AIApp.Memory.ThreadTTLSec > 0 {
+				ttl = time.Duration(state.AIApp.Memory.ThreadTTLSec) * time.Second
+			}
+
+			historyCount := 0
+			if state.Metadata != nil {
+				if hc, ok := state.Metadata["thread_history_count"].(int); ok {
+					historyCount = hc
+				}
+			}
+
+			var newTurns []core.ChatMessage
+			if historyCount < len(state.ChatRequest.Messages) {
+				for _, m := range state.ChatRequest.Messages[historyCount:] {
+					if m.Role == "user" || m.Role == "tool" {
+						newTurns = append(newTurns, m)
+					}
+				}
+			}
+			newTurns = append(newTurns, core.ChatMessage{
+				Role:    "assistant",
+				Content: text,
+			})
+
+			_ = h.threadStore.AppendMessages(r.Context(), state.ProjectID, state.Environment, state.ChatRequest.ThreadID, newTurns, ttl)
+		}
+	}
+
 	h.recordUsage(state)
+}
+
+func (h *Handler) cacheChatResponse(ctx context.Context, state *core.ReqState, resp *core.ChatResponse) {
+	if h.cacheStore == nil || state.AIApp == nil || resp == nil {
+		return
+	}
+	var key string
+	if state.Metadata != nil {
+		if k, ok := state.Metadata["cache_key"].(string); ok && k != "" {
+			key = k
+		}
+	}
+	if key == "" {
+		hash, err := cache.ComputeRequestHash(state.ChatRequest, state.AIApp)
+		if err != nil {
+			return
+		}
+		subject := ""
+		if state.Identity != nil {
+			subject = state.Identity.Subject
+		}
+		key = cache.ResponseCacheKey(state.ProjectID, state.Environment, state.AIApp.Cache.Scope, subject, hash)
+	}
+
+	ttl := time.Duration(state.AIApp.Cache.TTL) * time.Second
+	if ttl <= 0 {
+		ttl = 300 * time.Second
+	}
+	if b, err := json.Marshal(resp); err == nil {
+		_ = h.cacheStore.Set(ctx, key, b, ttl)
+	}
 }
 
 func (h *Handler) evaluateOutputGuardrails(ctx context.Context, state *core.ReqState, content string) (string, error) {
@@ -808,3 +953,135 @@ func (h *Handler) recordUsage(state *core.ReqState) {
 		}()
 	}
 }
+
+// SetThreadStore updates the handler's thread store.
+func (h *Handler) SetThreadStore(store core.ThreadStore) {
+	h.threadStore = store
+}
+
+// SetMemoryEngine updates the handler's memory engine.
+func (h *Handler) SetMemoryEngine(engine *memory.Engine) {
+	h.memoryEngine = engine
+}
+
+// HandleGetThread retrieves a conversation thread by ID.
+func (h *Handler) HandleGetThread(w http.ResponseWriter, r *http.Request) {
+	if h.threadStore == nil {
+		h.writeRawError(w, "not_implemented", "Thread store not configured", "")
+		return
+	}
+
+	threadID := chi.URLParam(r, "thread_id")
+	projectID := strings.TrimSpace(r.Header.Get("X-Project-ID"))
+	env := strings.TrimSpace(r.Header.Get("X-Environment"))
+	if env == "" {
+		env = h.defaultEnv
+	}
+
+	th, err := h.threadStore.GetThread(r.Context(), projectID, env, threadID)
+	if err != nil {
+		if errors.Is(err, memory.ErrThreadNotFound) {
+			h.writeRawError(w, "not_found", fmt.Sprintf("thread %q not found or expired", threadID), "")
+			return
+		}
+		h.writeRawError(w, "internal_error", err.Error(), "")
+		return
+	}
+
+	id, _ := core.IdentityFromContext(r.Context())
+	if th.Subject != "" && id != nil && th.Subject != id.Subject {
+		h.writeRawError(w, "forbidden", "thread belongs to another user", "")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(th)
+}
+
+// HandleDeleteThread removes a conversation thread.
+func (h *Handler) HandleDeleteThread(w http.ResponseWriter, r *http.Request) {
+	if h.threadStore == nil {
+		h.writeRawError(w, "not_implemented", "Thread store not configured", "")
+		return
+	}
+
+	threadID := chi.URLParam(r, "thread_id")
+	projectID := strings.TrimSpace(r.Header.Get("X-Project-ID"))
+	env := strings.TrimSpace(r.Header.Get("X-Environment"))
+	if env == "" {
+		env = h.defaultEnv
+	}
+
+	th, err := h.threadStore.GetThread(r.Context(), projectID, env, threadID)
+	if err == nil && th != nil {
+		id, _ := core.IdentityFromContext(r.Context())
+		if th.Subject != "" && id != nil && th.Subject != id.Subject {
+			h.writeRawError(w, "forbidden", "thread belongs to another user", "")
+			return
+		}
+	}
+
+	if err := h.threadStore.DeleteThread(r.Context(), projectID, env, threadID); err != nil {
+		h.writeRawError(w, "internal_error", err.Error(), "")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status":    "deleted",
+		"thread_id": threadID,
+	})
+}
+
+// HandleCreateThread creates a new conversation thread.
+func (h *Handler) HandleCreateThread(w http.ResponseWriter, r *http.Request) {
+	if h.threadStore == nil {
+		h.writeRawError(w, "not_implemented", "Thread store not configured", "")
+		return
+	}
+
+	appID := chi.URLParam(r, "ai_app_id")
+	projectID := strings.TrimSpace(r.Header.Get("X-Project-ID"))
+	env := strings.TrimSpace(r.Header.Get("X-Environment"))
+	if env == "" {
+		env = h.defaultEnv
+	}
+
+	var req struct {
+		ThreadID   string             `json:"thread_id,omitempty"`
+		Messages   []core.ChatMessage `json:"messages,omitempty"`
+		Metadata   map[string]any     `json:"metadata,omitempty"`
+		TTLSeconds int                `json:"ttl_seconds,omitempty"`
+	}
+
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	id, _ := core.IdentityFromContext(r.Context())
+	th := &core.Thread{
+		ID:          req.ThreadID,
+		ProjectID:   projectID,
+		Environment: env,
+		AIAppID:     appID,
+		Messages:    req.Messages,
+		Metadata:    req.Metadata,
+		TTLSeconds:  req.TTLSeconds,
+	}
+	if id != nil {
+		th.Issuer = id.Issuer
+		th.Subject = id.Subject
+	}
+
+	if err := h.threadStore.CreateThread(r.Context(), th); err != nil {
+		h.writeRawError(w, "internal_error", err.Error(), "")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(th)
+}
+

@@ -253,6 +253,77 @@ paths:
                 - request_id
       responses:
         "200":
+          description: Request successfully cancelled
+
+  /v1/apps/{ai_app_id}/threads:
+    post:
+      summary: Create conversation thread
+      parameters:
+        - name: ai_app_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/ProjectIDHeader"
+        - $ref: "#/components/parameters/EnvironmentHeader"
+      security:
+        - BearerAuth: []
+      responses:
+        "201":
+          description: Thread created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Thread"
+
+  /v1/apps/{ai_app_id}/threads/{thread_id}:
+    get:
+      summary: Get conversation thread
+      parameters:
+        - name: ai_app_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: thread_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/ProjectIDHeader"
+        - $ref: "#/components/parameters/EnvironmentHeader"
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Thread retrieved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Thread"
+        "404":
+          $ref: "#/components/responses/404Error"
+    delete:
+      summary: Delete conversation thread
+      parameters:
+        - name: ai_app_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: thread_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/ProjectIDHeader"
+        - $ref: "#/components/parameters/EnvironmentHeader"
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Thread deleted
+
   /v1/admin/health:
     get:
       summary: Control plane health check
@@ -523,6 +594,73 @@ paths:
       responses:
         "200":
           description: Environment deleted
+
+  /v1/admin/projects/{project_id}/environments/{name}/auth:
+    get:
+      summary: Get environment auth provider configuration
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Environment auth configuration
+    put:
+      summary: Update environment auth provider configuration
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Updated auth configuration
+
+  /v1/admin/auth/test-token:
+    post:
+      summary: Test and verify end-user JWT token against environment auth provider
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token:
+                  type: string
+              required:
+                - token
+      responses:
+        "200":
+          description: Token verification result with normalized claims
 
   /v1/admin/apps:
     get:
@@ -1119,6 +1257,9 @@ components:
     ChatRequest:
       type: object
       properties:
+        thread_id:
+          type: string
+          description: Optional server-side conversation thread ID
         messages:
           type: array
           items:
@@ -1155,6 +1296,8 @@ components:
           type: string
         ai_app_id:
           type: string
+        thread_id:
+          type: string
         created_at:
           type: integer
         message:
@@ -1171,6 +1314,41 @@ components:
         - message
         - finish_reason
         - usage
+
+    Thread:
+      type: object
+      properties:
+        id:
+          type: string
+        project_id:
+          type: string
+        environment:
+          type: string
+        ai_app_id:
+          type: string
+        issuer:
+          type: string
+        subject:
+          type: string
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+        metadata:
+          type: object
+        ttl_seconds:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - project_id
+        - environment
+        - ai_app_id
 
     AIAppMetadata:
       type: object

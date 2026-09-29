@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/beavend/beavend/internal/cache"
 	"github.com/beavend/beavend/internal/core"
 	"github.com/beavend/beavend/internal/policy"
 	"github.com/beavend/beavend/internal/tools"
@@ -419,5 +420,145 @@ func TestLoop_CELPolicyDenial(t *testing.T) {
 
 	if !strings.Contains(state.ChatResponse.Message.Content, "authorization denied") {
 		t.Errorf("expected denial message in content: %s", state.ChatResponse.Message.Content)
+	}
+}
+
+func TestLoop_ToolResultCaching(t *testing.T) {
+	ctx := context.Background()
+	cacheStore := cache.NewMemoryCacheStore()
+
+	execCount := 0
+	executor := &mockExecutor{
+		execFunc: func(_ context.Context, call core.ToolCall, _ core.Identity) (core.ToolResult, error) {
+			execCount++
+			return core.ToolResult{
+				CallID:  call.ID,
+				ToolID:  "weather_tool",
+				Content: fmt.Sprintf("Live weather for args %s (exec #%d)", call.Arguments, execCount),
+			}, nil
+		},
+	}
+
+	snap := core.NewSnapshot("proj_1", "prod", 1)
+	snap.Tools["weather_tool"] = &core.ToolDefinition{
+		ID:         "weather_tool",
+		Name:       "weather_tool",
+		SideEffect: "read",
+		Cache: core.CacheConfig{
+			Enabled: true,
+			TTL:     300,
+		},
+	}
+	snap.Apps["app_1"] = &core.AIApp{
+		ID:      "app_1",
+		ToolIDs: []string{"weather_tool"},
+	}
+
+	makeProvider := func() *mockProvider {
+		turn := 0
+		return &mockProvider{
+			chatFunc: func(_ context.Context, req core.ChatRequest) (*core.ChatResponse, error) {
+				turn++
+				if turn == 1 {
+					return &core.ChatResponse{
+						ID: "turn1",
+						Message: core.ChatMessage{
+							Role: "assistant",
+							ToolCalls: []core.ToolCall{
+								{ID: "call_1", Name: "weather_tool", Arguments: `{"city":"Tokyo"}`},
+							},
+						},
+					}, nil
+				}
+				lastMsg := req.Messages[len(req.Messages)-1]
+				return &core.ChatResponse{
+					ID: "turn2",
+					Message: core.ChatMessage{
+						Role:    "assistant",
+						Content: fmt.Sprintf("Result: %s", lastMsg.Content),
+					},
+				}, nil
+			},
+		}
+	}
+
+	loop := NewLoop(LoopConfig{
+		ExecutorRegistry: &mockRegistry{executor: executor},
+		CacheStore:       cacheStore,
+	})
+
+	// Run 1: Alice requests Tokyo weather -> Cache Miss -> Executed
+	stateAlice1 := &core.ReqState{
+		RequestID:   "req_1",
+		ProjectID:   "proj_1",
+		Environment: "prod",
+		AIAppID:     "app_1",
+		Snapshot:    snap,
+		AIApp:       snap.Apps["app_1"],
+		Identity:    &core.Identity{Subject: "alice"},
+		ChatRequest: &core.ChatRequest{
+			Messages: []core.ChatMessage{{Role: "user", Content: "Weather in Tokyo?"}},
+		},
+	}
+
+	err := loop.Run(ctx, stateAlice1, makeProvider())
+	if err != nil {
+		t.Fatalf("run 1 failed: %v", err)
+	}
+	if execCount != 1 {
+		t.Fatalf("expected execCount 1, got %d", execCount)
+	}
+	if !strings.Contains(stateAlice1.ChatResponse.Message.Content, "exec #1") {
+		t.Fatalf("unexpected content: %s", stateAlice1.ChatResponse.Message.Content)
+	}
+
+	// Run 2: Alice requests same Tokyo weather -> Cache Hit -> ExecCount remains 1!
+	stateAlice2 := &core.ReqState{
+		RequestID:   "req_2",
+		ProjectID:   "proj_1",
+		Environment: "prod",
+		AIAppID:     "app_1",
+		Snapshot:    snap,
+		AIApp:       snap.Apps["app_1"],
+		Identity:    &core.Identity{Subject: "alice"},
+		ChatRequest: &core.ChatRequest{
+			Messages: []core.ChatMessage{{Role: "user", Content: "Weather in Tokyo again?"}},
+		},
+	}
+
+	err = loop.Run(ctx, stateAlice2, makeProvider())
+	if err != nil {
+		t.Fatalf("run 2 failed: %v", err)
+	}
+	if execCount != 1 {
+		t.Fatalf("expected execCount to stay 1 on cache hit, got %d", execCount)
+	}
+	if !strings.Contains(stateAlice2.ChatResponse.Message.Content, "exec #1") {
+		t.Fatalf("unexpected cached content: %s", stateAlice2.ChatResponse.Message.Content)
+	}
+
+	// Run 3: Bob requests Tokyo weather -> Different user -> User isolation -> Cache Miss -> ExecCount becomes 2!
+	stateBob := &core.ReqState{
+		RequestID:   "req_3",
+		ProjectID:   "proj_1",
+		Environment: "prod",
+		AIAppID:     "app_1",
+		Snapshot:    snap,
+		AIApp:       snap.Apps["app_1"],
+		Identity:    &core.Identity{Subject: "bob"},
+		ChatRequest: &core.ChatRequest{
+			Messages: []core.ChatMessage{{Role: "user", Content: "Bob Tokyo weather"}},
+		},
+	}
+
+	err = loop.Run(ctx, stateBob, makeProvider())
+	if err != nil {
+		t.Fatalf("run 3 failed: %v", err)
+	}
+	if execCount != 2 {
+		t.Fatalf("expected execCount 2 due to user isolation, got %d", execCount)
+	}
+	if !strings.Contains(stateBob.ChatResponse.Message.Content, "exec #2") {
+		t.Fatalf("unexpected content for bob: %s", stateBob.ChatResponse.Message.Content)
 	}
 }

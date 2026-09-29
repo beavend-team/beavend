@@ -39,6 +39,12 @@ ORDER BY created_at ASC;
 DELETE FROM environments
 WHERE project_id = $1 AND name = $2;
 
+-- name: UpdateEnvironmentAuthConfig :one
+UPDATE environments
+SET auth_config = $3, updated_at = NOW()
+WHERE project_id = $1 AND name = $2
+RETURNING *;
+
 -- name: GetProjectRevision :one
 SELECT * FROM project_revisions
 WHERE project_id = $1 AND environment = $2;

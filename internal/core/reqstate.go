@@ -41,6 +41,7 @@ type Attachment struct {
 
 // ChatRequest represents the input to a chat completion or stream.
 type ChatRequest struct {
+	ThreadID       string            `json:"thread_id,omitempty" yaml:"thread_id,omitempty"`
 	Model          string            `json:"model,omitempty" yaml:"model,omitempty"`
 	Messages       []ChatMessage     `json:"messages" yaml:"messages"`
 	Attachments    []Attachment      `json:"attachments,omitempty" yaml:"attachments,omitempty"`
@@ -57,6 +58,7 @@ type ChatResponse struct {
 	ID           string      `json:"id" yaml:"id"`
 	RequestID    string      `json:"request_id" yaml:"request_id"`
 	AIAppID      string      `json:"ai_app_id" yaml:"ai_app_id"`
+	ThreadID     string      `json:"thread_id,omitempty" yaml:"thread_id,omitempty"`
 	CreatedAt    int64       `json:"created_at" yaml:"created_at"`
 	Message      ChatMessage `json:"message" yaml:"message"`
 	FinishReason string      `json:"finish_reason" yaml:"finish_reason"` // "stop", "tool_calls", "length"
@@ -72,6 +74,7 @@ type StreamEvent struct {
 	Usage             *UsageStats    `json:"usage,omitempty" yaml:"usage,omitempty"`
 	Error             *ErrorResponse `json:"error,omitempty" yaml:"error,omitempty"`
 	RequestID         string         `json:"request_id,omitempty" yaml:"request_id,omitempty"`
+	ThreadID          string         `json:"thread_id,omitempty" yaml:"thread_id,omitempty"`
 }
 
 // UsageStats tracks token consumption and estimated costs.

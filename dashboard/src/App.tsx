@@ -143,6 +143,7 @@ export const App: React.FC = () => {
               currentUser={currentUser}
               projects={projects}
               currentProject={currentProject}
+              currentEnv={currentEnv}
               onRefreshProjects={loadProjects}
             />
           )}

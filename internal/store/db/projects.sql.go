@@ -12,7 +12,7 @@ import (
 const createEnvironment = `-- name: CreateEnvironment :one
 INSERT INTO environments (project_id, name, description, created_at, updated_at)
 VALUES ($1, $2, $3, NOW(), NOW())
-RETURNING project_id, name, description, created_at, updated_at
+RETURNING project_id, name, description, created_at, updated_at, auth_config
 `
 
 type CreateEnvironmentParams struct {
@@ -30,6 +30,7 @@ func (q *Queries) CreateEnvironment(ctx context.Context, arg CreateEnvironmentPa
 		&i.Description,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AuthConfig,
 	)
 	return i, err
 }
@@ -85,7 +86,7 @@ func (q *Queries) DeleteProject(ctx context.Context, id string) error {
 }
 
 const getEnvironment = `-- name: GetEnvironment :one
-SELECT project_id, name, description, created_at, updated_at FROM environments
+SELECT project_id, name, description, created_at, updated_at, auth_config FROM environments
 WHERE project_id = $1 AND name = $2
 `
 
@@ -103,6 +104,7 @@ func (q *Queries) GetEnvironment(ctx context.Context, arg GetEnvironmentParams) 
 		&i.Description,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AuthConfig,
 	)
 	return i, err
 }
@@ -168,7 +170,7 @@ func (q *Queries) IncrementProjectRevision(ctx context.Context, arg IncrementPro
 }
 
 const listEnvironments = `-- name: ListEnvironments :many
-SELECT project_id, name, description, created_at, updated_at FROM environments
+SELECT project_id, name, description, created_at, updated_at, auth_config FROM environments
 WHERE project_id = $1
 ORDER BY created_at ASC
 `
@@ -188,6 +190,7 @@ func (q *Queries) ListEnvironments(ctx context.Context, projectID string) ([]Env
 			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AuthConfig,
 		); err != nil {
 			return nil, err
 		}
@@ -228,6 +231,33 @@ func (q *Queries) ListProjects(ctx context.Context) ([]Projects, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateEnvironmentAuthConfig = `-- name: UpdateEnvironmentAuthConfig :one
+UPDATE environments
+SET auth_config = $3, updated_at = NOW()
+WHERE project_id = $1 AND name = $2
+RETURNING project_id, name, description, created_at, updated_at, auth_config
+`
+
+type UpdateEnvironmentAuthConfigParams struct {
+	ProjectID  string `json:"project_id"`
+	Name       string `json:"name"`
+	AuthConfig []byte `json:"auth_config"`
+}
+
+func (q *Queries) UpdateEnvironmentAuthConfig(ctx context.Context, arg UpdateEnvironmentAuthConfigParams) (Environments, error) {
+	row := q.db.QueryRow(ctx, updateEnvironmentAuthConfig, arg.ProjectID, arg.Name, arg.AuthConfig)
+	var i Environments
+	err := row.Scan(
+		&i.ProjectID,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AuthConfig,
+	)
+	return i, err
 }
 
 const updateProject = `-- name: UpdateProject :one
