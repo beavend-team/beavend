@@ -12,7 +12,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/beavend/beavend/dashboard"
 	"github.com/beavend/beavend/internal/config"
+	"github.com/beavend/beavend/internal/control"
+	"github.com/beavend/beavend/internal/control/audit"
+	"github.com/beavend/beavend/internal/control/auth"
 	"github.com/beavend/beavend/internal/identity"
 	"github.com/beavend/beavend/internal/limits"
 	"github.com/beavend/beavend/internal/policy"
@@ -24,6 +28,7 @@ import (
 	"github.com/beavend/beavend/internal/snapshot"
 	synckit "github.com/beavend/beavend/internal/snapshot/sync"
 	"github.com/beavend/beavend/internal/store"
+	"github.com/beavend/beavend/internal/store/db"
 	"github.com/beavend/beavend/internal/telemetry"
 	"github.com/beavend/beavend/internal/tools"
 	"github.com/beavend/beavend/internal/usage"
@@ -31,6 +36,13 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "beavend: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	var (
 		roleFlag   = flag.String("role", "", "Role to run: all, runtime, or control (defaults to BEAVEND_ROLE)")
 		portFlag   = flag.Int("port", 0, "HTTP port to listen on (defaults to BEAVEND_HTTP_PORT)")
@@ -48,23 +60,20 @@ func main() {
 		cfg, err = config.Load()
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to load configuration: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to load configuration: %w", err)
 	}
 
 	if *roleFlag != "" {
 		cfg.Role = *roleFlag
 		if err := cfg.Validate(); err != nil {
-			fmt.Fprintf(os.Stderr, "invalid role flag: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("invalid role flag: %w", err)
 		}
 	}
 
 	if *portFlag != 0 {
 		cfg.HTTP.Port = *portFlag
 		if err := cfg.Validate(); err != nil {
-			fmt.Fprintf(os.Stderr, "invalid port flag: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("invalid port flag: %w", err)
 		}
 	}
 
@@ -77,17 +86,16 @@ func main() {
 		slog.Int("port", cfg.HTTP.Port),
 	)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	tel, err := telemetry.Init(ctx, "beavend", "0.1.0")
+	tel, err := telemetry.Init(context.Background(), "beavend", "0.1.0")
 	if err != nil {
-		slog.Error("failed to initialize telemetry", slog.String("error", err.Error()))
-		os.Exit(1)
+		return fmt.Errorf("initialize telemetry: %w", err)
 	}
 	defer func() {
 		_ = tel.Shutdown(context.Background())
 	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	var (
 		st          *store.Store
@@ -237,6 +245,61 @@ func main() {
 		routerOpts.AuthMiddleware = authMw
 	}
 
+	if cfg.Role == config.RoleAll || cfg.Role == config.RoleControl {
+		// Admin token manager (uses MasterKey for signing session tokens and cookies)
+		adminTokenMgr := auth.NewTokenManager([]byte(cfg.Security.MasterKey), 24*time.Hour)
+		routerOpts.AdminTokenManager = adminTokenMgr
+
+		var (
+			ctrlAuditor audit.Auditor
+			ctrlQueries *db.Queries
+			publisher   synckit.Publisher
+		)
+
+		if st != nil {
+			ctrlQueries = st.Queries()
+			ctrlAuditor = audit.NewStoreAuditor(ctrlQueries)
+
+			// Seed default admin user if not already present
+			if err := auth.SeedDefaultAdmin(ctx, ctrlQueries, cfg.Admin.Email, cfg.Admin.Password); err != nil {
+				slog.Warn("seed default admin user encountered warning", slog.String("error", err.Error()))
+			}
+
+			// Publisher for snapshot invalidation: Redis + Postgres NOTIFY fallback
+			var publishers []synckit.Publisher
+			if cfg.Redis.URL != "" {
+				if rOpts, err := redis.ParseURL(cfg.Redis.URL); err == nil {
+					redisClient := redis.NewClient(rOpts)
+					publishers = append(publishers, synckit.NewRedisPublisher(redisClient))
+				}
+			}
+			if st.Pool() != nil {
+				publishers = append(publishers, synckit.NewPostgresPublisher(st.Pool()))
+			}
+			if len(publishers) > 0 {
+				publisher = synckit.NewMultiPublisher(publishers...)
+			}
+		} else {
+			ctrlAuditor = audit.NewInMemoryAuditor()
+		}
+
+		ctrlService := control.NewService(ctrlQueries, publisher, ctrlAuditor, []byte(cfg.Security.MasterKey))
+		ctrlHandler := control.NewHandler(ctrlService)
+		routerOpts.ControlHandler = ctrlHandler
+
+		secureCookie := cfg.Env == config.EnvProduction
+		adminAuthHandler := auth.NewHandler(ctrlQueries, adminTokenMgr, ctrlAuditor, secureCookie)
+		routerOpts.AdminAuthHandler = adminAuthHandler
+
+		// Embedded Dashboard FS
+		dashFS, err := dashboard.FS()
+		if err != nil {
+			slog.Warn("failed to load embedded dashboard filesystem", slog.String("error", err.Error()))
+		} else {
+			routerOpts.DashboardFS = dashFS
+		}
+	}
+
 	checker := &DefaultReadyChecker{Role: cfg.Role}
 	router := BuildRouter(cfg, tel, checker, routerOpts)
 	server := NewHTTPServer(cfg, router)
@@ -255,8 +318,7 @@ func main() {
 
 	select {
 	case err := <-serverErr:
-		slog.Error("server encountered fatal error", slog.String("error", err.Error()))
-		os.Exit(1)
+		return fmt.Errorf("server fatal error: %w", err)
 	case sig := <-quit:
 		slog.Info("shutting down server gracefully", slog.String("signal", sig.String()))
 		cancel()
@@ -276,5 +338,6 @@ func main() {
 			}
 		}
 		slog.Info("server exited cleanly")
+		return nil
 	}
 }

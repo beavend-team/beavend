@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/beavend/beavend/internal/config"
+	"github.com/beavend/beavend/internal/control"
+	"github.com/beavend/beavend/internal/control/auth"
 	"github.com/beavend/beavend/internal/runtime"
 	"github.com/beavend/beavend/internal/telemetry"
 	"github.com/go-chi/chi/v5"
@@ -34,8 +37,12 @@ func (d *DefaultReadyChecker) IsReady(_ context.Context) (bool, map[string]any) 
 
 // RouterOptions holds optional runtime dependencies for BuildRouter.
 type RouterOptions struct {
-	RuntimeHandler *runtime.Handler
-	AuthMiddleware func(http.Handler) http.Handler
+	RuntimeHandler    *runtime.Handler
+	AuthMiddleware    func(http.Handler) http.Handler
+	ControlHandler    *control.Handler
+	AdminAuthHandler  *auth.Handler
+	AdminTokenManager *auth.TokenManager
+	DashboardFS       fs.FS
 }
 
 // BuildRouter configures the chi HTTP router with middlewares, health probes, and role routes.
@@ -68,7 +75,7 @@ func BuildRouter(cfg *config.Config, tel *telemetry.Telemetry, checker ReadyChec
 	}
 
 	if cfg.Role == config.RoleAll || cfg.Role == config.RoleControl {
-		mountControlRoutes(r)
+		mountControlRoutes(r, rOpts.AdminAuthHandler, rOpts.ControlHandler, rOpts.AdminTokenManager, rOpts.DashboardFS)
 	}
 
 	return r
@@ -137,7 +144,7 @@ func mountRuntimeRoutes(r chi.Router, handler *runtime.Handler, authMiddleware f
 
 			apps.Post("/{ai_app_id}/stream", func(w http.ResponseWriter, _ *http.Request) {
 				// Bypass default write timeout for long-lived SSE streaming
-				rc := http.NewResponseController(w)
+				rc := http.NewResponseController(w) //nolint:bodyclose // False positive: ResponseController is not an http.Response.
 				_ = rc.SetWriteDeadline(time.Time{})
 
 				w.Header().Set("Content-Type", "application/json")
@@ -177,16 +184,25 @@ func mountRuntimeRoutes(r chi.Router, handler *runtime.Handler, authMiddleware f
 	})
 }
 
-func mountControlRoutes(r chi.Router) {
-	r.Route("/v1/admin", func(admin chi.Router) {
-		admin.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]string{
-				"control_plane": "ready",
-			})
-		})
+func mountControlRoutes(
+	r chi.Router,
+	authHandler *auth.Handler,
+	ctrlHandler *control.Handler,
+	tokenManager *auth.TokenManager,
+	dashboardFS fs.FS,
+) {
+	// Root redirect: / -> /dashboard/
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/dashboard/", http.StatusFound)
 	})
+
+	r.Route("/v1/admin", func(admin chi.Router) {
+		control.MountRoutes(admin, authHandler, ctrlHandler, tokenManager)
+	})
+
+	dashHandler := control.DashboardHandler(dashboardFS)
+	r.Handle("/dashboard", http.RedirectHandler("/dashboard/", http.StatusMovedPermanently))
+	r.Handle("/dashboard/*", dashHandler)
 }
 
 func telemetryMiddleware(next http.Handler) http.Handler {

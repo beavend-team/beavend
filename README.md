@@ -1,3 +1,11 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo_dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/logo_light.svg">
+    <img alt="Beavend Logo" src="docs/logo_light.svg" width="260">
+  </picture>
+</p>
+
 # Beavend — The Self-Hosted AI Backend for Your Apps
 
 > **Bring your users, your data, your models.**  

@@ -87,6 +87,16 @@ func (q *Queries) CreatePolicyVersion(ctx context.Context, arg CreatePolicyVersi
 	return i, err
 }
 
+const deletePolicy = `-- name: DeletePolicy :exec
+DELETE FROM policies
+WHERE id = $1
+`
+
+func (q *Queries) DeletePolicy(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, deletePolicy, id)
+	return err
+}
+
 const getActivePolicyVersion = `-- name: GetActivePolicyVersion :one
 SELECT pv.id, pv.policy_id, pv.project_id, pv.environment, pv.version, pv.expression, pv.is_active, pv.created_at
 FROM policy_versions pv
@@ -227,6 +237,41 @@ func (q *Queries) ListPolicies(ctx context.Context, arg ListPoliciesParams) ([]P
 			&i.ActiveVersion,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPolicyVersions = `-- name: ListPolicyVersions :many
+SELECT id, policy_id, project_id, environment, version, expression, is_active, created_at FROM policy_versions
+WHERE policy_id = $1
+ORDER BY version DESC
+`
+
+func (q *Queries) ListPolicyVersions(ctx context.Context, policyID string) ([]PolicyVersions, error) {
+	rows, err := q.db.Query(ctx, listPolicyVersions, policyID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PolicyVersions{}
+	for rows.Next() {
+		var i PolicyVersions
+		if err := rows.Scan(
+			&i.ID,
+			&i.PolicyID,
+			&i.ProjectID,
+			&i.Environment,
+			&i.Version,
+			&i.Expression,
+			&i.IsActive,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

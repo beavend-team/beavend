@@ -38,3 +38,13 @@ SELECT pv.*
 FROM policy_versions pv
 JOIN policies p ON p.id = pv.policy_id AND p.active_version = pv.version
 WHERE p.project_id = $1 AND p.environment = $2;
+
+-- name: ListPolicyVersions :many
+SELECT * FROM policy_versions
+WHERE policy_id = $1
+ORDER BY version DESC;
+
+-- name: DeletePolicy :exec
+DELETE FROM policies
+WHERE id = $1;
+

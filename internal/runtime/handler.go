@@ -126,7 +126,7 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Bypass default write timeout for long-lived SSE streaming
-	rc := http.NewResponseController(w)
+	rc := http.NewResponseController(w) //nolint:bodyclose // False positive: ResponseController is not an http.Response.
 	_ = rc.SetWriteDeadline(time.Time{})
 
 	if err := h.pipeline.Execute(r.Context(), state); err != nil {
@@ -385,7 +385,7 @@ func (h *Handler) HandleToolResults(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) executeResumption(w http.ResponseWriter, r *http.Request, state *core.ReqState) {
 	if state.IsStreaming {
-		rc := http.NewResponseController(w)
+		rc := http.NewResponseController(w) //nolint:bodyclose // False positive: ResponseController is not an http.Response.
 		_ = rc.SetWriteDeadline(time.Time{})
 
 		if err := h.pipeline.Execute(r.Context(), state); err != nil {

@@ -409,6 +409,7 @@ func (l *Loop) runStreamingTurn(ctx context.Context, _ int, state *core.ReqState
 			_ = l.cfg.ContinuationMgr.Store().Save(ctx, susp, tools.DefaultSuspensionTTL)
 			token, _ := l.cfg.ContinuationMgr.IssueConfirmationToken(susp, toolCall, tools.DefaultSuspensionTTL)
 
+			tc := toolCall
 			// Emit SSE confirmation event and terminate stream
 			select {
 			case <-ctx.Done():
@@ -416,7 +417,7 @@ func (l *Loop) runStreamingTurn(ctx context.Context, _ int, state *core.ReqState
 			case state.StreamChan <- core.StreamEvent{
 				Type:              "confirmation",
 				ConfirmationToken: token,
-				ToolCall:          &toolCall,
+				ToolCall:          &tc,
 				RequestID:         state.RequestID,
 			}:
 			}
@@ -435,13 +436,14 @@ func (l *Loop) runStreamingTurn(ctx context.Context, _ int, state *core.ReqState
 			_ = l.cfg.ContinuationMgr.Store().Save(ctx, susp, tools.DefaultSuspensionTTL)
 			token, _ := l.cfg.ContinuationMgr.IssueConfirmationToken(susp, toolCall, tools.DefaultSuspensionTTL)
 
+			tc := toolCall
 			select {
 			case <-ctx.Done():
 				return false, false, ctx.Err()
 			case state.StreamChan <- core.StreamEvent{
 				Type:              "tool_call",
 				ConfirmationToken: token,
-				ToolCall:          &toolCall,
+				ToolCall:          &tc,
 				RequestID:         state.RequestID,
 			}:
 			}

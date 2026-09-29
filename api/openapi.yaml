@@ -247,7 +247,760 @@ paths:
                 - request_id
       responses:
         "200":
-          description: Request cancellation recorded
+  /v1/admin/health:
+    get:
+      summary: Control plane health check
+      description: Returns 200 OK if control plane components are operational.
+      responses:
+        "200":
+          description: Control plane is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  control_plane:
+                    type: string
+                    example: ready
+
+  /v1/admin/auth/login:
+    post:
+      summary: Admin login
+      description: Authenticates administrative credentials and sets session cookie.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          $ref: "#/components/responses/401Error"
+
+  /v1/admin/auth/logout:
+    post:
+      summary: Admin logout
+      description: Invalidates and clears administrative session cookie.
+      responses:
+        "200":
+          description: Logout successful
+
+  /v1/admin/auth/me:
+    get:
+      summary: Current admin profile
+      description: Returns information about the currently authenticated administrator.
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Admin user details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUser"
+        "401":
+          $ref: "#/components/responses/401Error"
+
+  /v1/admin/users:
+    get:
+      summary: List admin users
+      description: Lists all administrative users (Owner role required).
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: List of admin users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminUser"
+        "403":
+          $ref: "#/components/responses/403Error"
+    post:
+      summary: Create admin user
+      description: Provisions a new admin user account (Owner role required).
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAdminUserRequest"
+      responses:
+        "201":
+          description: Admin user created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUser"
+        "403":
+          $ref: "#/components/responses/403Error"
+
+  /v1/admin/users/{id}:
+    delete:
+      summary: Delete admin user
+      description: Removes an administrative user (Owner role required).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Admin user deleted
+        "403":
+          $ref: "#/components/responses/403Error"
+
+  /v1/admin/projects:
+    get:
+      summary: List projects
+      description: Returns all configured projects.
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: List of projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Project"
+    post:
+      summary: Create project
+      description: Provisions a new project tenant (Owner role required).
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProjectRequest"
+      responses:
+        "201":
+          description: Project created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+
+  /v1/admin/projects/{project_id}:
+    get:
+      summary: Get project
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Project details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+    put:
+      summary: Update project
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProjectRequest"
+      responses:
+        "200":
+          description: Project updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+    delete:
+      summary: Delete project
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Project deleted
+
+  /v1/admin/projects/{project_id}/environments:
+    get:
+      summary: List environments
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Environments list
+    post:
+      summary: Create environment
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateEnvironmentRequest"
+      responses:
+        "201":
+          description: Environment created
+
+  /v1/admin/projects/{project_id}/environments/{name}:
+    delete:
+      summary: Delete environment
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Environment deleted
+
+  /v1/admin/apps:
+    get:
+      summary: List AI Apps
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: List of AI Apps
+    post:
+      summary: Create AI App
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminAIApp"
+      responses:
+        "201":
+          description: AI App created
+
+  /v1/admin/apps/{id}:
+    get:
+      summary: Get AI App
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: AI App details
+    put:
+      summary: Update AI App
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminAIApp"
+      responses:
+        "200":
+          description: AI App updated
+    delete:
+      summary: Delete AI App
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: AI App deleted
+
+  /v1/admin/prompts:
+    get:
+      summary: List Prompts
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: List of Prompts
+    post:
+      summary: Create Prompt
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminPrompt"
+      responses:
+        "201":
+          description: Prompt created
+
+  /v1/admin/prompts/{id}:
+    get:
+      summary: Get Prompt
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Prompt details
+    delete:
+      summary: Delete Prompt
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Prompt deleted
+
+  /v1/admin/prompts/{id}/versions:
+    post:
+      summary: Create Prompt Version
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromptVersion"
+      responses:
+        "201":
+          description: Prompt version created
+
+  /v1/admin/models:
+    get:
+      summary: List Model Routings
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: List of model routings
+
+  /v1/admin/models/{logical_model}:
+    put:
+      summary: Upsert Model Routing
+      parameters:
+        - name: logical_model
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ModelRouting"
+      responses:
+        "200":
+          description: Model routing configured
+    delete:
+      summary: Delete Model Routing
+      parameters:
+        - name: logical_model
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Model routing deleted
+
+  /v1/admin/providers:
+    get:
+      summary: List Provider Configurations
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: List of provider configurations
+
+  /v1/admin/providers/{provider_name}:
+    put:
+      summary: Upsert Provider Configuration
+      parameters:
+        - name: provider_name
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderConfig"
+      responses:
+        "200":
+          description: Provider configured
+    delete:
+      summary: Delete Provider Configuration
+      parameters:
+        - name: provider_name
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Provider deleted
+
+  /v1/admin/tools:
+    get:
+      summary: List Tools
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: List of tools
+    post:
+      summary: Create Tool
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminTool"
+      responses:
+        "201":
+          description: Tool created
+
+  /v1/admin/tools/{id}:
+    get:
+      summary: Get Tool
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Tool details
+    put:
+      summary: Update Tool
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminTool"
+      responses:
+        "200":
+          description: Tool updated
+    delete:
+      summary: Delete Tool
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Tool deleted
+
+  /v1/admin/tools/{id}/secrets/{secret_ref}:
+    put:
+      summary: Set Tool Secret
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: secret_ref
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Tool secret stored
+
+  /v1/admin/policies:
+    get:
+      summary: List Policies
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: List of policies
+    post:
+      summary: Create Policy
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminPolicy"
+      responses:
+        "201":
+          description: Policy created
+
+  /v1/admin/policies/{id}:
+    get:
+      summary: Get Policy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Policy details
+    delete:
+      summary: Delete Policy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Policy deleted
+
+  /v1/admin/policies/{id}/versions:
+    post:
+      summary: Create Policy Version
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PolicyVersion"
+      responses:
+        "201":
+          description: Policy version created
+
+  /v1/admin/usage:
+    get:
+      summary: Get Usage Analytics
+      description: Returns aggregated token usage and cost metrics.
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Usage statistics
+
+  /v1/admin/logs:
+    get:
+      summary: Explore Request Logs
+      description: Queries structured request execution logs.
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Execution logs
+
+  /v1/admin/logs/{request_id}:
+    get:
+      summary: Get Request Log by ID
+      parameters:
+        - name: request_id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Request log details
+
+  /v1/admin/audit-logs:
+    get:
+      summary: List Audit Logs
+      description: Returns chronological audit trail of configuration mutations.
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Audit logs list
+
+  /v1/admin/subjects/{issuer}/{subject}:
+    delete:
+      summary: GDPR / Privacy Purge Subject
+      description: Deletes all request logs and stored records associated with an end-user subject across all projects.
+      parameters:
+        - name: issuer
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: subject
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Subject data purged
 
 components:
   securitySchemes:
@@ -255,6 +1008,14 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    AdminSessionAuth:
+      type: apiKey
+      in: cookie
+      name: beavend_admin_session
+    AdminBearerAuth:
+      type: http
+      scheme: bearer
+      description: Admin session token passed as Bearer
 
   parameters:
     ProjectIDHeader:
@@ -434,3 +1195,283 @@ components:
       required:
         - code
         - message
+
+    AdminUser:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum: [owner, editor, viewer]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - email
+        - role
+
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+      required:
+        - email
+        - password
+
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        user:
+          $ref: "#/components/schemas/AdminUser"
+      required:
+        - token
+        - user
+
+    CreateAdminUserRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+        role:
+          type: string
+          enum: [owner, editor, viewer]
+      required:
+        - email
+        - password
+        - role
+
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+
+    CreateProjectRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+      required:
+        - id
+        - name
+
+    CreateEnvironmentRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+      required:
+        - name
+
+    AdminAIApp:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        model_routing_id:
+          type: string
+        prompt_id:
+          type: string
+        memory_enabled:
+          type: boolean
+        rate_limit_rpm:
+          type: integer
+        token_quota_monthly:
+          type: integer
+        tools:
+          type: array
+          items:
+            type: string
+        policies:
+          type: array
+          items:
+            type: string
+      required:
+        - id
+        - name
+
+    AdminPrompt:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        active_version:
+          type: integer
+        latest_version:
+          type: integer
+      required:
+        - id
+        - name
+
+    PromptVersion:
+      type: object
+      properties:
+        prompt_id:
+          type: string
+        version:
+          type: integer
+        template:
+          type: string
+        input_variables:
+          type: array
+          items:
+            type: string
+        commit_message:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - template
+
+    ModelRouting:
+      type: object
+      properties:
+        logical_model:
+          type: string
+        deployment:
+          type: string
+        adapter:
+          type: string
+        fallback_models:
+          type: array
+          items:
+            type: string
+        retry_max_attempts:
+          type: integer
+      required:
+        - logical_model
+        - deployment
+        - adapter
+
+    ProviderConfig:
+      type: object
+      properties:
+        provider_name:
+          type: string
+        base_url:
+          type: string
+        api_key:
+          type: string
+        is_active:
+          type: boolean
+      required:
+        - provider_name
+
+    AdminTool:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        schema:
+          type: object
+        execution_type:
+          type: string
+          enum: [http, client]
+        http_endpoint:
+          type: string
+        http_method:
+          type: string
+        side_effect:
+          type: string
+          enum: [read, write]
+        confirmation:
+          type: string
+          enum: [none, required]
+        timeout_ms:
+          type: integer
+        identity_bindings:
+          type: object
+      required:
+        - id
+        - name
+
+    AdminPolicy:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        active_version:
+          type: integer
+        latest_version:
+          type: integer
+      required:
+        - id
+        - name
+
+    PolicyVersion:
+      type: object
+      properties:
+        policy_id:
+          type: string
+        version:
+          type: integer
+        expression:
+          type: string
+        action:
+          type: string
+          enum: [allow, deny, redact, sanitize]
+        reject_code:
+          type: string
+        reject_message:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - expression
+        - action
+

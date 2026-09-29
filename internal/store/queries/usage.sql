@@ -197,3 +197,15 @@ WHERE created_at >= $1 AND created_at < $2
   AND status != 'success'
 GROUP BY project_id, environment, ai_app_id, user_id, logical_model, provider;
 
+-- name: DeleteRequestLogsBySubject :exec
+DELETE FROM request_logs
+WHERE project_id = $1 AND environment = $2 AND user_subject = $3;
+
+-- name: DeleteUsageEventsBySubject :exec
+DELETE FROM usage_events
+WHERE project_id = $1 AND environment = $2 AND user_id = $3;
+
+-- name: DeleteUsageRollupsBySubject :exec
+DELETE FROM usage_rollups
+WHERE project_id = $1 AND environment = $2 AND user_id = $3;
+

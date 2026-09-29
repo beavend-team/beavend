@@ -395,16 +395,16 @@ func TestTierResolver_TableDriven(t *testing.T) {
 			require.NoError(t, err)
 
 			var inf24h, tok24h, inf1m *core.LimitRule
-			for _, r := range active {
-				rCopy := r
+			for i := range active {
+				r := &active[i]
 				if r.Resource == "inference" && r.Window == 24*time.Hour {
-					inf24h = &rCopy
+					inf24h = r
 				}
 				if r.Resource == "tokens" && r.Window == 24*time.Hour {
-					tok24h = &rCopy
+					tok24h = r
 				}
 				if r.Resource == "inference" && r.Window == 1*time.Minute {
-					inf1m = &rCopy
+					inf1m = r
 				}
 			}
 

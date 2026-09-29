@@ -138,6 +138,54 @@ func (q *Queries) AggregateUsageEventsForWindow(ctx context.Context, arg Aggrega
 	return items, nil
 }
 
+const deleteRequestLogsBySubject = `-- name: DeleteRequestLogsBySubject :exec
+DELETE FROM request_logs
+WHERE project_id = $1 AND environment = $2 AND user_subject = $3
+`
+
+type DeleteRequestLogsBySubjectParams struct {
+	ProjectID   string `json:"project_id"`
+	Environment string `json:"environment"`
+	UserSubject string `json:"user_subject"`
+}
+
+func (q *Queries) DeleteRequestLogsBySubject(ctx context.Context, arg DeleteRequestLogsBySubjectParams) error {
+	_, err := q.db.Exec(ctx, deleteRequestLogsBySubject, arg.ProjectID, arg.Environment, arg.UserSubject)
+	return err
+}
+
+const deleteUsageEventsBySubject = `-- name: DeleteUsageEventsBySubject :exec
+DELETE FROM usage_events
+WHERE project_id = $1 AND environment = $2 AND user_id = $3
+`
+
+type DeleteUsageEventsBySubjectParams struct {
+	ProjectID   string `json:"project_id"`
+	Environment string `json:"environment"`
+	UserID      string `json:"user_id"`
+}
+
+func (q *Queries) DeleteUsageEventsBySubject(ctx context.Context, arg DeleteUsageEventsBySubjectParams) error {
+	_, err := q.db.Exec(ctx, deleteUsageEventsBySubject, arg.ProjectID, arg.Environment, arg.UserID)
+	return err
+}
+
+const deleteUsageRollupsBySubject = `-- name: DeleteUsageRollupsBySubject :exec
+DELETE FROM usage_rollups
+WHERE project_id = $1 AND environment = $2 AND user_id = $3
+`
+
+type DeleteUsageRollupsBySubjectParams struct {
+	ProjectID   string `json:"project_id"`
+	Environment string `json:"environment"`
+	UserID      string `json:"user_id"`
+}
+
+func (q *Queries) DeleteUsageRollupsBySubject(ctx context.Context, arg DeleteUsageRollupsBySubjectParams) error {
+	_, err := q.db.Exec(ctx, deleteUsageRollupsBySubject, arg.ProjectID, arg.Environment, arg.UserID)
+	return err
+}
+
 const getRequestLogByID = `-- name: GetRequestLogByID :one
 SELECT
     id,

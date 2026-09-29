@@ -169,6 +169,7 @@ func (a *Adapter) Stream(ctx context.Context, req core.ChatRequest) (<-chan core
 	a.applyHeaders(httpReq)
 	httpReq.Header.Set("Accept", "text/event-stream")
 
+	//nolint:bodyclose // Body is closed asynchronously in the stream parser goroutine.
 	resp, err := a.streamingClient.Do(httpReq)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -182,8 +183,8 @@ func (a *Adapter) Stream(ctx context.Context, req core.ChatRequest) (<-chan core
 
 	reqID := req.Metadata["request_id"]
 	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
 		respBody, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
 		return nil, providers.NormalizeHTTPError(resp.StatusCode, respBody, resp.Header, reqID)
 	}
 

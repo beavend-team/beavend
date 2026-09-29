@@ -38,3 +38,13 @@ SELECT pv.*
 FROM prompt_versions pv
 JOIN prompts p ON p.id = pv.prompt_id AND p.active_version = pv.version
 WHERE p.project_id = $1 AND p.environment = $2;
+
+-- name: ListPromptVersions :many
+SELECT * FROM prompt_versions
+WHERE prompt_id = $1
+ORDER BY version DESC;
+
+-- name: DeletePrompt :exec
+DELETE FROM prompts
+WHERE id = $1;
+

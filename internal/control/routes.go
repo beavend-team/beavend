@@ -1,0 +1,107 @@
+package control
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/beavend/beavend/internal/control/auth"
+	"github.com/go-chi/chi/v5"
+)
+
+// MountRoutes registers all administrative and management endpoints under the given chi Router.
+func MountRoutes(
+	r chi.Router,
+	authHandler *auth.Handler,
+	ctrlHandler *Handler,
+	tokenManager *auth.TokenManager,
+) {
+	// Health probe (unauthenticated)
+	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"control_plane": "ready",
+		})
+	})
+
+	if authHandler != nil {
+		r.Post("/auth/login", authHandler.HandleLogin)
+		r.Post("/auth/logout", authHandler.HandleLogout)
+	}
+
+	if tokenManager == nil || ctrlHandler == nil {
+		return
+	}
+
+	authMw := auth.Middleware(tokenManager)
+	requireViewer := auth.RequireRole(auth.RoleViewer)
+	requireEditor := auth.RequireRole(auth.RoleEditor)
+	requireOwner := auth.RequireRole(auth.RoleOwner)
+
+	// Protected routes (require valid admin session)
+	r.Group(func(admin chi.Router) {
+		admin.Use(authMw)
+
+		// Current Admin Profile
+		if authHandler != nil {
+			admin.With(requireViewer).Get("/auth/me", authHandler.HandleMe)
+			admin.With(requireOwner).Get("/users", authHandler.HandleListUsers)
+			admin.With(requireOwner).Post("/users", authHandler.HandleCreateUser)
+			admin.With(requireOwner).Delete("/users/{id}", authHandler.HandleDeleteUser)
+		}
+
+		// Projects & Environments
+		admin.With(requireViewer).Get("/projects", ctrlHandler.HandleListProjects)
+		admin.With(requireOwner).Post("/projects", ctrlHandler.HandleCreateProject)
+		admin.With(requireViewer).Get("/projects/{project_id}", ctrlHandler.HandleGetProject)
+		admin.With(requireOwner).Put("/projects/{project_id}", ctrlHandler.HandleUpdateProject)
+		admin.With(requireOwner).Delete("/projects/{project_id}", ctrlHandler.HandleDeleteProject)
+		admin.With(requireViewer).Get("/projects/{project_id}/environments", ctrlHandler.HandleListEnvironments)
+		admin.With(requireOwner).Post("/projects/{project_id}/environments", ctrlHandler.HandleCreateEnvironment)
+		admin.With(requireOwner).Delete("/projects/{project_id}/environments/{name}", ctrlHandler.HandleDeleteEnvironment)
+
+		// AI Apps
+		admin.With(requireViewer).Get("/apps", ctrlHandler.HandleListAIApps)
+		admin.With(requireEditor).Post("/apps", ctrlHandler.HandleCreateAIApp)
+		admin.With(requireViewer).Get("/apps/{id}", ctrlHandler.HandleGetAIApp)
+		admin.With(requireEditor).Put("/apps/{id}", ctrlHandler.HandleUpdateAIApp)
+		admin.With(requireEditor).Delete("/apps/{id}", ctrlHandler.HandleDeleteAIApp)
+
+		// Prompts
+		admin.With(requireViewer).Get("/prompts", ctrlHandler.HandleListPrompts)
+		admin.With(requireEditor).Post("/prompts", ctrlHandler.HandleCreatePrompt)
+		admin.With(requireViewer).Get("/prompts/{id}", ctrlHandler.HandleGetPrompt)
+		admin.With(requireEditor).Post("/prompts/{id}/versions", ctrlHandler.HandleCreatePromptVersion)
+		admin.With(requireEditor).Delete("/prompts/{id}", ctrlHandler.HandleDeletePrompt)
+
+		// Model Routings & Providers
+		admin.With(requireViewer).Get("/models", ctrlHandler.HandleListModelRoutings)
+		admin.With(requireEditor).Put("/models/{logical_model}", ctrlHandler.HandleUpsertModelRouting)
+		admin.With(requireEditor).Delete("/models/{logical_model}", ctrlHandler.HandleDeleteModelRouting)
+		admin.With(requireViewer).Get("/providers", ctrlHandler.HandleListProviderConfigs)
+		admin.With(requireOwner).Put("/providers/{provider_name}", ctrlHandler.HandleUpsertProviderConfig)
+		admin.With(requireOwner).Delete("/providers/{provider_name}", ctrlHandler.HandleDeleteProviderConfig)
+
+		// Tools
+		admin.With(requireViewer).Get("/tools", ctrlHandler.HandleListTools)
+		admin.With(requireEditor).Post("/tools", ctrlHandler.HandleCreateTool)
+		admin.With(requireViewer).Get("/tools/{id}", ctrlHandler.HandleGetTool)
+		admin.With(requireEditor).Put("/tools/{id}", ctrlHandler.HandleUpdateTool)
+		admin.With(requireEditor).Delete("/tools/{id}", ctrlHandler.HandleDeleteTool)
+		admin.With(requireEditor).Put("/tools/{id}/secrets/{secret_ref}", ctrlHandler.HandleUpsertToolSecret)
+
+		// Policies
+		admin.With(requireViewer).Get("/policies", ctrlHandler.HandleListPolicies)
+		admin.With(requireEditor).Post("/policies", ctrlHandler.HandleCreatePolicy)
+		admin.With(requireViewer).Get("/policies/{id}", ctrlHandler.HandleGetPolicy)
+		admin.With(requireEditor).Post("/policies/{id}/versions", ctrlHandler.HandleCreatePolicyVersion)
+		admin.With(requireEditor).Delete("/policies/{id}", ctrlHandler.HandleDeletePolicy)
+
+		// Observability, Logs & Privacy
+		admin.With(requireViewer).Get("/usage", ctrlHandler.HandleGetUsage)
+		admin.With(requireViewer).Get("/logs", ctrlHandler.HandleGetLogs)
+		admin.With(requireViewer).Get("/logs/{request_id}", ctrlHandler.HandleGetLogByID)
+		admin.With(requireViewer).Get("/audit-logs", ctrlHandler.HandleListAuditLogs)
+		admin.With(requireOwner).Delete("/subjects/{issuer}/{subject}", ctrlHandler.HandlePrivacyPurgeSubject)
+	})
+}

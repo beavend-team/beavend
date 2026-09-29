@@ -8,9 +8,12 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/beavend/beavend/internal/config"
+	"github.com/beavend/beavend/internal/control"
+	"github.com/beavend/beavend/internal/control/auth"
 	"github.com/beavend/beavend/internal/core"
 	"github.com/beavend/beavend/internal/identity"
 	"github.com/beavend/beavend/internal/prompts"
@@ -341,5 +344,128 @@ func TestRuntimeEndpointsWiring(t *testing.T) {
 	router.ServeHTTP(recToolResults, reqToolResults)
 	if recToolResults.Code != http.StatusOK {
 		t.Fatalf("expected 200 for tool-results, got %d: %s", recToolResults.Code, recToolResults.Body.String())
+	}
+}
+
+func TestControlPlaneAndDashboardRoutes(t *testing.T) {
+	cfg := testConfig(config.RoleControl)
+
+	tm := auth.NewTokenManager([]byte("super-secret-master-key-32-chars-long"), time.Hour)
+	authHandler := auth.NewHandler(nil, tm, nil, false)
+	ctrlSvc := control.NewService(nil, nil, nil, []byte("super-secret-master-key-32-chars-long"))
+	ctrlHandler := control.NewHandler(ctrlSvc)
+
+	mockFS := fstest.MapFS{
+		"index.html": &fstest.MapFile{
+			Data: []byte("<!DOCTYPE html><html><body><h1>Admin Dashboard</h1></body></html>"),
+		},
+		"assets/app.js": &fstest.MapFile{
+			Data: []byte("console.log('beavend dashboard');"),
+		},
+	}
+
+	router := BuildRouter(cfg, nil, &DefaultReadyChecker{Role: config.RoleControl}, RouterOptions{
+		AdminAuthHandler:  authHandler,
+		ControlHandler:    ctrlHandler,
+		AdminTokenManager: tm,
+		DashboardFS:       mockFS,
+	})
+
+	// 1. Root redirect / -> /dashboard/
+	reqRoot := httptest.NewRequest(http.MethodGet, "/", nil)
+	recRoot := httptest.NewRecorder()
+	router.ServeHTTP(recRoot, reqRoot)
+	if recRoot.Code != http.StatusFound {
+		t.Errorf("expected 302 redirect for /, got %d", recRoot.Code)
+	}
+	if loc := recRoot.Header().Get("Location"); loc != "/dashboard/" {
+		t.Errorf("expected redirect location /dashboard/, got %q", loc)
+	}
+
+	// 2. /dashboard -> /dashboard/ redirect
+	reqDash := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
+	recDash := httptest.NewRecorder()
+	router.ServeHTTP(recDash, reqDash)
+	if recDash.Code != http.StatusMovedPermanently {
+		t.Errorf("expected 301 redirect for /dashboard, got %d", recDash.Code)
+	}
+	if loc := recDash.Header().Get("Location"); loc != "/dashboard/" {
+		t.Errorf("expected redirect location /dashboard/, got %q", loc)
+	}
+
+	// 3. /dashboard/ serves index.html
+	reqDashIndex := httptest.NewRequest(http.MethodGet, "/dashboard/", nil)
+	recDashIndex := httptest.NewRecorder()
+	router.ServeHTTP(recDashIndex, reqDashIndex)
+	if recDashIndex.Code != http.StatusOK {
+		t.Errorf("expected 200 for /dashboard/, got %d", recDashIndex.Code)
+	}
+	if !strings.Contains(recDashIndex.Body.String(), "<h1>Admin Dashboard</h1>") {
+		t.Errorf("expected index.html body in response, got %s", recDashIndex.Body.String())
+	}
+
+	// 4. /dashboard/assets/app.js serves static file
+	reqDashAsset := httptest.NewRequest(http.MethodGet, "/dashboard/assets/app.js", nil)
+	recDashAsset := httptest.NewRecorder()
+	router.ServeHTTP(recDashAsset, reqDashAsset)
+	if recDashAsset.Code != http.StatusOK {
+		t.Errorf("expected 200 for static asset, got %d", recDashAsset.Code)
+	}
+	if !strings.Contains(recDashAsset.Body.String(), "console.log('beavend dashboard')") {
+		t.Errorf("expected asset body in response, got %s", recDashAsset.Body.String())
+	}
+
+	// 5. SPA fallback /dashboard/apps -> index.html
+	reqDashSPA := httptest.NewRequest(http.MethodGet, "/dashboard/apps", nil)
+	recDashSPA := httptest.NewRecorder()
+	router.ServeHTTP(recDashSPA, reqDashSPA)
+	if recDashSPA.Code != http.StatusOK {
+		t.Errorf("expected 200 for SPA route /dashboard/apps, got %d", recDashSPA.Code)
+	}
+	if !strings.Contains(recDashSPA.Body.String(), "<h1>Admin Dashboard</h1>") {
+		t.Errorf("expected index.html fallback for SPA route, got %s", recDashSPA.Body.String())
+	}
+
+	// 6. /v1/admin/health probe
+	reqAdminHealth := httptest.NewRequest(http.MethodGet, "/v1/admin/health", nil)
+	recAdminHealth := httptest.NewRecorder()
+	router.ServeHTTP(recAdminHealth, reqAdminHealth)
+	if recAdminHealth.Code != http.StatusOK {
+		t.Errorf("expected 200 for /v1/admin/health, got %d", recAdminHealth.Code)
+	}
+
+	// 7. Protected route without auth -> 401
+	reqMeUnauth := httptest.NewRequest(http.MethodGet, "/v1/admin/auth/me", nil)
+	recMeUnauth := httptest.NewRecorder()
+	router.ServeHTTP(recMeUnauth, reqMeUnauth)
+	if recMeUnauth.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for unauthenticated /v1/admin/auth/me, got %d", recMeUnauth.Code)
+	}
+
+	// 8. Protected route with valid token -> 200
+	testUser := &auth.AdminUser{
+		ID:    "usr_test",
+		Email: "admin@test.local",
+		Role:  auth.RoleOwner,
+	}
+	token, err := tm.GenerateToken(testUser)
+	if err != nil {
+		t.Fatalf("failed to generate token: %v", err)
+	}
+
+	reqMeAuth := httptest.NewRequest(http.MethodGet, "/v1/admin/auth/me", nil)
+	reqMeAuth.Header.Set("Authorization", "Bearer "+token)
+	recMeAuth := httptest.NewRecorder()
+	router.ServeHTTP(recMeAuth, reqMeAuth)
+	if recMeAuth.Code != http.StatusOK {
+		t.Fatalf("expected 200 for authenticated /v1/admin/auth/me, got %d: %s", recMeAuth.Code, recMeAuth.Body.String())
+	}
+
+	var meResp auth.AdminUser
+	if err := json.Unmarshal(recMeAuth.Body.Bytes(), &meResp); err != nil {
+		t.Fatalf("failed to unmarshal me response: %v", err)
+	}
+	if meResp.Email != "admin@test.local" {
+		t.Errorf("expected email admin@test.local, got %q", meResp.Email)
 	}
 }

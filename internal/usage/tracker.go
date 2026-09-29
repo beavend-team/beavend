@@ -143,22 +143,23 @@ func (t *Tracker) extractEvents(state *core.ReqState) (*LogEvent, *Event) {
 		errorCode = state.Error.Code
 		errorMessage = state.Error.Message
 		status = "error"
-		if errorCode == "rate_limited" {
+		switch errorCode {
+		case "rate_limited":
 			status = "rate_limited"
 			statusCode = 429
-		} else if errorCode == "unauthenticated" {
+		case "unauthenticated":
 			statusCode = 401
-		} else if errorCode == "forbidden" {
+		case "forbidden":
 			statusCode = 403
-		} else if errorCode == "not_found" {
+		case "not_found":
 			statusCode = 404
-		} else if errorCode == "invalid_argument" || errorCode == "invalid_request" {
+		case "invalid_argument", "invalid_request":
 			statusCode = 400
-		} else if errorCode == "provider_error" {
+		case "provider_error":
 			statusCode = 502
-		} else if errorCode == "provider_timeout" {
+		case "provider_timeout":
 			statusCode = 504
-		} else {
+		default:
 			statusCode = 500
 		}
 	}

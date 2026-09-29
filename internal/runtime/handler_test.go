@@ -73,7 +73,7 @@ func (m *mockAdapter) Health(_ context.Context) error {
 	return nil
 }
 
-func setupTestEnvironment(t *testing.T) (*chi.Mux, *mockSnapshotResolver, *mockAdapter, *Handler) {
+func setupTestEnvironment(t *testing.T) (*chi.Mux, *mockAdapter, *Handler) {
 	resolver := &mockSnapshotResolver{
 		snapshots: make(map[string]*core.Snapshot),
 	}
@@ -139,11 +139,11 @@ func setupTestEnvironment(t *testing.T) (*chi.Mux, *mockSnapshotResolver, *mockA
 	r.Post("/v1/apps/{ai_app_id}/confirm", handler.HandleConfirm)
 	r.Post("/v1/apps/{ai_app_id}/tool-results", handler.HandleToolResults)
 
-	return r, resolver, adapter, handler
+	return r, adapter, handler
 }
 
 func TestHandler_HandleChat(t *testing.T) {
-	r, _, _, _ := setupTestEnvironment(t)
+	r, _, _ := setupTestEnvironment(t)
 
 	t.Run("missing project id header returns 400", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/chat", strings.NewReader(`{}`))
@@ -193,7 +193,7 @@ func TestHandler_HandleChat(t *testing.T) {
 }
 
 func TestHandler_HandleStream(t *testing.T) {
-	r, _, _, _ := setupTestEnvironment(t)
+	r, _, _ := setupTestEnvironment(t)
 
 	t.Run("successful stream completion returns SSE chunks", func(t *testing.T) {
 		body := `{"messages":[{"role":"user","content":"Hi"}]}`
@@ -215,7 +215,7 @@ func TestHandler_HandleStream(t *testing.T) {
 }
 
 func TestHandler_HandleConfirm(t *testing.T) {
-	r, _, adapter, handler := setupTestEnvironment(t)
+	r, adapter, handler := setupTestEnvironment(t)
 
 	// Setup a suspended state
 	susp := &tools.SuspendedState{
@@ -307,7 +307,7 @@ func TestHandler_HandleConfirm(t *testing.T) {
 }
 
 func TestHandler_HandleToolResults(t *testing.T) {
-	r, _, adapter, handler := setupTestEnvironment(t)
+	r, adapter, handler := setupTestEnvironment(t)
 
 	susp := &tools.SuspendedState{
 		ProjectID:   "proj_1",

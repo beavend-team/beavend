@@ -7,6 +7,10 @@ beavend
 *.dylib
 bin/
 dist/
+!dashboard/dist/
+
+# Dependencies
+node_modules/
 
 # Test binaries
 *.test

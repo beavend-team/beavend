@@ -17,7 +17,7 @@ type contextKey string
 
 const (
 	identityContextKey contextKey = "beavend_identity"
-	rawTokenContextKey contextKey = "beavend_raw_token"
+	rawTokenContextKey contextKey = "beavend_raw_token" //nolint:gosec // Context key identifier, not a credential.
 )
 
 // SnapshotResolver retrieves a Snapshot for a given project and environment.

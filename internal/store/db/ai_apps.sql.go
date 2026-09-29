@@ -236,6 +236,49 @@ func (q *Queries) GetActiveAIAppVersion(ctx context.Context, id string) (GetActi
 	return i, err
 }
 
+const listAIAppVersions = `-- name: ListAIAppVersions :many
+SELECT id, app_id, project_id, environment, version, access_policy, prompt_id, prompt_version, model_routing_id, tool_ids, limits, cache_config, guardrails, response_schema, is_active, created_at FROM ai_app_versions
+WHERE app_id = $1
+ORDER BY version DESC
+`
+
+func (q *Queries) ListAIAppVersions(ctx context.Context, appID string) ([]AiAppVersions, error) {
+	rows, err := q.db.Query(ctx, listAIAppVersions, appID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AiAppVersions{}
+	for rows.Next() {
+		var i AiAppVersions
+		if err := rows.Scan(
+			&i.ID,
+			&i.AppID,
+			&i.ProjectID,
+			&i.Environment,
+			&i.Version,
+			&i.AccessPolicy,
+			&i.PromptID,
+			&i.PromptVersion,
+			&i.ModelRoutingID,
+			&i.ToolIds,
+			&i.Limits,
+			&i.CacheConfig,
+			&i.Guardrails,
+			&i.ResponseSchema,
+			&i.IsActive,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAIApps = `-- name: ListAIApps :many
 SELECT id, project_id, environment, name, description, active_version, created_at, updated_at FROM ai_apps
 WHERE project_id = $1 AND environment = $2

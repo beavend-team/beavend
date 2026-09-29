@@ -90,6 +90,16 @@ func (q *Queries) CreatePromptVersion(ctx context.Context, arg CreatePromptVersi
 	return i, err
 }
 
+const deletePrompt = `-- name: DeletePrompt :exec
+DELETE FROM prompts
+WHERE id = $1
+`
+
+func (q *Queries) DeletePrompt(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, deletePrompt, id)
+	return err
+}
+
 const getActivePromptVersion = `-- name: GetActivePromptVersion :one
 SELECT pv.id, pv.prompt_id, pv.project_id, pv.environment, pv.version, pv.template, pv.variables, pv.is_active, pv.created_at
 FROM prompt_versions pv
@@ -176,6 +186,42 @@ type ListActivePromptVersionsParams struct {
 
 func (q *Queries) ListActivePromptVersions(ctx context.Context, arg ListActivePromptVersionsParams) ([]PromptVersions, error) {
 	rows, err := q.db.Query(ctx, listActivePromptVersions, arg.ProjectID, arg.Environment)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PromptVersions{}
+	for rows.Next() {
+		var i PromptVersions
+		if err := rows.Scan(
+			&i.ID,
+			&i.PromptID,
+			&i.ProjectID,
+			&i.Environment,
+			&i.Version,
+			&i.Template,
+			&i.Variables,
+			&i.IsActive,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPromptVersions = `-- name: ListPromptVersions :many
+SELECT id, prompt_id, project_id, environment, version, template, variables, is_active, created_at FROM prompt_versions
+WHERE prompt_id = $1
+ORDER BY version DESC
+`
+
+func (q *Queries) ListPromptVersions(ctx context.Context, promptID string) ([]PromptVersions, error) {
+	rows, err := q.db.Query(ctx, listPromptVersions, promptID)
 	if err != nil {
 		return nil, err
 	}

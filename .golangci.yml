@@ -13,6 +13,13 @@ linters:
     - misspell
     - unconvert
     - errcheck
+    - gocritic
+    - bodyclose
+    - gosec
+    - nilerr
+    - unparam
+    - whitespace
+    - copyloopvar
 
 linters-settings:
   depguard:

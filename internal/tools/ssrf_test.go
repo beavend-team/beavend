@@ -124,8 +124,9 @@ func TestSafeDialer_AllowPrivateForLocalTesting(t *testing.T) {
 
 	// Safe dialer with default config (AllowPrivate=false) MUST reject local test server
 	blockedClient := NewSafeHTTPClient(SafeDialerConfig{AllowPrivate: false}, 5*time.Second)
-	_, err = blockedClient.Get(ts.URL)
+	blockedResp, err := blockedClient.Get(ts.URL)
 	if err == nil {
+		_ = blockedResp.Body.Close()
 		t.Fatalf("expected connection to local test server to be blocked, but succeeded")
 	}
 }

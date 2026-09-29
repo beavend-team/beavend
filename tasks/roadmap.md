@@ -28,7 +28,7 @@ Phase 4: Policy Engine (CEL) [Done] │                              │
                                   │
                    Phase 9: Usage Tracking & Async Logging [Done]
                                   │
-                   Phase 10: Control Plane & Embedded Dashboard [Next]
+                   Phase 10: Control Plane & Embedded Dashboard [Done]
 ```
 
 ---
@@ -186,11 +186,20 @@ Phase 4: Policy Engine (CEL) [Done] │                              │
 
 ---
 
-## Phase 10: Control Plane & Embedded Dashboard
+## Phase 10: Control Plane & Embedded Dashboard [Completed]
+* **Status:** Completed
 * **Goal:** Build the administrative management API, admin session authentication, audit logging, and embed the React/Vite dashboard.
+* **Tasks:**
+  * `tasks/phase-10-control-plane/T041-admin-auth-sessions-rbac-and-audit.md` — Admin authentication, sessions, RBAC & audit logging
+  * `tasks/phase-10-control-plane/T042-management-api-crud-and-snapshot-invalidation.md` — Management API: core resources CRUD & snapshot invalidation
+  * `tasks/phase-10-control-plane/T043-management-api-observability-logs-and-privacy.md` — Management API: observability, logs & privacy operations
+  * `tasks/phase-10-control-plane/T044-react-vite-admin-dashboard-spa.md` — React + Vite admin dashboard single page application
+  * `tasks/phase-10-control-plane/T045-embedded-dashboard-serving-server-wiring-and-e2e.md` — Embedded dashboard serving, server wiring & end-to-end validation
 * **Major Deliverables:**
   * REST endpoints under `/v1/admin/...` for projects, apps, prompts, models, tools, and policies.
-  * Local admin account authentication and session cookie management.
+  * Local admin account authentication, bcrypt hashing, and session cookie / bearer token management.
+  * Synchronous audit logging for mutating administrative operations.
+  * Automatic project revision increment and snapshot invalidation notification.
   * React + TypeScript + Vite SPA embedded in Go binary via `embed.FS`.
 * **Dependencies:** Phase 2.
-* **Expected Outcome:** Administrators can configure Beavend entirely through a web browser UI.
+* **Expected Outcome:** Administrators can configure Beavend entirely through a web browser UI or management API.

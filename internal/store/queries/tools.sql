@@ -43,6 +43,16 @@ FROM tool_versions tv
 JOIN tools t ON t.id = tv.tool_id AND t.active_version = tv.version
 WHERE t.project_id = $1 AND t.environment = $2;
 
+-- name: ListToolVersions :many
+SELECT * FROM tool_versions
+WHERE tool_id = $1
+ORDER BY version DESC;
+
+-- name: DeleteTool :exec
+DELETE FROM tools
+WHERE id = $1;
+
+
 -- name: UpsertToolSecret :one
 INSERT INTO tool_secrets (
     id, project_id, environment, tool_id, secret_ref,

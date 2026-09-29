@@ -115,6 +115,16 @@ func (q *Queries) CreateToolVersion(ctx context.Context, arg CreateToolVersionPa
 	return i, err
 }
 
+const deleteTool = `-- name: DeleteTool :exec
+DELETE FROM tools
+WHERE id = $1
+`
+
+func (q *Queries) DeleteTool(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, deleteTool, id)
+	return err
+}
+
 const deleteToolSecret = `-- name: DeleteToolSecret :exec
 DELETE FROM tool_secrets
 WHERE project_id = $1 AND environment = $2 AND tool_id = $3 AND secret_ref = $4
@@ -338,6 +348,49 @@ func (q *Queries) ListToolSecrets(ctx context.Context, arg ListToolSecretsParams
 			&i.KeyID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listToolVersions = `-- name: ListToolVersions :many
+SELECT id, tool_id, project_id, environment, version, side_effect, input_schema, identity_bindings, executor, downstream_auth, confirmation, "authorization", result_config, cache_config, is_active, created_at FROM tool_versions
+WHERE tool_id = $1
+ORDER BY version DESC
+`
+
+func (q *Queries) ListToolVersions(ctx context.Context, toolID string) ([]ToolVersions, error) {
+	rows, err := q.db.Query(ctx, listToolVersions, toolID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ToolVersions{}
+	for rows.Next() {
+		var i ToolVersions
+		if err := rows.Scan(
+			&i.ID,
+			&i.ToolID,
+			&i.ProjectID,
+			&i.Environment,
+			&i.Version,
+			&i.SideEffect,
+			&i.InputSchema,
+			&i.IdentityBindings,
+			&i.Executor,
+			&i.DownstreamAuth,
+			&i.Confirmation,
+			&i.Authorization,
+			&i.ResultConfig,
+			&i.CacheConfig,
+			&i.IsActive,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

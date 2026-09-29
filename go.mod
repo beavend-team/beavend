@@ -9,14 +9,16 @@ require (
 	github.com/lestrrat-go/jwx/v2 v2.0.21
 	github.com/pressly/goose/v3 v3.20.0
 	github.com/prometheus/client_golang v1.19.0
-	github.com/redis/go-redis/v9 v9.6.0
+	github.com/redis/go-redis/v9 v9.7.0
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/stretchr/testify v1.9.0
 	go.opentelemetry.io/otel v1.24.0
 	go.opentelemetry.io/otel/exporters/prometheus v0.46.0
+	go.opentelemetry.io/otel/metric v1.24.0
 	go.opentelemetry.io/otel/sdk v1.24.0
 	go.opentelemetry.io/otel/sdk/metric v1.24.0
 	go.opentelemetry.io/otel/trace v1.24.0
+	golang.org/x/crypto v0.21.0
 	golang.org/x/sync v0.7.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -47,9 +49,7 @@ require (
 	github.com/segmentio/asm v1.2.0 // indirect
 	github.com/sethvargo/go-retry v0.2.4 // indirect
 	github.com/stoewer/go-strcase v1.2.0 // indirect
-	go.opentelemetry.io/otel/metric v1.24.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/crypto v0.21.0 // indirect
 	golang.org/x/exp v0.0.0-20240325151524-a685a6edb6d8 // indirect
 	golang.org/x/sys v0.18.0 // indirect
 	golang.org/x/text v0.14.0 // indirect

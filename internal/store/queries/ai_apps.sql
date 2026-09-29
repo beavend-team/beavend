@@ -46,3 +46,9 @@ SELECT aav.*, a.name, a.description
 FROM ai_app_versions aav
 JOIN ai_apps a ON a.id = aav.app_id AND a.active_version = aav.version
 WHERE a.project_id = $1 AND a.environment = $2;
+
+-- name: ListAIAppVersions :many
+SELECT * FROM ai_app_versions
+WHERE app_id = $1
+ORDER BY version DESC;
+
