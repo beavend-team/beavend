@@ -38,10 +38,11 @@ type ExecutorRegistry interface {
 	GetExecutor(def core.ToolDefinition) (core.Executor, error)
 }
 
-// DefaultExecutorRegistry creates standard tool executors (HTTP, Webhook, etc.).
+// DefaultExecutorRegistry creates standard tool executors (HTTP, Webhook, MCP, SQL template, etc.).
 type DefaultExecutorRegistry struct {
 	authenticator core.Authenticator
 	allowPrivate  bool
+	sqlPool       *tools.SQLConnectionPool
 }
 
 // NewDefaultExecutorRegistry creates a new DefaultExecutorRegistry.
@@ -49,6 +50,19 @@ func NewDefaultExecutorRegistry(authenticator core.Authenticator, allowPrivate b
 	return &DefaultExecutorRegistry{
 		authenticator: authenticator,
 		allowPrivate:  allowPrivate,
+		sqlPool:       tools.DefaultSQLConnectionPool(),
+	}
+}
+
+// NewDefaultExecutorRegistryWithPool creates a DefaultExecutorRegistry with a custom SQLConnectionPool.
+func NewDefaultExecutorRegistryWithPool(authenticator core.Authenticator, allowPrivate bool, pool *tools.SQLConnectionPool) *DefaultExecutorRegistry {
+	if pool == nil {
+		pool = tools.DefaultSQLConnectionPool()
+	}
+	return &DefaultExecutorRegistry{
+		authenticator: authenticator,
+		allowPrivate:  allowPrivate,
+		sqlPool:       pool,
 	}
 }
 
@@ -58,6 +72,15 @@ func (r *DefaultExecutorRegistry) GetExecutor(def core.ToolDefinition) (core.Exe
 	case "http", "webhook", "":
 		client := tools.NewSafeHTTPClient(tools.SafeDialerConfig{AllowPrivate: r.allowPrivate}, 15*time.Second)
 		return tools.NewHTTPExecutor(def, client, r.authenticator), nil
+	case "mcp":
+		client := tools.NewSafeHTTPClient(tools.SafeDialerConfig{AllowPrivate: r.allowPrivate}, 15*time.Second)
+		return tools.NewMCPExecutor(def, client, r.authenticator), nil
+	case "sql_template":
+		pool := r.sqlPool
+		if pool == nil {
+			pool = tools.DefaultSQLConnectionPool()
+		}
+		return tools.NewSQLTemplateExecutor(def, pool), nil
 	default:
 		return nil, fmt.Errorf("unsupported executor type: %s", def.Executor.Type)
 	}

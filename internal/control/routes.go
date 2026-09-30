@@ -108,6 +108,7 @@ func MountRoutes(
 		admin.With(requireEditor).Put("/tools/{id}", ctrlHandler.HandleUpdateTool)
 		admin.With(requireEditor).Delete("/tools/{id}", ctrlHandler.HandleDeleteTool)
 		admin.With(requireEditor).Put("/tools/{id}/secrets/{secret_ref}", ctrlHandler.HandleUpsertToolSecret)
+		admin.With(requireViewer).Post("/tools/{id}/test", ctrlHandler.HandleTestTool)
 
 		// Policies
 		admin.With(requireViewer).Get("/policies", ctrlHandler.HandleListPolicies)

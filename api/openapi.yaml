@@ -1076,7 +1076,47 @@ paths:
         - AdminBearerAuth: []
       responses:
         "200":
-          description: Tool secret stored
+  /v1/admin/tools/{id}/test:
+    post:
+      summary: Test Tool Execution
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                arguments:
+                  type: object
+                identity:
+                  type: object
+      responses:
+        "200":
+          description: Tool executed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  call_id:
+                    type: string
+                  tool_id:
+                    type: string
+                  content:
+                    type: string
+                  is_error:
+                    type: boolean
+                  metadata:
+                    type: object
 
   /v1/admin/policies:
     get:
@@ -1679,11 +1719,14 @@ components:
           type: object
         execution_type:
           type: string
-          enum: [http, client]
+          enum: [http, webhook, mcp, sql_template, client_side]
         http_endpoint:
           type: string
         http_method:
           type: string
+        template:
+          type: string
+          description: Parameterized SQL template for sql_template executor
         side_effect:
           type: string
           enum: [read, write]

@@ -105,6 +105,32 @@ func TestHandler_ToolJSONSchemaValidation(t *testing.T) {
 	handler.HandleCreateTool(rec, req)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Contains(t, rec.Body.String(), "invalid_schema")
+
+	// Mutating SQL template must fail validation
+	badSQLReq := CreateToolRequest{
+		ID:       "tool_bad_sql",
+		Name:     "Bad SQL Tool",
+		Executor: json.RawMessage(`{"type": "sql_template", "template": "DROP TABLE users;"}`),
+	}
+	bodySQL, _ := json.Marshal(badSQLReq)
+	reqSQL := httptest.NewRequest("POST", "/v1/admin/tools", bytes.NewReader(bodySQL))
+	recSQL := httptest.NewRecorder()
+	handler.HandleCreateTool(recSQL, reqSQL)
+	assert.Equal(t, http.StatusBadRequest, recSQL.Code)
+	assert.Contains(t, recSQL.Body.String(), "invalid_sql_template")
+
+	// Empty MCP URL must fail validation
+	badMCPReq := CreateToolRequest{
+		ID:       "tool_bad_mcp",
+		Name:     "Bad MCP Tool",
+		Executor: json.RawMessage(`{"type": "mcp", "url": "  "}`),
+	}
+	bodyMCP, _ := json.Marshal(badMCPReq)
+	reqMCP := httptest.NewRequest("POST", "/v1/admin/tools", bytes.NewReader(bodyMCP))
+	recMCP := httptest.NewRecorder()
+	handler.HandleCreateTool(recMCP, reqMCP)
+	assert.Equal(t, http.StatusBadRequest, recMCP.Code)
+	assert.Contains(t, recMCP.Body.String(), "invalid_executor")
 }
 
 func TestMountRoutes_RBAC(t *testing.T) {

@@ -469,6 +469,13 @@ class APIClient {
     return this.request(`/tools/${id}`, { method: 'DELETE' });
   }
 
+  async testTool(toolID: string, payload: { arguments?: Record<string, any>; identity?: Record<string, any> }): Promise<any> {
+    return this.request(`/tools/${encodeURIComponent(toolID)}/test`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async upsertToolSecret(toolID: string, secretRef: string, secretValue: string): Promise<void> {
     return this.request(`/tools/${toolID}/secrets/${secretRef}`, {
       method: 'PUT',

@@ -39,6 +39,8 @@ Phase 4: Policy Engine (CEL) [Done] │                              │
                    Phase 14: Context, Threads & Memory Engine [Done]
                                   │
                    Phase 15: Configuration as Code (Export, Import & Promotion) [Done]
+                                  │
+                   Phase 16: Advanced Tool Executors (MCP & Parameterized SQL) [Done]
 ```
 
 ---
@@ -318,6 +320,28 @@ Phase 4: Policy Engine (CEL) [Done] │                              │
   * ADR-013 in `docs/decisions/ADR-013-configuration-as-code-export-import.md`.
 * **Dependencies:** Phase 2, Phase 10, Phase 13.
 * **Expected Outcome:** Developers can export their entire project configuration into version-controlled YAML, review changes via dry-run diffs, promote configurations across environments, and automate deployments via CI/CD.
+
+---
+
+## Phase 16: Advanced Tool Executors (MCP & Parameterized SQL Templates) [Completed]
+* **Status:** Completed
+* **Goal:** Implement native Model Context Protocol (MCP) and parameterized read-only SQL template tool executors with connection pooling, identity bindings, and SSRF defense.
+* **Tasks:**
+  * `tasks/phase-16-advanced-executors/T071-mcp-tool-executor.md` — SSRF-safe MCP JSON-RPC 2.0 tool executor over HTTP/SSE
+  * `tasks/phase-16-advanced-executors/T072-sql-template-tool-executor.md` — Parameterized read-only SQL template tool executor with dialect binding
+  * `tasks/phase-16-advanced-executors/T073-executor-registry-and-agent-loop-integration.md` — Wire MCP and SQL executors into DefaultExecutorRegistry & agent loop
+  * `tasks/phase-16-advanced-executors/T074-control-plane-and-dashboard-tool-support.md` — Control plane schema validation & dashboard UI support
+  * `tasks/phase-16-advanced-executors/T075-verification-adr-and-roadmap-update.md` — ADR-014, integration tests & phase completion
+* **Major Deliverables:**
+  * `tools.MCPExecutor` communicating via JSON-RPC 2.0 (`tools/call`) over HTTP/SSE with downstream auth and SSRF protection.
+  * `tools.SQLTemplateExecutor` with read-only statement enforcement, named parameter binding (`:param`), connection reuse, and JSON row serialization.
+  * Integrated `DefaultExecutorRegistry` resolving `"http"`, `"webhook"`, `"mcp"`, and `"sql_template"`.
+  * Management API validation and interactive testing endpoints for new executors.
+  * Dashboard tool management UI supporting MCP and SQL template configuration.
+  * ADR-014 in `docs/decisions/ADR-014-mcp-and-sql-template-tool-executors.md`.
+* **Dependencies:** Phase 8, Phase 10, Phase 12.
+* **Expected Outcome:** Models can invoke external MCP server tools and execute parameterized read-only database queries on behalf of users with zero SQL injection risk and zero DB reads on the hot path.
+
 
 
 

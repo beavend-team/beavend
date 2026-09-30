@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/beavend/beavend/internal/core"
 	"github.com/beavend/beavend/internal/secrets"
 	"github.com/beavend/beavend/internal/store/db"
+	"github.com/beavend/beavend/internal/tools"
 	chi "github.com/go-chi/chi/v5"
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v5"
 )
@@ -71,19 +73,8 @@ func (h *Handler) HandleCreateTool(w http.ResponseWriter, r *http.Request) {
 	if req.Confirmation == "" {
 		req.Confirmation = "none"
 	}
-	if len(req.InputSchema) == 0 {
-		req.InputSchema = []byte("{}")
-	} else {
-		// Validate JSON schema syntax
-		compiler := jsonschema.NewCompiler()
-		if err := compiler.AddResource("schema.json", strings.NewReader(string(req.InputSchema))); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_schema", fmt.Sprintf("invalid input_schema: %v", err))
-			return
-		}
-		if _, err := compiler.Compile("schema.json"); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_schema", fmt.Sprintf("failed to compile input_schema: %v", err))
-			return
-		}
+	if !validateToolPayload(w, &req) {
+		return
 	}
 	if len(req.IdentityBindings) == 0 {
 		req.IdentityBindings = []byte("{}")
@@ -200,8 +191,8 @@ func (h *Handler) HandleUpdateTool(w http.ResponseWriter, r *http.Request) {
 	if req.Confirmation == "" {
 		req.Confirmation = "none"
 	}
-	if len(req.InputSchema) == 0 {
-		req.InputSchema = []byte("{}")
+	if !validateToolPayload(w, &req) {
+		return
 	}
 	if len(req.IdentityBindings) == 0 {
 		req.IdentityBindings = []byte("{}")
@@ -342,3 +333,146 @@ func (h *Handler) HandleUpsertToolSecret(w http.ResponseWriter, r *http.Request)
 		"secret_ref": secretRef,
 	})
 }
+
+func validateToolPayload(w http.ResponseWriter, req *CreateToolRequest) bool {
+	trimmedSchema := strings.TrimSpace(string(req.InputSchema))
+	if len(req.InputSchema) == 0 || trimmedSchema == "" || trimmedSchema == "null" || trimmedSchema == "{}" {
+		req.InputSchema = []byte("{}")
+	} else {
+		compiler := jsonschema.NewCompiler()
+		if err := compiler.AddResource("schema.json", strings.NewReader(trimmedSchema)); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_schema", fmt.Sprintf("invalid input_schema: %v", err))
+			return false
+		}
+		if _, err := compiler.Compile("schema.json"); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_schema", fmt.Sprintf("failed to compile input_schema: %v", err))
+			return false
+		}
+	}
+
+	if len(req.Executor) > 0 && string(req.Executor) != "{}" {
+		var execCfg core.ExecutorConfig
+		if err := json.Unmarshal(req.Executor, &execCfg); err == nil {
+			switch execCfg.Type {
+			case "mcp":
+				if strings.TrimSpace(execCfg.URL) == "" {
+					writeError(w, http.StatusBadRequest, "invalid_executor", "mcp executor requires a non-empty url")
+					return false
+				}
+			case "sql_template":
+				if strings.TrimSpace(execCfg.Template) == "" {
+					writeError(w, http.StatusBadRequest, "invalid_executor", "sql_template executor requires a non-empty template")
+					return false
+				}
+				if err := tools.ValidateReadOnlySQL(execCfg.Template); err != nil {
+					writeError(w, http.StatusBadRequest, "invalid_sql_template", err.Error())
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+type TestToolRequest struct {
+	Arguments map[string]any `json:"arguments"`
+	Identity  *core.Identity `json:"identity,omitempty"`
+}
+
+func (h *Handler) HandleTestTool(w http.ResponseWriter, r *http.Request) {
+	if h.svc.queries == nil {
+		writeError(w, http.StatusInternalServerError, "database_unavailable", "database not configured")
+		return
+	}
+	toolID := chi.URLParam(r, "id")
+
+	var req TestToolRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	tool, err := h.svc.queries.GetTool(r.Context(), toolID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "tool not found")
+		return
+	}
+
+	tv, err := h.svc.queries.GetToolVersion(r.Context(), db.GetToolVersionParams{
+		ToolID:  tool.ID,
+		Version: tool.ActiveVersion,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "tool active version not found")
+		return
+	}
+
+	var execCfg core.ExecutorConfig
+	if len(tv.Executor) > 0 {
+		_ = json.Unmarshal(tv.Executor, &execCfg)
+	}
+
+	var downstreamAuth core.DownstreamAuthConfig
+	if len(tv.DownstreamAuth) > 0 {
+		_ = json.Unmarshal(tv.DownstreamAuth, &downstreamAuth)
+	}
+
+	var identityBindings map[string]string
+	if len(tv.IdentityBindings) > 0 {
+		_ = json.Unmarshal(tv.IdentityBindings, &identityBindings)
+	}
+
+	tDef := core.ToolDefinition{
+		ID:               tool.ID,
+		Name:             tool.Name,
+		Description:      tool.Description,
+		Version:          int(tv.Version),
+		SideEffect:       tv.SideEffect,
+		IdentityBindings: identityBindings,
+		Executor:         execCfg,
+		DownstreamAuth:   downstreamAuth,
+		Confirmation:     tv.Confirmation,
+		Authorization:    tv.Authorization,
+	}
+
+	var id core.Identity
+	if req.Identity != nil {
+		id = *req.Identity
+	}
+
+	args := req.Arguments
+	if args == nil {
+		args = make(map[string]any)
+	}
+	if len(identityBindings) > 0 {
+		args = tools.InjectIdentityBindings(args, identityBindings, &id)
+	}
+
+	argsBytes, _ := json.Marshal(args)
+	toolCall := core.ToolCall{
+		ID:        fmt.Sprintf("test_%s", tool.ID),
+		Name:      tool.Name,
+		Arguments: string(argsBytes),
+	}
+
+	var exec core.Executor
+	switch execCfg.Type {
+	case "http", "webhook", "":
+		exec = tools.NewHTTPExecutor(tDef, nil, nil)
+	case "mcp":
+		exec = tools.NewMCPExecutor(tDef, nil, nil)
+	case "sql_template":
+		exec = tools.NewSQLTemplateExecutor(tDef, nil)
+	default:
+		writeError(w, http.StatusBadRequest, "unsupported_executor", fmt.Sprintf("unsupported executor type: %s", execCfg.Type))
+		return
+	}
+
+	res, err := exec.Execute(r.Context(), toolCall, id)
+	if err != nil && res.Content == "" {
+		writeError(w, http.StatusInternalServerError, "execution_error", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, res)
+}
+

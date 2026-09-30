@@ -562,3 +562,43 @@ func TestLoop_ToolResultCaching(t *testing.T) {
 		t.Fatalf("unexpected content for bob: %s", stateBob.ChatResponse.Message.Content)
 	}
 }
+
+func TestDefaultExecutorRegistry_MCPAndSQL(t *testing.T) {
+	registry := NewDefaultExecutorRegistry(nil, false)
+
+	// Test MCP tool resolution
+	mcpDef := core.ToolDefinition{
+		ID:   "mcp_search",
+		Name: "mcp_search",
+		Executor: core.ExecutorConfig{
+			Type: "mcp",
+			URL:  "http://example.com/mcp",
+		},
+	}
+	mcpExec, err := registry.GetExecutor(mcpDef)
+	if err != nil {
+		t.Fatalf("failed to resolve mcp executor: %v", err)
+	}
+	if _, ok := mcpExec.(*tools.MCPExecutor); !ok {
+		t.Fatalf("expected *tools.MCPExecutor, got %T", mcpExec)
+	}
+
+	// Test SQL template tool resolution
+	sqlDef := core.ToolDefinition{
+		ID:   "sql_query",
+		Name: "sql_query",
+		Executor: core.ExecutorConfig{
+			Type:     "sql_template",
+			Template: "SELECT 1",
+			URL:      "mock://db",
+		},
+	}
+	sqlExec, err := registry.GetExecutor(sqlDef)
+	if err != nil {
+		t.Fatalf("failed to resolve sql_template executor: %v", err)
+	}
+	if _, ok := sqlExec.(*tools.SQLTemplateExecutor); !ok {
+		t.Fatalf("expected *tools.SQLTemplateExecutor, got %T", sqlExec)
+	}
+}
+
