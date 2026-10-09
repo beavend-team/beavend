@@ -1,4 +1,4 @@
-# T005 — HTTP Server Wiring, Role Flags, and Health Probes
+# T005 - HTTP Server Wiring, Role Flags, and Health Probes
 
 ## Goal
 Implement the main application entrypoint in `cmd/beavend` with role-based routing, signal handling, graceful shutdown, and `/healthz` / `/readyz` probes.

@@ -1,4 +1,4 @@
-# T027 — Prompt Pipeline Stage [Completed]
+# T027 - Prompt Pipeline Stage [Completed]
 
 * **Status:** Completed
 

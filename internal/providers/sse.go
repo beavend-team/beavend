@@ -179,6 +179,23 @@ func (p *StreamParser) ParseStream(ctx context.Context, reader io.Reader, out ch
 		}
 
 		for _, choice := range chunk.Choices {
+			// Thinking / reasoning delta
+			reasoning := choice.Delta.ReasoningContent
+			if reasoning == "" {
+				reasoning = choice.Delta.Reasoning
+			}
+			if reasoning == "" {
+				reasoning = choice.Delta.Thinking
+			}
+			if reasoning != "" {
+				if !sendEvent(core.StreamEvent{
+					Type:  "thinking",
+					Delta: reasoning,
+				}) {
+					return
+				}
+			}
+
 			// Delta content
 			if choice.Delta.Content != "" {
 				if !sendEvent(core.StreamEvent{

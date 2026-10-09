@@ -1,11 +1,16 @@
 package providers
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"time"
 
 	"github.com/beavend/beavend/internal/core"
 )
+
+func base64Encode(data []byte) string {
+	return base64.StdEncoding.EncodeToString(data)
+}
 
 // OpenAIChatRequest represents the standard OpenAI wire format for chat completions.
 type OpenAIChatRequest struct {
@@ -33,11 +38,14 @@ type OpenAIResponseFormat struct {
 
 // OpenAIMessage represents a single message in OpenAI format.
 type OpenAIMessage struct {
-	Role       string           `json:"role"`
-	Content    string           `json:"content"`
-	Name       string           `json:"name,omitempty"`
-	ToolCalls  []OpenAIToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string           `json:"tool_call_id,omitempty"`
+	Role             string           `json:"role"`
+	Content          any              `json:"content"` // string or []map[string]any for multimodal parts
+	ReasoningContent string           `json:"reasoning_content,omitempty"`
+	Reasoning        string           `json:"reasoning,omitempty"`
+	Thinking         string           `json:"thinking,omitempty"`
+	Name             string           `json:"name,omitempty"`
+	ToolCalls        []OpenAIToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string           `json:"tool_call_id,omitempty"`
 }
 
 // OpenAITool defines a tool exposed to the model.
@@ -94,11 +102,23 @@ type OpenAIStreamChunk struct {
 	Usage   *OpenAIUsage        `json:"usage,omitempty"`
 }
 
+// OpenAIDelta represents delta updates within a stream chunk.
+type OpenAIDelta struct {
+	Role             string           `json:"role"`
+	Content          string           `json:"content"`
+	ReasoningContent string           `json:"reasoning_content,omitempty"`
+	Reasoning        string           `json:"reasoning,omitempty"`
+	Thinking         string           `json:"thinking,omitempty"`
+	Name             string           `json:"name,omitempty"`
+	ToolCalls        []OpenAIToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string           `json:"tool_call_id,omitempty"`
+}
+
 // OpenAIChunkChoice represents a choice within a stream chunk.
 type OpenAIChunkChoice struct {
-	Index        int           `json:"index"`
-	Delta        OpenAIMessage `json:"delta"`
-	FinishReason *string       `json:"finish_reason"`
+	Index        int         `json:"index"`
+	Delta        OpenAIDelta `json:"delta"`
+	FinishReason *string     `json:"finish_reason"`
 }
 
 // OpenAIUsage represents token count statistics.
@@ -160,9 +180,15 @@ func FromCoreChatRequest(req core.ChatRequest, deployment string) OpenAIChatRequ
 	// Map Messages
 	wireReq.Messages = make([]OpenAIMessage, len(req.Messages))
 	for i, m := range req.Messages {
+		content := formatWireMessageContent(m)
+		// If last message in request and request has attachments, append them to content
+		if i == len(req.Messages)-1 && len(req.Attachments) > 0 {
+			content = appendAttachmentsToContent(content, req.Attachments)
+		}
+
 		msg := OpenAIMessage{
 			Role:       m.Role,
-			Content:    m.Content,
+			Content:    content,
 			ToolCallID: m.ToolCallID,
 		}
 
@@ -219,6 +245,92 @@ func FromCoreChatRequest(req core.ChatRequest, deployment string) OpenAIChatRequ
 	return wireReq
 }
 
+func formatWireMessageContent(m core.ChatMessage) any {
+	if len(m.Parts) == 0 {
+		return m.Content
+	}
+
+	hasMedia := false
+	for _, p := range m.Parts {
+		if p.Type == core.PartTypeMedia && p.Media != nil {
+			hasMedia = true
+			break
+		}
+	}
+
+	// If no media parts, simple string representation suffices
+	if !hasMedia {
+		return m.TextContent()
+	}
+
+	// Multi-part block content for OpenAI multimodal standard
+	var blocks []map[string]any
+	for _, p := range m.Parts {
+		switch p.Type {
+		case core.PartTypeText:
+			if p.Text != "" {
+				blocks = append(blocks, map[string]any{
+					"type": "text",
+					"text": p.Text,
+				})
+			}
+		case core.PartTypeMedia:
+			if p.Media != nil {
+				urlStr := p.Media.URL
+				if urlStr == "" && p.Media.Digest != "" {
+					urlStr = p.Media.Digest
+				}
+				blocks = append(blocks, map[string]any{
+					"type": "image_url",
+					"image_url": map[string]any{
+						"url": urlStr,
+					},
+				})
+			}
+		}
+	}
+
+	if len(blocks) == 0 {
+		return m.TextContent()
+	}
+	return blocks
+}
+
+func appendAttachmentsToContent(existing any, atts []core.Attachment) any {
+	var blocks []map[string]any
+	switch v := existing.(type) {
+	case string:
+		if v != "" {
+			blocks = append(blocks, map[string]any{
+				"type": "text",
+				"text": v,
+			})
+		}
+	case []map[string]any:
+		blocks = append(blocks, v...)
+	}
+
+	for _, att := range atts {
+		urlStr := att.URL
+		if urlStr == "" && len(att.Data) > 0 {
+			urlStr = "data:" + att.MimeType + ";base64," + base64Encode(att.Data)
+		}
+		if urlStr != "" {
+			blocks = append(blocks, map[string]any{
+				"type": "image_url",
+				"image_url": map[string]any{
+					"url": urlStr,
+				},
+			})
+		}
+	}
+
+	if len(blocks) == 0 {
+		return existing
+	}
+	return blocks
+}
+
 // ToCoreChatResponse maps an OpenAI wire response into core.ChatResponse.
 func ToCoreChatResponse(resp *OpenAIChatResponse, requestID, aiAppID string, extraCost *float64) *core.ChatResponse {
 	if resp == nil {
@@ -254,12 +366,18 @@ func ToCoreChatResponse(resp *OpenAIChatResponse, requestID, aiAppID string, ext
 			}
 		}
 
+		contentStr := ""
+		if s, ok := choice.Message.Content.(string); ok {
+			contentStr = s
+		}
+
 		res.Message = core.ChatMessage{
 			Role:       choice.Message.Role,
-			Content:    choice.Message.Content,
+			Content:    contentStr,
 			ToolCalls:  toolCalls,
 			ToolCallID: choice.Message.ToolCallID,
 		}
+		res.Message.EnsureParts()
 	}
 
 	if resp.Usage != nil {
@@ -319,3 +437,36 @@ func ToCoreEmbedResponse(resp *OpenAIEmbedResponse) *core.EmbedResponse {
 		Usage:      usage,
 	}
 }
+
+// OpenAIImageRequest represents input for OpenAI /v1/images/generations.
+type OpenAIImageRequest struct {
+	Model          string `json:"model,omitempty"`
+	Prompt         string `json:"prompt"`
+	N              int    `json:"n,omitempty"`
+	Size           string `json:"size,omitempty"`
+	Quality        string `json:"quality,omitempty"`
+	ResponseFormat string `json:"response_format,omitempty"` // "url" or "b64_json"
+}
+
+// OpenAIImageResponse represents output from OpenAI /v1/images/generations.
+type OpenAIImageResponse struct {
+	Created int64                 `json:"created"`
+	Data    []OpenAIImageDataItem `json:"data"`
+}
+
+// OpenAIImageDataItem represents an image entry in OpenAIImageResponse.
+type OpenAIImageDataItem struct {
+	URL           string `json:"url,omitempty"`
+	B64JSON       string `json:"b64_json,omitempty"`
+	RevisedPrompt string `json:"revised_prompt,omitempty"`
+}
+
+// OpenAISpeechRequest represents input for OpenAI /v1/audio/speech.
+type OpenAISpeechRequest struct {
+	Model          string  `json:"model"`
+	Input          string  `json:"input"`
+	Voice          string  `json:"voice"`
+	ResponseFormat string  `json:"response_format,omitempty"` // "mp3", "opus", "aac", "flac", "wav", "pcm"
+	Speed          float64 `json:"speed,omitempty"`
+}
+

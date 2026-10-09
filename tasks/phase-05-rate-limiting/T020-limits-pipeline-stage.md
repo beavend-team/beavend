@@ -1,4 +1,4 @@
-# T020 — Rate Limiting Pipeline Stage & HTTP Handling [Completed]
+# T020 - Rate Limiting Pipeline Stage & HTTP Handling [Completed]
 
 * **Status:** Completed
 

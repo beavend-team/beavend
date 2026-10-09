@@ -1,4 +1,4 @@
-# T025 — Model Routing Pipeline Stage [Completed]
+# T025 - Model Routing Pipeline Stage [Completed]
 
 * **Status:** Completed
 

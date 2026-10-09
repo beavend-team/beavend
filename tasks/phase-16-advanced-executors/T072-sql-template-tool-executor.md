@@ -1,4 +1,4 @@
-# T072 — Parameterized SQL Template Tool Executor
+# T072 - Parameterized SQL Template Tool Executor
 
 ## Status
 Completed

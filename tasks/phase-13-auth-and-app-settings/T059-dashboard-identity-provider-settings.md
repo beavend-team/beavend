@@ -1,4 +1,4 @@
-# T059 — Dashboard Identity Provider Configuration & JWT Inspector
+# T059 - Dashboard Identity Provider Configuration & JWT Inspector
 
 * **Status:** Completed
 

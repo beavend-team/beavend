@@ -1,4 +1,4 @@
-# T014 — Snapshot Compiler CEL Integration [Completed]
+# T014 - Snapshot Compiler CEL Integration [Completed]
 
 * **Status:** Completed
 

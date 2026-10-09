@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/beavend/beavend/internal/core"
+	"github.com/beavend/beavend/internal/pricing"
 	"github.com/beavend/beavend/internal/routing"
 	"github.com/beavend/beavend/internal/runtime/agent"
 )
@@ -107,14 +108,20 @@ func (s *ExecutionStage) Handle(ctx context.Context, state *core.ReqState) error
 		adapterName = "litellm"
 	}
 
-	adapter, ok := s.resolver.GetAdapter(adapterName)
-	if !ok {
-		state.Error = &core.ErrorResponse{
-			Code:      "unavailable",
-			Message:   fmt.Sprintf("provider adapter %q not available", adapterName),
-			RequestID: state.RequestID,
+	var adapter core.ProviderAdapter
+	if state.ResolvedAdapter != nil {
+		adapter = state.ResolvedAdapter
+	} else {
+		var ok bool
+		adapter, ok = s.resolver.GetAdapterWithSnapshot(adapterName, state.Snapshot)
+		if !ok {
+			state.Error = &core.ErrorResponse{
+				Code:      "unavailable",
+				Message:   fmt.Sprintf("provider adapter %q not available", adapterName),
+				RequestID: state.RequestID,
+			}
+			return fmt.Errorf("%w: %s", routing.ErrAdapterNotFound, adapterName)
 		}
-		return fmt.Errorf("%w: %s", routing.ErrAdapterNotFound, adapterName)
 	}
 
 	span.SetAttributes(
@@ -139,38 +146,103 @@ func (s *ExecutionStage) Handle(ctx context.Context, state *core.ReqState) error
 }
 
 func (s *ExecutionStage) handleUnary(ctx context.Context, adapter core.ProviderAdapter, state *core.ReqState, span trace.Span) error {
-	err := s.loop.Run(ctx, state, adapter)
-	if err != nil {
-		span.RecordError(err)
-		if invocationErrors != nil {
-			invocationErrors.Add(ctx, 1)
+	var initialMessages []core.ChatMessage
+	if state.ChatRequest != nil {
+		initialMessages = make([]core.ChatMessage, len(state.ChatRequest.Messages))
+		copy(initialMessages, state.ChatRequest.Messages)
+	}
+
+	adapterName := state.ResolvedModel.Adapter
+	if adapterName == "" {
+		adapterName = "litellm"
+	}
+	currentRoute := &routing.ResolvedRoute{
+		ModelRouting: state.ResolvedModel,
+		Adapter:      adapter,
+		Deployment:   state.ChatRequest.Model,
+		AdapterName:  adapterName,
+		Snapshot:     state.Snapshot,
+	}
+
+	attempted := map[string]bool{
+		currentRoute.Deployment: true,
+	}
+	if currentRoute.AdapterName != "" {
+		attempted[currentRoute.AdapterName+"/"+currentRoute.Deployment] = true
+	}
+
+	for {
+		err := s.loop.Run(ctx, state, adapter)
+		if err == nil {
+			break
 		}
 
-		code := "provider_error"
-		if errors.Is(err, context.DeadlineExceeded) {
-			code = "provider_timeout"
+		if ctx.Err() != nil {
+			return err
 		}
 
-		var appErr *core.ErrorResponse
-		if errors.As(err, &appErr) {
-			state.Error = appErr
-		} else {
-			state.Error = &core.ErrorResponse{
-				Code:      code,
-				Message:   fmt.Sprintf("upstream model error: %v", err),
-				RequestID: state.RequestID,
+		// Attempt fallback resolution across multiple providers
+		fbRoute, fbErr := s.resolver.ResolveFallback(currentRoute, attempted, state.Snapshot)
+		if fbErr != nil {
+			span.RecordError(err)
+			if invocationErrors != nil {
+				invocationErrors.Add(ctx, 1)
 			}
+
+			code := "provider_error"
+			if errors.Is(err, context.DeadlineExceeded) {
+				code = "provider_timeout"
+			}
+
+			var appErr *core.ErrorResponse
+			if errors.As(err, &appErr) {
+				state.Error = appErr
+			} else {
+				state.Error = &core.ErrorResponse{
+					Code:      code,
+					Message:   fmt.Sprintf("upstream model error: %v", err),
+					RequestID: state.RequestID,
+				}
+			}
+
+			slog.ErrorContext(ctx, "provider chat invocation failed (all fallbacks exhausted)",
+				"request_id", state.RequestID,
+				"project_id", state.ProjectID,
+				"env", state.Environment,
+				"ai_app_id", state.AIAppID,
+				"adapter", currentRoute.AdapterName,
+				"deployment", currentRoute.Deployment,
+				"error", err,
+			)
+			return err
 		}
 
-		slog.ErrorContext(ctx, "provider chat invocation failed",
+		slog.WarnContext(ctx, "model invocation failed, failing over to fallback deployment",
 			"request_id", state.RequestID,
-			"project_id", state.ProjectID,
-			"env", state.Environment,
-			"ai_app_id", state.AIAppID,
-			"adapter", state.ResolvedModel.Adapter,
+			"failed_adapter", currentRoute.AdapterName,
+			"failed_deployment", currentRoute.Deployment,
+			"fallback_adapter", fbRoute.AdapterName,
+			"fallback_deployment", fbRoute.Deployment,
 			"error", err,
 		)
-		return err
+
+		attempted[fbRoute.Deployment] = true
+		if fbRoute.AdapterName != "" {
+			attempted[fbRoute.AdapterName+"/"+fbRoute.Deployment] = true
+		}
+
+		// Reset messages to pre-failure state
+		if state.ChatRequest != nil && initialMessages != nil {
+			state.ChatRequest.Messages = make([]core.ChatMessage, len(initialMessages))
+			copy(state.ChatRequest.Messages, initialMessages)
+		}
+
+		adapter = fbRoute.Adapter
+		state.ResolvedAdapter = fbRoute.Adapter
+		if state.ChatRequest != nil {
+			state.ChatRequest.Model = fbRoute.Deployment
+		}
+		currentRoute = fbRoute
 	}
 
 	resp := state.ChatResponse
@@ -185,6 +257,25 @@ func (s *ExecutionStage) handleUnary(ctx context.Context, adapter core.ProviderA
 		}
 
 		state.Usage = resp.Usage
+		if (state.Usage.CostUSD == nil || *state.Usage.CostUSD == 0) && (state.Usage.InputTokens > 0 || state.Usage.OutputTokens > 0) {
+			var override *core.ModelPrice
+			if state.ResolvedModel != nil && (state.ResolvedModel.InputCostPer1M != nil || state.ResolvedModel.OutputCostPer1M != nil) {
+				override = &core.ModelPrice{}
+				if state.ResolvedModel.InputCostPer1M != nil {
+					override.InputCostPer1M = *state.ResolvedModel.InputCostPer1M
+				}
+				if state.ResolvedModel.OutputCostPer1M != nil {
+					override.OutputCostPer1M = *state.ResolvedModel.OutputCostPer1M
+				}
+			}
+			targetModel := currentRoute.Deployment
+			if targetModel == "" && state.ChatRequest != nil {
+				targetModel = state.ChatRequest.Model
+			}
+			calculated := pricing.CalculateCost(state.Usage.InputTokens, state.Usage.OutputTokens, targetModel, override)
+			state.Usage.CostUSD = &calculated
+			resp.Usage.CostUSD = &calculated
+		}
 
 		span.SetAttributes(
 			attribute.Int("usage.input_tokens", resp.Usage.InputTokens),
@@ -213,37 +304,100 @@ func (s *ExecutionStage) handleStreaming(ctx context.Context, adapter core.Provi
 	go func() {
 		defer close(state.StreamChan)
 
-		err := s.loop.Run(ctx, state, adapter)
-		if err != nil {
-			span.RecordError(err)
-			if invocationErrors != nil {
-				invocationErrors.Add(ctx, 1)
+		var initialMessages []core.ChatMessage
+		if state.ChatRequest != nil {
+			initialMessages = make([]core.ChatMessage, len(state.ChatRequest.Messages))
+			copy(initialMessages, state.ChatRequest.Messages)
+		}
+
+		adapterName := state.ResolvedModel.Adapter
+		if adapterName == "" {
+			adapterName = "litellm"
+		}
+		currentRoute := &routing.ResolvedRoute{
+			ModelRouting: state.ResolvedModel,
+			Adapter:      adapter,
+			Deployment:   state.ChatRequest.Model,
+			AdapterName:  adapterName,
+			Snapshot:     state.Snapshot,
+		}
+
+		attempted := map[string]bool{
+			currentRoute.Deployment: true,
+		}
+		if currentRoute.AdapterName != "" {
+			attempted[currentRoute.AdapterName+"/"+currentRoute.Deployment] = true
+		}
+
+		for {
+			err := s.loop.Run(ctx, state, adapter)
+			if err == nil {
+				return
 			}
 
-			code := "provider_error"
-			if errors.Is(err, context.DeadlineExceeded) {
-				code = "provider_timeout"
+			if ctx.Err() != nil {
+				return
 			}
 
-			var appErr *core.ErrorResponse
-			if errors.As(err, &appErr) {
-				state.Error = appErr
-			} else {
-				state.Error = &core.ErrorResponse{
-					Code:      code,
-					Message:   fmt.Sprintf("upstream stream error: %v", err),
-					RequestID: state.RequestID,
+			fbRoute, fbErr := s.resolver.ResolveFallback(currentRoute, attempted, state.Snapshot)
+			if fbErr != nil {
+				span.RecordError(err)
+				if invocationErrors != nil {
+					invocationErrors.Add(ctx, 1)
 				}
+
+				code := "provider_error"
+				if errors.Is(err, context.DeadlineExceeded) {
+					code = "provider_timeout"
+				}
+
+				var appErr *core.ErrorResponse
+				if errors.As(err, &appErr) {
+					state.Error = appErr
+				} else {
+					state.Error = &core.ErrorResponse{
+						Code:      code,
+						Message:   fmt.Sprintf("upstream stream error: %v", err),
+						RequestID: state.RequestID,
+					}
+				}
+
+				select {
+				case <-ctx.Done():
+				case state.StreamChan <- core.StreamEvent{
+					Type:      "error",
+					Error:     state.Error,
+					RequestID: state.RequestID,
+				}:
+				}
+				return
 			}
 
-			select {
-			case <-ctx.Done():
-			case state.StreamChan <- core.StreamEvent{
-				Type:      "error",
-				Error:     state.Error,
-				RequestID: state.RequestID,
-			}:
+			slog.WarnContext(ctx, "stream invocation failed, failing over to fallback deployment",
+				"request_id", state.RequestID,
+				"failed_adapter", currentRoute.AdapterName,
+				"failed_deployment", currentRoute.Deployment,
+				"fallback_adapter", fbRoute.AdapterName,
+				"fallback_deployment", fbRoute.Deployment,
+				"error", err,
+			)
+
+			attempted[fbRoute.Deployment] = true
+			if fbRoute.AdapterName != "" {
+				attempted[fbRoute.AdapterName+"/"+fbRoute.Deployment] = true
 			}
+
+			if state.ChatRequest != nil && initialMessages != nil {
+				state.ChatRequest.Messages = make([]core.ChatMessage, len(initialMessages))
+				copy(state.ChatRequest.Messages, initialMessages)
+			}
+
+			adapter = fbRoute.Adapter
+			state.ResolvedAdapter = fbRoute.Adapter
+			if state.ChatRequest != nil {
+				state.ChatRequest.Model = fbRoute.Deployment
+			}
+			currentRoute = fbRoute
 		}
 	}()
 

@@ -1,4 +1,4 @@
-# T058 — Dashboard AI App Details, Per-App Settings & Interactive Playground
+# T058 - Dashboard AI App Details, Per-App Settings & Interactive Playground
 
 * **Status:** Completed
 

@@ -1,4 +1,4 @@
-# T023 — Native OpenAI-Compatible Adapter [Completed]
+# T023 - Native OpenAI-Compatible Adapter [Completed]
 
 * **Status:** Completed
 

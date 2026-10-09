@@ -86,6 +86,14 @@ func (s *CacheStage) Handle(ctx context.Context, state *core.ReqState) error {
 		return nil
 	}
 
+	if !cache.ShouldCacheResponse(state.ChatRequest, nil, state.AIApp) {
+		span.SetAttributes(attribute.Bool("cache.enabled", false), attribute.Bool("cache.skipped_modality", true))
+		if state.Metadata != nil {
+			state.Metadata["cache_hit"] = false
+		}
+		return nil
+	}
+
 	span.SetAttributes(
 		attribute.Bool("cache.enabled", true),
 		attribute.String("cache.scope", state.AIApp.Cache.Scope),
@@ -93,7 +101,7 @@ func (s *CacheStage) Handle(ctx context.Context, state *core.ReqState) error {
 	)
 
 	// Compute hash of request
-	hash, err := cache.ComputeRequestHash(state.ChatRequest, state.AIApp)
+	hash, err := cache.ComputeRequestHash(state.ChatRequest, state.AIApp, state.SelectedModel)
 	if err != nil {
 		slog.WarnContext(ctx, "failed to compute request cache hash",
 			"request_id", state.RequestID,

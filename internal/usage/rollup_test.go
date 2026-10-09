@@ -188,3 +188,61 @@ func TestRollupAggregator_StartStop(t *testing.T) {
 		t.Errorf("expected aggregator to be stopped")
 	}
 }
+
+func TestRollupAggregator_SyncRange(t *testing.T) {
+	mockStore := &mockRollupStore{
+		mockRows: []AggregatedUsageRow{
+			{
+				ProjectID:    "proj_1",
+				Environment:  "production",
+				AIAppID:      "app_main",
+				UserID:       "usr_1",
+				LogicalModel: "fast",
+				Provider:     "litellm",
+				RequestCount: 1,
+				InputTokens:  10,
+				OutputTokens: 20,
+				TotalTokens:  30,
+			},
+		},
+	}
+
+	agg := NewRollupAggregator(mockStore, RollupAggregatorConfig{Interval: time.Minute})
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	from := now.Add(-3 * time.Hour)
+	to := now
+
+	// Test hourly SyncRange
+	if err := agg.SyncRange(ctx, "hour", from, to); err != nil {
+		t.Fatalf("unexpected error during hourly SyncRange: %v", err)
+	}
+
+	mockStore.mu.Lock()
+	if len(mockStore.upsertCalls) == 0 {
+		t.Errorf("expected upsert calls during hourly SyncRange, got 0")
+	}
+	mockStore.upsertCalls = nil
+	mockStore.mu.Unlock()
+
+	// Test daily SyncRange
+	fromDay := now.Add(-48 * time.Hour)
+	if err := agg.SyncRange(ctx, "day", fromDay, to); err != nil {
+		t.Fatalf("unexpected error during daily SyncRange: %v", err)
+	}
+
+	mockStore.mu.Lock()
+	var hasDayGranularity bool
+	for _, call := range mockStore.upsertCalls {
+		if call.granularity == "day" {
+			hasDayGranularity = true
+			break
+		}
+	}
+	mockStore.mu.Unlock()
+
+	if !hasDayGranularity {
+		t.Errorf("expected at least one day granularity upsert call")
+	}
+}

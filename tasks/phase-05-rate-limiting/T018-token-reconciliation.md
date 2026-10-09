@@ -1,4 +1,4 @@
-# T018 — Token Reservation and Post-Request Reconciliation [Completed]
+# T018 - Token Reservation and Post-Request Reconciliation [Completed]
 
 * **Status:** Completed
 

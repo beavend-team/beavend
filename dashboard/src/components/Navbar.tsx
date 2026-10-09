@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
-import { AdminUser, Project, Environment } from '../api/client';
-import { LogOut, Layers, ChevronDown, GitBranch, User } from 'lucide-react';
+import { api, AdminUser, Project, Environment } from '../api/client';
+import { LogOut, Layers, ChevronDown, GitBranch, User, Plus } from 'lucide-react';
+import { Modal } from './ui/Modal';
+import { Input } from './ui/Form';
+import { Button } from './ui/Button';
+import { Alert } from './ui/Feedback';
 
 interface NavbarProps {
   user: AdminUser | null;
@@ -11,6 +15,7 @@ interface NavbarProps {
   onChangeProject: (projectID: string) => void;
   onChangeEnv: (env: string) => void;
   onLogout: () => void;
+  onRefreshProjects?: () => void;
 }
 
 const envColors: Record<string, string> = {
@@ -39,20 +44,60 @@ export const Navbar: React.FC<NavbarProps> = ({
   onChangeProject,
   onChangeEnv,
   onLogout,
+  onRefreshProjects,
 }) => {
-  const currentProjectData = projects.find((p) => p.id === currentProject);
+  const [showNewProjModal, setShowNewProjModal] = useState(false);
+  const [newProjId, setNewProjId] = useState('');
+  const [newProjName, setNewProjName] = useState('');
+  const [newProjDesc, setNewProjDesc] = useState('');
+  const [creatingProj, setCreatingProj] = useState(false);
+  const [createProjError, setCreateProjError] = useState<string | null>(null);
+
+  const handleCreateProject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreatingProj(true);
+    setCreateProjError(null);
+    try {
+      const cleanId = newProjId.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+      const created = await api.createProject({
+        id: cleanId,
+        name: newProjName.trim(),
+        description: newProjDesc.trim(),
+      });
+      setShowNewProjModal(false);
+      setNewProjId('');
+      setNewProjName('');
+      setNewProjDesc('');
+      if (onRefreshProjects) {
+        await onRefreshProjects();
+      }
+      onChangeProject(created.id);
+    } catch (err: any) {
+      setCreateProjError(err.message || 'Failed to create project');
+    } finally {
+      setCreatingProj(false);
+    }
+  };
+
+  const handleSelectProject = (val: string) => {
+    if (val === '__new__') {
+      setShowNewProjModal(true);
+      return;
+    }
+    onChangeProject(val);
+  };
 
   return (
     <header className="h-[60px] bg-neutral-950/90 backdrop-blur-md border-b border-neutral-800/80 flex items-center justify-between px-5 z-10 flex-shrink-0">
       {/* Left: Context selectors */}
       <div className="flex items-center gap-2">
         {/* Project selector */}
-        <div className="flex items-center gap-1.5 bg-neutral-900 border border-neutral-800 rounded-lg px-2.5 py-1.5">
+        <div className="flex items-center gap-1.5 bg-neutral-900 border border-neutral-800 rounded-lg pl-2.5 pr-1.5 py-1.5">
           <Layers className="w-3.5 h-3.5 text-neutral-500 flex-shrink-0" />
           <select
             value={currentProject}
-            onChange={(e) => onChangeProject(e.target.value)}
-            className="bg-transparent text-xs text-neutral-200 font-medium focus:outline-none cursor-pointer pr-4"
+            onChange={(e) => handleSelectProject(e.target.value)}
+            className="bg-transparent text-xs text-neutral-200 font-medium focus:outline-none cursor-pointer pr-2"
           >
             {projects.length === 0 ? (
               <option value="default" className="bg-neutral-900">default</option>
@@ -63,7 +108,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </option>
               ))
             )}
+            <option disabled className="bg-neutral-900 text-neutral-600">──────────</option>
+            <option value="__new__" className="bg-neutral-900 text-emerald-400 font-medium">
+              + New Project...
+            </option>
           </select>
+          <button
+            type="button"
+            onClick={() => setShowNewProjModal(true)}
+            className="p-1 hover:bg-neutral-800 text-neutral-400 hover:text-emerald-400 rounded transition-colors"
+            title="Create New Project"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
         </div>
 
         <ChevronDown className="w-3.5 h-3.5 text-neutral-700 rotate-[-90deg]" />
@@ -120,6 +177,72 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         </div>
       )}
+
+      {/* Quick New Project Modal */}
+      <Modal
+        open={showNewProjModal}
+        onClose={() => {
+          setShowNewProjModal(false);
+          setCreateProjError(null);
+        }}
+        title="Create New Project"
+        description="A project is an isolated tenant with its own AI apps, auth config, and environments."
+        size="sm"
+      >
+        {createProjError && (
+          <Alert variant="error" className="mb-4" onDismiss={() => setCreateProjError(null)}>
+            {createProjError}
+          </Alert>
+        )}
+        <form onSubmit={handleCreateProject} className="space-y-4">
+          <Input
+            label="Project Name"
+            required
+            placeholder="e.g. Mobile App"
+            value={newProjName}
+            onChange={(e) => {
+              setNewProjName(e.target.value);
+              if (!newProjId || newProjId === newProjName.toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, -1)) {
+                setNewProjId(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '-'));
+              }
+            }}
+          />
+          <Input
+            label="Project ID"
+            required
+            placeholder="e.g. mobile-app"
+            value={newProjId}
+            onChange={(e) => setNewProjId(e.target.value)}
+            className="font-mono text-xs"
+            hint="Unique identifier used in API headers (X-Project-ID)"
+          />
+          <Input
+            label="Description (Optional)"
+            placeholder="e.g. AI backend for iOS and Android"
+            value={newProjDesc}
+            onChange={(e) => setNewProjDesc(e.target.value)}
+          />
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowNewProjModal(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              loading={creatingProj}
+              icon={<Plus className="w-3.5 h-3.5" />}
+            >
+              Create Project
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </header>
   );
 };

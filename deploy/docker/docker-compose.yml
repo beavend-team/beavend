@@ -31,6 +31,28 @@ services:
       timeout: 3s
       retries: 5
 
+  searxng:
+    image: searxng/searxng:latest
+    container_name: beavend-searxng
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./searxng:/etc/searxng:ro
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8081/
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "1m"
+        max-file: "1"
+
   beavend:
     build:
       context: ../..
@@ -50,6 +72,7 @@ services:
       BEAVEND_HTTP_PORT: 8080
       BEAVEND_DATABASE_URL: postgres://beavend:beavend@postgres:5432/beavend?sslmode=disable
       BEAVEND_REDIS_URL: redis://valkey:6379/0
+      BEAVEND_SEARXNG_URL: http://searxng:8080
       BEAVEND_MASTER_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
       BEAVEND_ADMIN_EMAIL: admin@beavend.local
       BEAVEND_ADMIN_PASSWORD: adminpassword123
@@ -59,3 +82,4 @@ services:
 volumes:
   postgres_data:
   valkey_data:
+

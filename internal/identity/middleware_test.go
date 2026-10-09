@@ -2,18 +2,20 @@ package identity
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/beavend/beavend/internal/core"
-	"github.com/beavend/beavend/internal/snapshot"
 )
 
 func TestAuthMiddleware(t *testing.T) {
@@ -23,7 +25,7 @@ func TestAuthMiddleware(t *testing.T) {
 	mgr.SetManual(testURL, fixture.jwksSet, 1*time.Hour)
 
 	verifier := NewVerifier(mgr)
-	registry := snapshot.NewRegistry()
+	registry := newMockSnapshotResolver()
 
 	// Register project snapshot
 	projectID := "proj_test"
@@ -34,6 +36,11 @@ func TestAuthMiddleware(t *testing.T) {
 		Issuer:   "https://auth.example.com",
 		Audience: []string{"test-app"},
 		JWKSURL:  testURL,
+	}
+	snap.Apps["assistant"] = &core.AIApp{
+		ID:         "assistant",
+		Name:       "Assistant",
+		AuthConfig: snap.AuthConfig,
 	}
 	registry.Swap(snap)
 
@@ -196,5 +203,397 @@ func TestAuthMiddleware(t *testing.T) {
 
 		handler.ServeHTTP(w, req)
 		assert.False(t, handled)
+	})
+
+	t.Run("allow anonymous request when configured", func(t *testing.T) {
+		handled = false
+		anonSnap := core.NewSnapshot("proj_anon", "production", 1)
+		anonSnap.Apps["public"] = &core.AIApp{
+			ID:   "public",
+			Name: "Public",
+			AuthConfig: &core.AuthConfig{
+				Provider:       "jwt",
+				AllowAnonymous: true,
+			},
+		}
+		registry.Swap(anonSnap)
+
+		req := httptest.NewRequest(http.MethodGet, "/v1/apps/public", nil)
+		req.Header.Set("X-Project-ID", "proj_anon")
+		req.Header.Set("X-Environment", "production")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.True(t, handled)
+		assert.Equal(t, http.StatusOK, w.Code)
+		require.NotNil(t, capturedID)
+		assert.Equal(t, "anonymous", capturedID.Subject)
+		assert.Equal(t, "proj_anon", capturedID.Project)
+	})
+
+	t.Run("valid app api key authenticates successfully", func(t *testing.T) {
+		handled = false
+		appKeyStr := "bv_app_sec_test_secret_1234567890abcdef"
+		h := sha256.Sum256([]byte(appKeyStr))
+		keyHash := hex.EncodeToString(h[:])
+
+		snapWithKey := core.NewSnapshot("proj_key", "production", 1)
+		snapWithKey.AppAPIKeys[keyHash] = &core.AppAPIKey{
+			ID:          "key_1",
+			AppID:       "my_app",
+			ProjectID:   "proj_key",
+			Environment: "production",
+			Name:        "Test Backend Key",
+			KeyPrefix:   "bv_app_sec_test",
+			KeyHash:     keyHash,
+			CreatedAt:   time.Now().UTC(),
+		}
+		registry.Swap(snapWithKey)
+
+		// Create chi router to test URLParam matching
+		r := chi.NewRouter()
+		r.Use(AuthMiddleware(registry, verifier))
+		r.Post("/v1/apps/{ai_app_id}/chat", nextHandler)
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/apps/my_app/chat", nil)
+		req.Header.Set("Authorization", "Bearer "+appKeyStr)
+		req.Header.Set("X-Project-ID", "proj_key")
+		req.Header.Set("X-Environment", "production")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.True(t, handled)
+		assert.Equal(t, http.StatusOK, w.Code)
+		require.NotNil(t, capturedID)
+		assert.Equal(t, "my_app", capturedID.Subject)
+		assert.Equal(t, "beavend:app_key", capturedID.Issuer)
+		assert.Equal(t, "my_app", capturedID.Claims["app_id"])
+		assert.Equal(t, "key_1", capturedID.Claims["key_id"])
+	})
+
+	t.Run("app api key scoped to different app returns 403", func(t *testing.T) {
+		handled = false
+		appKeyStr := "bv_app_sec_test_secret_1234567890abcdef"
+
+		r := chi.NewRouter()
+		r.Use(AuthMiddleware(registry, verifier))
+		r.Post("/v1/apps/{ai_app_id}/chat", nextHandler)
+
+		// Request for different_app with my_app's key
+		req := httptest.NewRequest(http.MethodPost, "/v1/apps/different_app/chat", nil)
+		req.Header.Set("Authorization", "Bearer "+appKeyStr)
+		req.Header.Set("X-Project-ID", "proj_key")
+		req.Header.Set("X-Environment", "production")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.False(t, handled)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("invalid app api key returns 401", func(t *testing.T) {
+		handled = false
+		req := httptest.NewRequest(http.MethodPost, "/v1/apps/my_app/chat", nil)
+		req.Header.Set("Authorization", "Bearer bv_app_invalid_key_value")
+		req.Header.Set("X-Project-ID", "proj_key")
+		req.Header.Set("X-Environment", "production")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.False(t, handled)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+
+	t.Run("unauthenticated request with X-Playground header without admin credentials is rejected", func(t *testing.T) {
+		handled = false
+		capturedID = nil
+		req := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/chat", nil)
+		req.Header.Set("X-Project-ID", projectID)
+		req.Header.Set("X-Environment", env)
+		req.Header.Set("X-Playground", "true")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.False(t, handled)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Nil(t, capturedID)
+	})
+
+	t.Run("playground request with X-Admin-Token populates admin identity", func(t *testing.T) {
+		handled = false
+		capturedID = nil
+
+		adminValidator := AdminTokenValidatorFunc(func(tokenStr string) (*AdminClaims, error) {
+			if tokenStr == "valid-admin-session-token" {
+				return &AdminClaims{
+					UserID: "admin_123",
+					Email:  "admin@example.com",
+					Role:   "owner",
+				}, nil
+			}
+			return nil, assert.AnError
+		})
+
+		handlerWithAdmin := AuthMiddleware(registry, verifier, WithAdminTokenValidator(adminValidator))(nextHandler)
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/chat", nil)
+		req.Header.Set("X-Project-ID", projectID)
+		req.Header.Set("X-Environment", env)
+		req.Header.Set("X-Playground", "true")
+		req.Header.Set("X-Admin-Token", "valid-admin-session-token")
+		w := httptest.NewRecorder()
+
+		handlerWithAdmin.ServeHTTP(w, req)
+
+		assert.True(t, handled)
+		assert.Equal(t, http.StatusOK, w.Code)
+		require.NotNil(t, capturedID)
+		assert.Equal(t, "admin_123", capturedID.Subject)
+		assert.Equal(t, "beavend:admin", capturedID.Issuer)
+		assert.Equal(t, "admin@example.com", capturedID.Claims["email"])
+		assert.Equal(t, "owner", capturedID.Claims["role"])
+	})
+
+	t.Run("admin bearer token authorizes as admin directly", func(t *testing.T) {
+		handled = false
+		capturedID = nil
+
+		adminValidator := AdminTokenValidatorFunc(func(tokenStr string) (*AdminClaims, error) {
+			if tokenStr == "admin-token-xyz" {
+				return &AdminClaims{
+					UserID: "admin_456",
+					Email:  "dev@example.com",
+					Role:   "editor",
+				}, nil
+			}
+			return nil, assert.AnError
+		})
+
+		handlerWithAdmin := AuthMiddleware(registry, verifier, WithAdminTokenValidator(adminValidator))(nextHandler)
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/chat", nil)
+		req.Header.Set("Authorization", "Bearer admin-token-xyz")
+		req.Header.Set("X-Project-ID", projectID)
+		req.Header.Set("X-Environment", env)
+		w := httptest.NewRecorder()
+
+		handlerWithAdmin.ServeHTTP(w, req)
+
+		assert.True(t, handled)
+		assert.Equal(t, http.StatusOK, w.Code)
+		require.NotNil(t, capturedID)
+		assert.Equal(t, "admin_456", capturedID.Subject)
+		assert.Equal(t, "beavend:admin", capturedID.Issuer)
+		assert.Equal(t, "dev@example.com", capturedID.Claims["email"])
+		assert.Equal(t, "editor", capturedID.Claims["role"])
+	})
+
+	t.Run("playground request with simulated JSON token populates claims when admin token is provided", func(t *testing.T) {
+		handled = false
+		capturedID = nil
+
+		// Create snapshot with no auth provider configured
+		unauthSnap := core.NewSnapshot("proj_unauth", "production", 1)
+		unauthSnap.AuthConfig = nil
+		registry.Swap(unauthSnap)
+
+		adminValidator := AdminTokenValidatorFunc(func(tokenStr string) (*AdminClaims, error) {
+			if tokenStr == "admin-key" {
+				return &AdminClaims{UserID: "admin_root", Email: "admin@root.com", Role: "owner"}, nil
+			}
+			return nil, assert.AnError
+		})
+		handlerWithAdmin := AuthMiddleware(registry, verifier, WithAdminTokenValidator(adminValidator))(nextHandler)
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/chat", nil)
+		req.Header.Set("Authorization", `Bearer {"sub":"test_user_789","plan":"pro","tier":"gold"}`)
+		req.Header.Set("X-Project-ID", "proj_unauth")
+		req.Header.Set("X-Environment", "production")
+		req.Header.Set("X-Playground", "true")
+		req.Header.Set("X-Admin-Token", "admin-key")
+		w := httptest.NewRecorder()
+
+		handlerWithAdmin.ServeHTTP(w, req)
+
+		assert.True(t, handled)
+		assert.Equal(t, http.StatusOK, w.Code)
+		require.NotNil(t, capturedID)
+		assert.Equal(t, "test_user_789", capturedID.Subject)
+		assert.Equal(t, "beavend:playground_simulated", capturedID.Issuer)
+		assert.Equal(t, "pro", capturedID.Claims["plan"])
+		assert.Equal(t, "gold", capturedID.Claims["tier"])
+	})
+
+	t.Run("simulated JSON token without admin credentials is rejected", func(t *testing.T) {
+		handled = false
+		capturedID = nil
+
+		unauthSnap := core.NewSnapshot("proj_unauth_2", "production", 1)
+		unauthSnap.AuthConfig = nil
+		registry.Swap(unauthSnap)
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/chat", nil)
+		req.Header.Set("Authorization", `Bearer {"sub":"malicious_user","role":"admin"}`)
+		req.Header.Set("X-Project-ID", "proj_unauth_2")
+		req.Header.Set("X-Environment", "production")
+		req.Header.Set("X-Playground", "true")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.False(t, handled)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Nil(t, capturedID)
+	})
+
+	t.Run("app-level anonymous provider allows requests without token", func(t *testing.T) {
+		handled = false
+		capturedID = nil
+
+		anonSnap := core.NewSnapshot("proj_anon", "production", 1)
+		// Project requires strict auth
+		anonSnap.AuthConfig = &core.AuthConfig{
+			Provider: "oidc",
+			Issuer:   "https://strict.auth.com",
+			JWKSURL:  "https://strict.auth.com/jwks.json",
+		}
+		// But app has anonymous override
+		anonSnap.Apps["public-bot"] = &core.AIApp{
+			ID:   "public-bot",
+			Name: "Public Bot",
+			AuthConfig: &core.AuthConfig{
+				Provider: "anonymous",
+			},
+		}
+		registry.Swap(anonSnap)
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/apps/public-bot/chat", nil)
+		req.Header.Set("X-Project-ID", "proj_anon")
+		req.Header.Set("X-Environment", "production")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.True(t, handled)
+		assert.Equal(t, http.StatusOK, w.Code)
+		require.NotNil(t, capturedID)
+		assert.Equal(t, "anonymous", capturedID.Subject)
+		assert.Equal(t, "anonymous", capturedID.Issuer)
+		assert.Equal(t, true, capturedID.Claims["anonymous"])
+	})
+
+	t.Run("app-level auth override uses app's specific provider", func(t *testing.T) {
+		handled = false
+		capturedID = nil
+
+		appAuthSnap := core.NewSnapshot("proj_custom_app", "production", 1)
+		// Project has dummy auth
+		appAuthSnap.AuthConfig = &core.AuthConfig{
+			Provider: "oidc",
+			Issuer:   "https://project.auth.com",
+			JWKSURL:  "https://project.auth.com/jwks.json",
+		}
+		// App overrides with fixture JWKS
+		appAuthSnap.Apps["custom-app"] = &core.AIApp{
+			ID:   "custom-app",
+			Name: "Custom App",
+			AuthConfig: &core.AuthConfig{
+				Provider: "oidc",
+				Issuer:   "https://auth.example.com",
+				Audience: []string{"custom-app-aud"},
+				JWKSURL:  testURL,
+			},
+		}
+		registry.Swap(appAuthSnap)
+
+		tok := buildAndSignToken(t,
+			fixture.privJWK,
+			jwa.RS256,
+			"https://auth.example.com",
+			"custom_user",
+			[]string{"custom-app-aud"},
+			time.Now().Add(1*time.Hour),
+			time.Time{},
+			map[string]any{"plan": "enterprise"},
+		)
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/apps/custom-app/chat", nil)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		req.Header.Set("X-Project-ID", "proj_custom_app")
+		req.Header.Set("X-Environment", "production")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.True(t, handled)
+		assert.Equal(t, http.StatusOK, w.Code)
+		require.NotNil(t, capturedID)
+		assert.Equal(t, "custom_user", capturedID.Subject)
+		assert.Equal(t, "enterprise", capturedID.Claims["plan"])
+	})
+
+	t.Run("app-level anonymous provider allows unauthenticated request", func(t *testing.T) {
+		handled = false
+		capturedID = nil
+
+		anonSnap := core.NewSnapshot("proj_anon", "production", 1)
+		anonSnap.Apps["anon-app"] = &core.AIApp{
+			ID:   "anon-app",
+			Name: "Anon App",
+			AuthConfig: &core.AuthConfig{
+				Provider: "anonymous",
+			},
+		}
+		registry.Swap(anonSnap)
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/apps/anon-app/chat", nil)
+		req.Header.Set("X-Project-ID", "proj_anon")
+		req.Header.Set("X-Environment", "production")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.True(t, handled)
+		assert.Equal(t, http.StatusOK, w.Code)
+		require.NotNil(t, capturedID)
+		assert.Equal(t, "anonymous", capturedID.Subject)
+		assert.Equal(t, true, capturedID.Claims["anonymous"])
+	})
+
+	t.Run("app-level oidc provider with allow_anonymous allows unauthenticated request", func(t *testing.T) {
+		handled = false
+		capturedID = nil
+
+		anonSnap := core.NewSnapshot("proj_anon_override", "production", 1)
+		anonSnap.Apps["anon-override-app"] = &core.AIApp{
+			ID:   "anon-override-app",
+			Name: "Anon Override App",
+			AuthConfig: &core.AuthConfig{
+				Provider:       "oidc",
+				Issuer:         "https://auth.example.com",
+				Audience:       []string{"test-app"},
+				JWKSURL:        testURL,
+				AllowAnonymous: true,
+			},
+		}
+		registry.Swap(anonSnap)
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/apps/anon-override-app/chat", nil)
+		req.Header.Set("X-Project-ID", "proj_anon_override")
+		req.Header.Set("X-Environment", "production")
+		w := httptest.NewRecorder()
+
+		handler.ServeHTTP(w, req)
+
+		assert.True(t, handled)
+		assert.Equal(t, http.StatusOK, w.Code)
+		require.NotNil(t, capturedID)
+		assert.Equal(t, "anonymous", capturedID.Subject)
+		assert.Equal(t, true, capturedID.Claims["anonymous"])
 	})
 }

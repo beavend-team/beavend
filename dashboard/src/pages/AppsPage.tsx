@@ -3,11 +3,10 @@ import { api, AIApp, Prompt, ModelRouting } from '../api/client';
 import { AppWorkspace } from './AppWorkspace';
 import { Bot, Plus, Trash2, ChevronRight, Sparkles, Clock, Cpu } from 'lucide-react';
 import { Card } from '../components/ui/Card';
-import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { Input, Textarea, Select } from '../components/ui/Form';
-import { Alert, EmptyState, Loading } from '../components/ui/Feedback';
+import { Alert, EmptyState, Loading, ErrorBoundary } from '../components/ui/Feedback';
 import { formatRelativeTime } from '../lib/utils';
 
 export const AppsPage: React.FC = () => {
@@ -91,11 +90,28 @@ export const AppsPage: React.FC = () => {
 
   if (selectedAppId) {
     return (
-      <AppWorkspace
-        appId={selectedAppId}
-        onBack={() => setSelectedAppId(null)}
-        onRefreshApps={loadData}
-      />
+      <ErrorBoundary
+        fallback={(err, reset) => (
+          <div className="space-y-4 max-w-[800px] p-6 bg-red-950/20 border border-red-900/40 rounded-xl">
+            <h2 className="text-base font-semibold text-red-200">Unable to display Application Workspace</h2>
+            <p className="text-xs text-red-400 font-mono">{err.message}</p>
+            <div className="flex gap-2">
+              <Button size="sm" variant="ghost" onClick={() => setSelectedAppId(null)}>
+                Back to Applications
+              </Button>
+              <Button size="sm" variant="secondary" onClick={reset}>
+                Retry
+              </Button>
+            </div>
+          </div>
+        )}
+      >
+        <AppWorkspace
+          appId={selectedAppId}
+          onBack={() => setSelectedAppId(null)}
+          onRefreshApps={loadData}
+        />
+      </ErrorBoundary>
     );
   }
 
@@ -150,17 +166,14 @@ export const AppsPage: React.FC = () => {
                 <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/15 flex items-center justify-center">
                   <Bot className="w-4 h-4 text-emerald-400" />
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <Badge variant="mono">v{app.active_version}</Badge>
-                  <button
-                    onClick={(e) => handleDelete(app.id, e)}
-                    disabled={deleting === app.id}
-                    className="p-1 text-neutral-600 hover:text-red-400 hover:bg-neutral-800 rounded transition-colors opacity-0 group-hover:opacity-100"
-                    title="Delete app"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                <button
+                  onClick={(e) => handleDelete(app.id, e)}
+                  disabled={deleting === app.id}
+                  className="p-1 text-neutral-600 hover:text-red-400 hover:bg-neutral-800 rounded transition-colors opacity-0 group-hover:opacity-100"
+                  title="Delete app"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
               </div>
 
               <div className="space-y-1 mb-3">
@@ -198,6 +211,11 @@ export const AppsPage: React.FC = () => {
         size="md"
       >
         {error && <Alert variant="error" className="mb-4" onDismiss={() => setError(null)}>{error}</Alert>}
+        {models.length === 0 && (
+          <Alert variant="warning" className="mb-4">
+            ⚠️ <b>No model routing configured yet:</b> Outgoing AI completions will fail until a model route (e.g. &quot;fast&quot;) is mapped in <b>Models &amp; Routing</b>.
+          </Alert>
+        )}
 
         <form onSubmit={handleCreate} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">

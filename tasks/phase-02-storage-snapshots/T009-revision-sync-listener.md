@@ -1,4 +1,4 @@
-# T009 — Redis Pub/Sub Revision Synchronization Listener
+# T009 - Redis Pub/Sub Revision Synchronization Listener
 
 ## Goal
 Implement the real-time configuration revision invalidation listener using Redis pub/sub with periodic polling backstop in `internal/snapshot/sync`.

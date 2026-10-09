@@ -2,9 +2,16 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/beavend/beavend/internal/cache"
 	"github.com/beavend/beavend/internal/core"
@@ -423,6 +430,126 @@ func TestLoop_CELPolicyDenial(t *testing.T) {
 	}
 }
 
+func TestLoop_EntitlementToolAuthorization(t *testing.T) {
+	policyCompiler, err := policy.NewCompiler()
+	require.NoError(t, err)
+	policyEvaluator, err := policy.NewEvaluator(policyCompiler)
+	require.NoError(t, err)
+
+	snap := core.NewSnapshot("proj_1", "dev", 1)
+	snap.Policies["enterprise_tool_policy"] = &core.PolicyDefinition{
+		ID:         "enterprise_tool_policy",
+		Expression: `has(claims.plan) && claims.plan == "enterprise"`,
+	}
+	compiled, err := policyCompiler.Compile(snap.Policies["enterprise_tool_policy"].Expression)
+	require.NoError(t, err)
+	snap.CompiledPolicies["enterprise_tool_policy"] = compiled
+
+	snap.Apps["app_1"] = &core.AIApp{
+		ID:      "app_1",
+		ToolIDs: []string{"enterprise_tool"},
+	}
+	snap.Tools["enterprise_tool"] = &core.ToolDefinition{
+		ID:            "enterprise_tool",
+		Name:          "enterprise_tool",
+		Authorization: "enterprise_tool_policy",
+		Executor: core.ExecutorConfig{
+			Type: "client_side",
+		},
+	}
+
+	loop := NewLoop(LoopConfig{
+		PolicyEvaluator: policyEvaluator,
+	})
+
+	t.Run("denies tool execution when required claim missing", func(t *testing.T) {
+		var step int
+		provider := &mockProvider{
+			chatFunc: func(_ context.Context, req core.ChatRequest) (*core.ChatResponse, error) {
+				step++
+				if step == 1 {
+					return &core.ChatResponse{
+						ID: "resp_1",
+						Message: core.ChatMessage{
+							Role: "assistant",
+							ToolCalls: []core.ToolCall{
+								{ID: "c_1", Name: "enterprise_tool"},
+							},
+						},
+					}, nil
+				}
+				lastMsg := req.Messages[len(req.Messages)-1]
+				return &core.ChatResponse{
+					ID: "resp_2",
+					Message: core.ChatMessage{
+						Role:    "assistant",
+						Content: fmt.Sprintf("Tool rejected with: %s", lastMsg.Content),
+					},
+				}, nil
+			},
+		}
+
+		state := &core.ReqState{
+			RequestID: "req_ent_deny",
+			ProjectID: "proj_1",
+			AIAppID:   "app_1",
+			Snapshot:  snap,
+			AIApp:     snap.Apps["app_1"],
+			Identity: &core.Identity{
+				Subject: "alice",
+				Claims: map[string]any{
+					"plan": "starter",
+				},
+			},
+			ChatRequest: &core.ChatRequest{
+				Messages: []core.ChatMessage{{Role: "user", Content: "Run enterprise tool"}},
+			},
+		}
+
+		err := loop.Run(context.Background(), state, provider)
+		require.NoError(t, err)
+		assert.Contains(t, state.ChatResponse.Message.Content, "authorization denied")
+	})
+
+	t.Run("allows tool execution when claim matches", func(t *testing.T) {
+		provider := &mockProvider{
+			chatFunc: func(_ context.Context, req core.ChatRequest) (*core.ChatResponse, error) {
+				return &core.ChatResponse{
+					ID: "resp_1",
+					Message: core.ChatMessage{
+						Role: "assistant",
+						ToolCalls: []core.ToolCall{
+							{ID: "c_1", Name: "enterprise_tool"},
+						},
+					},
+				}, nil
+			},
+		}
+
+		state := &core.ReqState{
+			RequestID: "req_ent_allow",
+			ProjectID: "proj_1",
+			AIAppID:   "app_1",
+			Snapshot:  snap,
+			AIApp:     snap.Apps["app_1"],
+			Identity: &core.Identity{
+				Subject: "bob",
+				Claims: map[string]any{
+					"plan": "enterprise",
+				},
+			},
+			ChatRequest: &core.ChatRequest{
+				Messages: []core.ChatMessage{{Role: "user", Content: "Run enterprise tool"}},
+			},
+		}
+
+		err := loop.Run(context.Background(), state, provider)
+		require.NoError(t, err)
+		assert.Equal(t, "client_tool", state.ChatResponse.FinishReason)
+		require.Len(t, state.ChatResponse.Message.ToolCalls, 1)
+	})
+}
+
 func TestLoop_ToolResultCaching(t *testing.T) {
 	ctx := context.Background()
 	cacheStore := cache.NewMemoryCacheStore()
@@ -600,5 +727,133 @@ func TestDefaultExecutorRegistry_MCPAndSQL(t *testing.T) {
 	if _, ok := sqlExec.(*tools.SQLTemplateExecutor); !ok {
 		t.Fatalf("expected *tools.SQLTemplateExecutor, got %T", sqlExec)
 	}
+
+	// Test SearXNG tool resolution
+	searxngDef := core.ToolDefinition{
+		ID:   "web_search",
+		Name: "web_search",
+		Executor: core.ExecutorConfig{
+			Type: "searxng",
+		},
+	}
+	searxngExec, err := registry.GetExecutor(searxngDef)
+	if err != nil {
+		t.Fatalf("failed to resolve searxng executor: %v", err)
+	}
+	if _, ok := searxngExec.(*tools.SearXNGExecutor); !ok {
+		t.Fatalf("expected *tools.SearXNGExecutor, got %T", searxngExec)
+	}
 }
+
+func TestLoop_Unary_WebSearchAutoTool(t *testing.T) {
+	ctx := context.Background()
+
+	// Mock SearXNG server
+	searxServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"query":             "latest golang",
+			"number_of_results": 1,
+			"results": []map[string]any{
+				{
+					"title":   "Go 1.24 is released",
+					"url":     "https://go.dev/blog/go1.24",
+					"content": "Announcement of Go 1.24.",
+				},
+			},
+		})
+	}))
+	defer searxServer.Close()
+
+	searxClient := tools.NewSearXNGClient(searxServer.URL, true, 2*time.Second, searxServer.Client())
+	registry := NewDefaultExecutorRegistry(nil, false)
+	registry.SetSearXNGClient(searxClient)
+
+	snap := core.NewSnapshot("proj_1", "dev", 1)
+	snap.Apps["search_assistant"] = &core.AIApp{
+		ID:   "search_assistant",
+		Name: "Search Assistant",
+		Search: core.SearchConfig{
+			Enabled:    true,
+			MaxResults: 3,
+		},
+	}
+
+	var step int
+	provider := &mockProvider{
+		chatFunc: func(_ context.Context, req core.ChatRequest) (*core.ChatResponse, error) {
+			step++
+			if step == 1 {
+				// Verify web_search is in req.Tools
+				found := false
+				for _, t := range req.Tools {
+					if t.Name == "web_search" {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected web_search tool in chat request tools, got %+v", req.Tools)
+				}
+
+				return &core.ChatResponse{
+					Message: core.ChatMessage{
+						Role: "assistant",
+						ToolCalls: []core.ToolCall{
+							{
+								ID:        "call_s1",
+								Name:      "web_search",
+								Arguments: `{"query": "latest golang"}`,
+							},
+						},
+					},
+				}, nil
+			}
+
+			// Turn 2: Verify tool result was fed back
+			if len(req.Messages) < 3 {
+				t.Fatalf("expected at least 3 messages on turn 2, got %d", len(req.Messages))
+			}
+			lastMsg := req.Messages[len(req.Messages)-1]
+			if lastMsg.Role != "tool" {
+				t.Fatalf("expected last message to be tool, got %s", lastMsg.Role)
+			}
+			if !strings.Contains(lastMsg.Content, "Go 1.24 is released") {
+				t.Fatalf("expected search content in tool response, got %s", lastMsg.Content)
+			}
+
+			return &core.ChatResponse{
+				Message: core.ChatMessage{
+					Role:    "assistant",
+					Content: "Go 1.24 was recently released with many improvements.",
+				},
+			}, nil
+		},
+	}
+
+	loop := NewLoop(LoopConfig{
+		ExecutorRegistry: registry,
+	})
+
+	state := &core.ReqState{
+		Snapshot: snap,
+		AIAppID:  "search_assistant",
+		AIApp:    snap.Apps["search_assistant"],
+		ChatRequest: &core.ChatRequest{
+			Messages: []core.ChatMessage{
+				{Role: "user", Content: "What is the latest Go version?"},
+			},
+		},
+	}
+
+	err := loop.Run(ctx, state, provider)
+	if err != nil {
+		t.Fatalf("loop run failed: %v", err)
+	}
+
+	if state.ChatResponse == nil || !strings.Contains(state.ChatResponse.Message.Content, "Go 1.24") {
+		t.Fatalf("unexpected final response: %+v", state.ChatResponse)
+	}
+}
+
 

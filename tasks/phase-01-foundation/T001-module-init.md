@@ -1,4 +1,4 @@
-# T001 — Go Module Initialization, Dependency Pinning, and Project Layout
+# T001 - Go Module Initialization, Dependency Pinning, and Project Layout
 
 ## Goal
 Initialize the Go module, establish internal package boundaries, and pin techstack-approved dependencies in `go.mod`.

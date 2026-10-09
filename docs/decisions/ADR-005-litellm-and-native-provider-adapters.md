@@ -1,4 +1,4 @@
-# ADR-005 — LiteLLM Gateway Default with Native OpenAI-Compatible Adapter
+# ADR-005: LiteLLM Gateway Default with Native OpenAI-Compatible Adapter
 
 ## Status
 Accepted

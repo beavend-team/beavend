@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/beavend/beavend/internal/configcode"
-	"github.com/go-chi/chi/v5"
+	chi "github.com/go-chi/chi/v5"
 )
 
 // HandleExportConfig exports the declarative configuration document for a project environment as YAML.

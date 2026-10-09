@@ -1,4 +1,4 @@
-# T041 — Admin Authentication, Sessions, RBAC & Audit Logging
+# T041 - Admin Authentication, Sessions, RBAC & Audit Logging
 
 * **Status:** Completed
 

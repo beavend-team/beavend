@@ -1,4 +1,4 @@
-# ADR-004 — CEL (Common Expression Language) for Authorization and Limit Tiers
+# ADR-004: CEL (Common Expression Language) for Authorization and Limit Tiers
 
 ## Status
 Accepted

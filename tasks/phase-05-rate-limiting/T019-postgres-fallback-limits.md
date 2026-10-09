@@ -1,4 +1,4 @@
-# T019 — PostgreSQL Fallback Limit Store [Completed]
+# T019 - PostgreSQL Fallback Limit Store [Completed]
 
 * **Status:** Completed
 

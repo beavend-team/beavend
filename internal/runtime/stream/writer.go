@@ -94,7 +94,7 @@ func (wr *Writer) WriteEvent(w io.Writer, event core.StreamEvent) error {
 	var payload any
 
 	switch event.Type {
-	case "delta":
+	case "delta", "thinking":
 		payload = map[string]string{
 			"text": event.Delta,
 		}

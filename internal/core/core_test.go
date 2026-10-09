@@ -197,3 +197,179 @@ func TestLimitRule_JSON(t *testing.T) {
 		})
 	}
 }
+
+func TestAIApp_AuthJSON(t *testing.T) {
+	raw := `{
+		"id": "app_1",
+		"name": "Test App",
+		"auth": {
+			"provider": "firebase",
+			"project_id": "demo-proj"
+		}
+	}`
+
+	var app AIApp
+	if err := json.Unmarshal([]byte(raw), &app); err != nil {
+		t.Fatalf("failed to unmarshal AIApp: %v", err)
+	}
+	if app.AuthConfig == nil || app.AuthConfig.Provider != "firebase" {
+		t.Fatalf("expected firebase auth config, got %+v", app.AuthConfig)
+	}
+
+	// Test auth_config alternate key
+	rawAlt := `{
+		"id": "app_2",
+		"name": "Alt App",
+		"auth_config": {
+			"provider": "supabase"
+		}
+	}`
+	var appAlt AIApp
+	if err := json.Unmarshal([]byte(rawAlt), &appAlt); err != nil {
+		t.Fatalf("failed to unmarshal AIApp: %v", err)
+	}
+	if appAlt.AuthConfig == nil || appAlt.AuthConfig.Provider != "supabase" {
+		t.Fatalf("expected supabase auth config, got %+v", appAlt.AuthConfig)
+	}
+}
+
+func TestAIApp_ModelRoutesJSON(t *testing.T) {
+	raw := `{
+		"id": "app_routes",
+		"name": "Multimodal App",
+		"model_routes": {
+			"default": "fast",
+			"rules": [
+				{
+					"when": {
+						"input_has": ["image"],
+						"output": ["text"],
+						"metadata": {"complexity": "high"},
+						"expr": "claims.role == 'admin'"
+					},
+					"use": "vision"
+				}
+			]
+		}
+	}`
+
+	var app AIApp
+	if err := json.Unmarshal([]byte(raw), &app); err != nil {
+		t.Fatalf("failed to unmarshal AIApp with model_routes: %v", err)
+	}
+
+	if app.ModelRoutes == nil {
+		t.Fatalf("expected ModelRoutes to be non-nil")
+	}
+	if app.ModelRoutes.Default != "fast" {
+		t.Errorf("expected default 'fast', got %q", app.ModelRoutes.Default)
+	}
+	if len(app.ModelRoutes.Rules) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(app.ModelRoutes.Rules))
+	}
+
+	rule := app.ModelRoutes.Rules[0]
+	if rule.Use != "vision" {
+		t.Errorf("expected rule use 'vision', got %q", rule.Use)
+	}
+	if len(rule.When.InputHas) != 1 || rule.When.InputHas[0] != "image" {
+		t.Errorf("expected input_has ['image'], got %v", rule.When.InputHas)
+	}
+	if len(rule.When.Output) != 1 || rule.When.Output[0] != "text" {
+		t.Errorf("expected output ['text'], got %v", rule.When.Output)
+	}
+	if rule.When.Metadata["complexity"] != "high" {
+		t.Errorf("expected metadata complexity 'high', got %v", rule.When.Metadata)
+	}
+	if rule.When.Expr != "claims.role == 'admin'" {
+		t.Errorf("expected expr \"claims.role == 'admin'\", got %q", rule.When.Expr)
+	}
+
+	// Test round-trip serialization
+	data, err := json.Marshal(app)
+	if err != nil {
+		t.Fatalf("failed to marshal AIApp: %v", err)
+	}
+	var roundTrip AIApp
+	if err := json.Unmarshal(data, &roundTrip); err != nil {
+		t.Fatalf("failed to unmarshal round-trip AIApp: %v", err)
+	}
+	if roundTrip.ModelRoutes == nil || roundTrip.ModelRoutes.Default != "fast" {
+		t.Errorf("round-trip model routes mismatch: %+v", roundTrip.ModelRoutes)
+	}
+	if len(roundTrip.ModelRoutes.Rules) != 1 || roundTrip.ModelRoutes.Rules[0].Use != "vision" {
+		t.Errorf("round-trip rules mismatch: %+v", roundTrip.ModelRoutes.Rules)
+	}
+}
+
+func TestModelRouting_Modalities(t *testing.T) {
+	routing := ModelRouting{
+		ID:               "m_multimodal",
+		LogicalModel:     "omni",
+		Deployment:       "gemini-2.5-flash",
+		Adapter:          "litellm",
+		InputModalities:  []string{"text", "image", "audio"},
+		OutputModalities: []string{"text", "audio"},
+	}
+
+	data, err := json.Marshal(routing)
+	if err != nil {
+		t.Fatalf("failed to marshal ModelRouting: %v", err)
+	}
+
+	var parsed ModelRouting
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal ModelRouting: %v", err)
+	}
+
+	if len(parsed.InputModalities) != 3 || parsed.InputModalities[1] != "image" {
+		t.Errorf("expected 3 input modalities, got %v", parsed.InputModalities)
+	}
+	if len(parsed.OutputModalities) != 2 || parsed.OutputModalities[1] != "audio" {
+		t.Errorf("expected 2 output modalities, got %v", parsed.OutputModalities)
+	}
+}
+
+func TestChatRequest_OutputModalitiesAndAttachmentDigest(t *testing.T) {
+	req := ChatRequest{
+		Model:            "omni",
+		OutputModalities: []string{"text", "image"},
+		Attachments: []Attachment{
+			{
+				Type:     "audio",
+				MimeType: "audio/mp3",
+				URL:      "https://example.com/sound.mp3",
+				Digest:   "sha256:1234567890abcdef",
+			},
+			{
+				Type:     "video",
+				MimeType: "video/mp4",
+				URL:      "https://example.com/clip.mp4",
+				Digest:   "sha256:fedcba0987654321",
+			},
+		},
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("failed to marshal ChatRequest: %v", err)
+	}
+
+	var parsed ChatRequest
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal ChatRequest: %v", err)
+	}
+
+	if len(parsed.OutputModalities) != 2 || parsed.OutputModalities[1] != "image" {
+		t.Errorf("expected output modalities ['text', 'image'], got %v", parsed.OutputModalities)
+	}
+	if len(parsed.Attachments) != 2 {
+		t.Fatalf("expected 2 attachments, got %d", len(parsed.Attachments))
+	}
+	if parsed.Attachments[0].Type != "audio" || parsed.Attachments[0].Digest != "sha256:1234567890abcdef" {
+		t.Errorf("unexpected audio attachment: %+v", parsed.Attachments[0])
+	}
+	if parsed.Attachments[1].Type != "video" || parsed.Attachments[1].Digest != "sha256:fedcba0987654321" {
+		t.Errorf("unexpected video attachment: %+v", parsed.Attachments[1])
+	}
+}

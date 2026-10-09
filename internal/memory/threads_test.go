@@ -60,6 +60,42 @@ func TestMemoryThreadStore(t *testing.T) {
 	assert.ErrorIs(t, err, ErrThreadNotFound)
 }
 
+func TestMemoryThreadStore_CanonicalParts(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryThreadStore()
+
+	th := &core.Thread{
+		ID:          "th_parts",
+		ProjectID:   "proj1",
+		Environment: "prod",
+		Messages: []core.ChatMessage{
+			{
+				Role:    "user",
+				Content: "Here is the diagram",
+				Parts: []core.Part{
+					core.TextPart("Here is the diagram"),
+					core.MediaPart(&core.MediaRef{
+						MediaID:  "med_diag1",
+						MimeType: "image/png",
+						Digest:   "sha256:diag123",
+					}),
+				},
+			},
+		},
+	}
+
+	err := store.CreateThread(ctx, th)
+	require.NoError(t, err)
+
+	fetched, err := store.GetThread(ctx, "proj1", "prod", "th_parts")
+	require.NoError(t, err)
+	require.Len(t, fetched.Messages, 1)
+	require.Len(t, fetched.Messages[0].Parts, 2)
+	assert.Equal(t, core.PartTypeText, fetched.Messages[0].Parts[0].Type)
+	assert.Equal(t, core.PartTypeMedia, fetched.Messages[0].Parts[1].Type)
+	assert.Equal(t, "med_diag1", fetched.Messages[0].Parts[1].Media.MediaID)
+}
+
 func TestMemoryThreadStore_SubjectPurge(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryThreadStore()

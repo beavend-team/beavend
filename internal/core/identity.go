@@ -33,6 +33,7 @@ type AuthConfig struct {
 	AllowedAlgorithms []string      `json:"allowed_algorithms,omitempty" yaml:"allowed_algorithms,omitempty"`
 	ProjectID         string        `json:"project_id,omitempty" yaml:"project_id,omitempty"` // Provider project ID (e.g. Firebase project_id)
 	ClockSkew         time.Duration `json:"clock_skew,omitempty" yaml:"clock_skew,omitempty"`
+	AllowAnonymous    bool          `json:"allow_anonymous,omitempty" yaml:"allow_anonymous,omitempty"`
 }
 
 // Identity represents the normalized end-user identity derived from a validated token.

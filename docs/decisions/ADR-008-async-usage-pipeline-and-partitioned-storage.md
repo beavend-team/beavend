@@ -1,4 +1,4 @@
-# ADR-008 — Asynchronous Bounded Usage Pipeline and Partitioned Storage
+# ADR-008: Asynchronous Bounded Usage Pipeline and Partitioned Storage
 
 ## Status
 Accepted

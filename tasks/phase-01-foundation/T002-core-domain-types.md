@@ -1,4 +1,4 @@
-# T002 — Core Domain Interfaces and Models
+# T002 - Core Domain Interfaces and Models
 
 ## Goal
 Define the fundamental domain entities, data contracts, and component interfaces in `internal/core`.

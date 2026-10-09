@@ -1,4 +1,4 @@
-# ADR-011 — Ephemeral Caching and Response Acceleration
+# ADR-011: Ephemeral Caching and Response Acceleration
 
 ## Status
 Accepted

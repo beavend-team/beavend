@@ -21,9 +21,12 @@ import (
 	"github.com/beavend/beavend/internal/core"
 	"github.com/beavend/beavend/internal/identity"
 	"github.com/beavend/beavend/internal/limits"
+	"github.com/beavend/beavend/internal/media"
 	"github.com/beavend/beavend/internal/memory"
 	"github.com/beavend/beavend/internal/policy"
+	"github.com/beavend/beavend/internal/pricing"
 	"github.com/beavend/beavend/internal/providers/litellm"
+	"github.com/beavend/beavend/internal/providers/openaicompat"
 	"github.com/beavend/beavend/internal/routing"
 	"github.com/beavend/beavend/internal/runtime"
 	"github.com/beavend/beavend/internal/runtime/agent"
@@ -109,6 +112,16 @@ func run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Initialize model pricing engine and optional background catalog sync
+	pricingCatalog := pricing.DefaultCatalog()
+	if cfg.Pricing.AutoSync && cfg.Pricing.CatalogURL != "" {
+		pricingSyncer := pricing.NewSyncer(pricingCatalog, pricing.SyncerConfig{
+			CatalogURL: cfg.Pricing.CatalogURL,
+			Interval:   cfg.Pricing.SyncInterval,
+		})
+		pricingSyncer.Start(ctx)
+	}
+
 	var (
 		st          *store.Store
 		registry    *snapshot.Registry
@@ -144,6 +157,9 @@ func run() error {
 				if err != nil {
 					slog.Error("failed to initialize snapshot compiler", slog.String("error", err.Error()))
 				} else {
+					if len(cfg.Security.MasterKey) > 0 {
+						compiler.SetMasterKey([]byte(cfg.Security.MasterKey))
+					}
 					syncer := synckit.NewSyncer(registry, compiler, st.Queries(), nil, synckit.SyncerOptions{
 						DatabaseURL: cfg.Database.URL,
 						Logger:      logger,
@@ -209,7 +225,15 @@ func run() error {
 		ThreadStore:     threadStore,
 	})
 
+	searxngClient := tools.NewSearXNGClient(cfg.Search.SearxngURL, cfg.Search.Enabled, cfg.Search.Timeout, nil)
+
 	var routerOpts RouterOptions
+	var adminTokenMgr *auth.TokenManager
+	if cfg.Security.MasterKey != "" {
+		adminTokenMgr = auth.NewTokenManager([]byte(cfg.Security.MasterKey), 24*time.Hour)
+		routerOpts.AdminTokenManager = adminTokenMgr
+	}
+
 	if cfg.Role == config.RoleAll || cfg.Role == config.RoleRuntime {
 		if registry == nil {
 			registry = snapshot.NewRegistry()
@@ -226,21 +250,41 @@ func run() error {
 			slog.Warn("failed to initialize litellm adapter", slog.String("error", err.Error()))
 		}
 
+		openaiAdapter, err := openaicompat.NewAdapter(openaicompat.Config{})
+		if err == nil {
+			modelResolver.RegisterAdapter("openai_compat", openaiAdapter)
+			modelResolver.RegisterAdapter("openaicompat", openaiAdapter)
+		} else {
+			slog.Warn("failed to initialize openai_compat adapter", slog.String("error", err.Error()))
+		}
+
 		var continuationStore tools.SuspendedStateStore
+		var jobStore media.JobStore
 		if cfg.Redis.URL != "" {
 			if rOpts, err := redis.ParseURL(cfg.Redis.URL); err == nil {
 				redisClient := redis.NewClient(rOpts)
 				continuationStore = tools.NewRedisSuspendedStateStore(redisClient)
+				jobStore = media.NewRedisJobStore(redisClient)
 			}
 		}
 		if continuationStore == nil {
 			continuationStore = tools.NewInMemorySuspendedStateStore()
 		}
+		if jobStore == nil {
+			jobStore = media.NewInMemoryJobStore()
+		}
 		continuationMgr := tools.NewContinuationManager(continuationStore, []byte(cfg.Security.MasterKey))
+
+		mediaStore, _ := media.NewLocalMediaStore(media.LocalMediaStoreConfig{
+			BaseDir:    os.TempDir() + "/beavend/media",
+			SigningKey: cfg.Security.MasterKey,
+		})
 
 		authenticator := tools.NewDownstreamAuthenticator(nil)
 		isDev := cfg.Env == "development" || cfg.Env == "test"
 		execRegistry := agent.NewDefaultExecutorRegistry(authenticator, isDev)
+		execRegistry.SetSearXNGClient(searxngClient)
+		execRegistry.SetMediaServices(mediaStore, jobStore, modelResolver)
 		policyCompiler, _ := policy.NewCompiler()
 		policyEvaluator, _ := policy.NewEvaluator(policyCompiler)
 
@@ -252,9 +296,10 @@ func run() error {
 		})
 
 		limitStore := limits.NewMemoryLimitStore(nil)
-		authzStage, _ := stages.NewAuthZStage(nil)
+		authzStage, _ := stages.NewAuthZStage(policyEvaluator)
 		limitsStage, _ := stages.NewLimitsStage(limitStore, nil, nil)
 		inputGuardStage := stages.NewInputGuardrailStage()
+		routeSelectStage, _ := stages.NewRouteSelectStage(modelResolver)
 		cacheStage := stages.NewCacheStage(cacheStore)
 		contextStage := stages.NewContextStage(memEngine, threadStore)
 		promptStage, _ := stages.NewPromptStage(nil)
@@ -283,7 +328,7 @@ func run() error {
 
 		usageTracker := usage.NewTracker(usageBuf, limitStore)
 
-		pipeline := runtime.NewContextAwarePipeline(authzStage, limitsStage, inputGuardStage, cacheStage, contextStage, promptStage, routingStage, execStage, outputGuardStage)
+		pipeline := runtime.NewContextAwarePipeline(authzStage, limitsStage, inputGuardStage, cacheStage, contextStage, promptStage, routingStage, execStage, outputGuardStage, routeSelectStage)
 		runtimeHandler := runtime.NewHandler(registry, pipeline, runtime.HandlerOptions{
 			DefaultEnvironment: cfg.Env,
 			ContinuationMgr:    continuationMgr,
@@ -292,18 +337,33 @@ func run() error {
 			CacheStore:         cacheStore,
 			ThreadStore:        threadStore,
 			MemoryEngine:       memEngine,
+			JobStore:           jobStore,
+			MediaStore:         mediaStore,
 		})
 		routerOpts.RuntimeHandler = runtimeHandler
 
 		verifier := identity.NewVerifier(nil)
-		authMw := identity.AuthMiddleware(registry, verifier, identity.WithDefaultEnvironment(cfg.Env))
+		authOpts := []identity.MiddlewareOption{
+			identity.WithDefaultEnvironment(cfg.Env),
+		}
+		if adminTokenMgr != nil {
+			authOpts = append(authOpts, identity.WithAdminTokenValidator(identity.AdminTokenValidatorFunc(func(token string) (*identity.AdminClaims, error) {
+				claims, err := adminTokenMgr.ValidateToken(token)
+				if err != nil {
+					return nil, err
+				}
+				return &identity.AdminClaims{
+					UserID: claims.UserID,
+					Email:  claims.Email,
+					Role:   string(claims.Role),
+				}, nil
+			})))
+		}
+		authMw := identity.AuthMiddleware(registry, verifier, authOpts...)
 		routerOpts.AuthMiddleware = authMw
 	}
 
 	if cfg.Role == config.RoleAll || cfg.Role == config.RoleControl {
-		// Admin token manager (uses MasterKey for signing session tokens and cookies)
-		adminTokenMgr := auth.NewTokenManager([]byte(cfg.Security.MasterKey), 24*time.Hour)
-		routerOpts.AdminTokenManager = adminTokenMgr
 
 		var (
 			ctrlAuditor audit.Auditor
@@ -318,6 +378,11 @@ func run() error {
 			// Seed default admin user if not already present
 			if err := auth.SeedDefaultAdmin(ctx, ctrlQueries, cfg.Admin.Email, cfg.Admin.Password); err != nil {
 				slog.Warn("seed default admin user encountered warning", slog.String("error", err.Error()))
+			}
+
+			// Seed default project and environments if not already present
+			if err := control.SeedDefaultProject(ctx, ctrlQueries); err != nil {
+				slog.Warn("seed default project encountered warning", slog.String("error", err.Error()))
 			}
 
 			// Publisher for snapshot invalidation: Redis + Postgres NOTIFY fallback
@@ -342,6 +407,7 @@ func run() error {
 		ctrlService.SetCacheStore(cacheStore)
 		ctrlService.SetMemoryProvider(memoryProvider)
 		ctrlService.SetThreadStore(threadStore)
+		ctrlService.SetSearXNGClient(searxngClient)
 		ctrlHandler := control.NewHandler(ctrlService)
 		routerOpts.ControlHandler = ctrlHandler
 

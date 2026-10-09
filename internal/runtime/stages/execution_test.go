@@ -183,3 +183,65 @@ func TestExecutionStage_HandleStreaming(t *testing.T) {
 	assert.Equal(t, "usage", received[2].Type)
 	assert.Equal(t, "done", received[3].Type)
 }
+
+func TestExecutionStage_MultiProviderFailover(t *testing.T) {
+	ctx := context.Background()
+	resolver := routing.NewResolver()
+
+	primaryCalls := 0
+	primaryAdapter := &mockProviderAdapter{
+		chatFunc: func(_ context.Context, _ core.ChatRequest) (*core.ChatResponse, error) {
+			primaryCalls++
+			return nil, errors.New("groq rate limit 429: quota exceeded")
+		},
+	}
+
+	fallbackCalls := 0
+	fallbackAdapter := &mockProviderAdapter{
+		chatFunc: func(_ context.Context, req core.ChatRequest) (*core.ChatResponse, error) {
+			fallbackCalls++
+			return &core.ChatResponse{
+				Message: core.ChatMessage{
+					Role:    "assistant",
+					Content: "Hello from OpenAI fallback!",
+				},
+				FinishReason: "stop",
+				Usage: core.UsageStats{
+					TotalTokens: 30,
+				},
+			}, nil
+		},
+	}
+
+	resolver.RegisterAdapter("groq", primaryAdapter)
+	resolver.RegisterAdapter("openai_compat", fallbackAdapter)
+
+	stage, err := NewExecutionStage(resolver)
+	require.NoError(t, err)
+
+	state := &core.ReqState{
+		RequestID:   "req_failover",
+		AIAppID:     "assistant",
+		IsStreaming: false,
+		ResolvedModel: &core.ModelRouting{
+			LogicalModel:        "fast",
+			Adapter:             "groq",
+			Deployment:          "llama-3.3-70b",
+			FallbackDeployments: []string{"openai_compat/gpt-4o-mini"},
+		},
+		ChatRequest: &core.ChatRequest{
+			Model: "llama-3.3-70b",
+			Messages: []core.ChatMessage{
+				{Role: "user", Content: "Hello"},
+			},
+		},
+	}
+
+	err = stage.Handle(ctx, state)
+	require.NoError(t, err)
+	require.NotNil(t, state.ChatResponse)
+	assert.Equal(t, "Hello from OpenAI fallback!", state.ChatResponse.Message.Content)
+	assert.Equal(t, 1, primaryCalls)
+	assert.Equal(t, 1, fallbackCalls)
+	assert.Equal(t, "gpt-4o-mini", state.ChatRequest.Model)
+}

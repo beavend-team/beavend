@@ -290,6 +290,41 @@ func (q *Queries) ListPrompts(ctx context.Context, arg ListPromptsParams) ([]Pro
 	return items, nil
 }
 
+const updatePrompt = `-- name: UpdatePrompt :one
+UPDATE prompts
+SET name = $2, description = $3, active_version = $4, updated_at = NOW()
+WHERE id = $1
+RETURNING id, project_id, environment, name, description, active_version, created_at, updated_at
+`
+
+type UpdatePromptParams struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	ActiveVersion int32  `json:"active_version"`
+}
+
+func (q *Queries) UpdatePrompt(ctx context.Context, arg UpdatePromptParams) (Prompts, error) {
+	row := q.db.QueryRow(ctx, updatePrompt,
+		arg.ID,
+		arg.Name,
+		arg.Description,
+		arg.ActiveVersion,
+	)
+	var i Prompts
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Environment,
+		&i.Name,
+		&i.Description,
+		&i.ActiveVersion,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updatePromptActiveVersion = `-- name: UpdatePromptActiveVersion :one
 UPDATE prompts
 SET active_version = $2, updated_at = NOW()

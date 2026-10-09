@@ -1,4 +1,4 @@
-# Beavend — Product Requirements Document
+# Beavend: Product Requirements Document
 
 > **Version:** 0.2 (revised draft)
 > **Tagline:** The self-hosted AI backend for your apps. Bring your users, your data, your models.
@@ -84,7 +84,7 @@ The word "app" is overloaded. Beavend uses these terms strictly:
 | **AI App** | A runnable AI capability inside a Project (e.g. `assistant`) |
 | **Tool** | A named, schema-typed capability the model may call |
 | **Identity** | Normalized representation of the end user derived from a validated token |
-| **Provider** | An AI model provider (Gemini, OpenAI, …) |
+| **Provider** | An AI model provider (Gemini, OpenAI, etc.) |
 | **Logical model** | An implementor-defined alias (`fast`, `reasoning`, `vision`) mapped to a provider deployment |
 
 Never use "app" alone in documentation or UI.
@@ -780,7 +780,7 @@ beavend-sdk-web   → Browser, Node, Deno, Bun (npm)
 
 **The SDK must NOT contain:** provider keys, system prompts, provider selection logic, guardrail config, authorization rules, quota logic, or provider credentials.
 
-**iOS SDK** is a pure Swift implementation (`URLSession` + `AsyncStream`) — no Kotlin or KMP dependency. Public API is idiomatic Swift (`async/await`, `AsyncSequence`), and the surface mirrors the Android SDK.
+**iOS SDK** is a pure Swift implementation (`URLSession` + `AsyncStream`) with no Kotlin or KMP dependency. Public API is idiomatic Swift (`async/await`, `AsyncSequence`), and the surface mirrors the Android SDK.
 
 **Android/KMP SDK** uses Ktor client (OkHttp engine) with kotlinx.serialization and coroutines/Flow. The KMP module structure leaves room to add other targets later without restructuring.
 
@@ -1018,7 +1018,7 @@ assistant  configuration: v12  prompt: v7  routing: v4  guardrails: v3  tools: g
 
 ## 36. Roadmap
 
-### v0.1 — Core platform
+### v0.1: Core platform
 
 ```text
 Docker deployment
@@ -1039,7 +1039,7 @@ Config export/import
 Android SDK (beavend-sdk-kmp), REST API
 ```
 
-### v0.2 — Tools and safety
+### v0.2: Tools and safety
 
 ```text
 Custom tools (HTTP, webhook)
@@ -1055,7 +1055,7 @@ Multimodal attachments
 Privacy: retention, redaction, delete by subject
 ```
 
-### v0.3 — Context and quality
+### v0.3: Context and quality
 
 ```text
 MCP and SQL-template executors

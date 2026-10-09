@@ -1,4 +1,4 @@
-# T040 — Server Wiring & End-to-End Validation
+# T040 - Server Wiring & End-to-End Validation
 
 * **Status:** Completed
 

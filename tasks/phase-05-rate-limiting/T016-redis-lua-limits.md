@@ -1,4 +1,4 @@
-# T016 — Redis Lua Multi-Window Limit Store [Completed]
+# T016 - Redis Lua Multi-Window Limit Store [Completed]
 
 * **Status:** Completed
 

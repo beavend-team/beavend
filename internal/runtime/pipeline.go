@@ -57,6 +57,12 @@ func (p *Pipeline) Execute(ctx context.Context, state *core.ReqState) error {
 		state.StartTime = time.Now().UTC()
 	}
 
+	if state.Snapshot != nil {
+		if _, ok := core.SnapshotFromContext(ctx); !ok {
+			ctx = core.ContextWithSnapshot(ctx, state.Snapshot)
+		}
+	}
+
 	ctx, span := p.tracer.Start(ctx, "pipeline.execute",
 		trace.WithAttributes(
 			attribute.String("project_id", state.ProjectID),
@@ -77,6 +83,12 @@ func (p *Pipeline) Execute(ctx context.Context, state *core.ReqState) error {
 				RequestID: state.RequestID,
 			}
 			return err
+		}
+
+		if state.Snapshot != nil {
+			if _, ok := core.SnapshotFromContext(ctx); !ok {
+				ctx = core.ContextWithSnapshot(ctx, state.Snapshot)
+			}
 		}
 
 		stageName := fmt.Sprintf("%T", stage)
@@ -119,8 +131,9 @@ func (p *Pipeline) Execute(ctx context.Context, state *core.ReqState) error {
 	return nil
 }
 
-// NewStandardPipeline builds the standard Beavend AI runtime pipeline:
+// NewStandardPipeline builds a lightweight, minimal Beavend AI runtime pipeline (primarily for testing):
 // Ingress AuthZ -> Rate Limits -> Prompt Templating -> Model Routing -> Execution
+// For production workloads requiring guardrails, cache, threads, and memory, use NewContextAwarePipeline.
 func NewStandardPipeline(
 	authz *stages.AuthZStage,
 	limits *stages.LimitsStage,
@@ -132,7 +145,7 @@ func NewStandardPipeline(
 }
 
 // NewFullStandardPipeline builds the complete Beavend AI runtime pipeline with guardrails:
-// Ingress AuthZ -> Rate Limits -> Input Guardrails -> Cache -> Prompt Templating -> Model Routing -> Execution -> Output Guardrails
+// Ingress AuthZ -> Rate Limits -> Input Guardrails -> Route Select -> Cache -> Prompt Templating -> Model Routing -> Execution -> Output Guardrails
 func NewFullStandardPipeline(
 	authz *stages.AuthZStage,
 	limits *stages.LimitsStage,
@@ -153,6 +166,11 @@ func NewFullStandardPipeline(
 	if inputGuard != nil {
 		p.AddStage(inputGuard)
 	}
+	if routing != nil && routing.Resolver() != nil {
+		if rs, err := stages.NewRouteSelectStage(routing.Resolver()); err == nil {
+			p.AddStage(rs)
+		}
+	}
 	if len(cacheStage) > 0 && cacheStage[0] != nil {
 		p.AddStage(cacheStage[0])
 	}
@@ -172,7 +190,7 @@ func NewFullStandardPipeline(
 }
 
 // NewAcceleratedPipeline builds the full accelerated Beavend AI runtime pipeline:
-// Ingress AuthZ -> Rate Limits -> Input Guardrails -> Cache -> Prompt Templating -> Model Routing -> Execution -> Output Guardrails
+// Ingress AuthZ -> Rate Limits -> Input Guardrails -> Route Select -> Cache -> Prompt Templating -> Model Routing -> Execution -> Output Guardrails
 func NewAcceleratedPipeline(
 	authz *stages.AuthZStage,
 	limits *stages.LimitsStage,
@@ -187,7 +205,7 @@ func NewAcceleratedPipeline(
 }
 
 // NewContextAwarePipeline builds the complete Beavend AI runtime pipeline with Context, Threads, Memory, and Cache:
-// Ingress AuthZ -> Rate Limits -> Input Guardrails -> Cache -> Context (Threads & Memory) -> Prompt -> Model Routing -> Execution -> Output Guardrails
+// Ingress AuthZ -> Rate Limits -> Input Guardrails -> Route Select -> Cache -> Context (Threads & Memory) -> Prompt -> Model Routing -> Execution -> Output Guardrails
 func NewContextAwarePipeline(
 	authz *stages.AuthZStage,
 	limits *stages.LimitsStage,
@@ -198,6 +216,7 @@ func NewContextAwarePipeline(
 	routing *stages.ModelRoutingStage,
 	execution *stages.ExecutionStage,
 	outputGuard *stages.OutputGuardrailStage,
+	routeSelect ...*stages.RouteSelectStage,
 ) *Pipeline {
 	p := NewPipeline()
 	if authz != nil {
@@ -208,6 +227,13 @@ func NewContextAwarePipeline(
 	}
 	if inputGuard != nil {
 		p.AddStage(inputGuard)
+	}
+	if len(routeSelect) > 0 && routeSelect[0] != nil {
+		p.AddStage(routeSelect[0])
+	} else if routing != nil && routing.Resolver() != nil {
+		if rs, err := stages.NewRouteSelectStage(routing.Resolver()); err == nil {
+			p.AddStage(rs)
+		}
 	}
 	if cacheStage != nil {
 		p.AddStage(cacheStage)

@@ -1,4 +1,4 @@
-# T045 — Embedded Dashboard Serving, Server Wiring & End-to-End Validation
+# T045 - Embedded Dashboard Serving, Server Wiring & End-to-End Validation
 
 * **Status:** Completed
 

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Beavend Documentation — The Self-Hosted AI Backend</title>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+  <meta name="description" content="Open-source, provider-agnostic, application-facing AI backend.">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0">
+  <link rel="icon" type="image/svg+xml" href="assets/logo_light.svg">
+  <link rel="stylesheet" href="//cdn.jsdelivr.net/npm/docsify@4/lib/themes/vue.css">
+  <link rel="stylesheet" href="//cdn.jsdelivr.net/npm/docsify-darklight-theme@latest/dist/style.min.css">
+  <style>
+    :root {
+      --theme-color: #2563eb;
+    }
+    .app-name-link img {
+      width: 140px;
+      margin-bottom: 8px;
+    }
+    .sidebar {
+      padding-top: 15px;
+    }
+    .markdown-section {
+      max-width: 900px;
+      padding: 30px 40px 60px;
+    }
+    .markdown-section pre {
+      border-radius: 8px;
+    }
+    .mermaid {
+      display: flex;
+      justify-content: center;
+      margin: 20px 0;
+      background: rgba(0,0,0,0.02);
+      padding: 16px;
+      border-radius: 8px;
+      border: 1px solid rgba(0,0,0,0.06);
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      font-size: 12px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+  </style>
+  <!-- Mermaid.js -->
+  <script src="//cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({ startOnLoad: false, theme: 'default' });
+  </script>
+</head>
+<body>
+  <div id="app">Loading Beavend Documentation...</div>
+  <script>
+    var num = 0;
+    window.$docsify = {
+      name: 'Beavend',
+      repo: 'https://github.com/beavend/beavend',
+      loadSidebar: true,
+      loadNavbar: true,
+      subMaxLevel: 3,
+      auto2top: true,
+      search: {
+        maxAge: 86400000,
+        paths: 'auto',
+        placeholder: 'Search documentation...',
+        noData: 'No results found.',
+        depth: 4
+      },
+      copyCode: {
+        buttonText: 'Copy',
+        errorText: 'Error',
+        successText: 'Copied'
+      },
+      darklightTheme: {
+        siteFont: 'system-ui, -apple-system, sans-serif',
+        defaultTheme: 'light',
+        codeFontFamily: 'Roboto Mono, monospace',
+        bodyFontSize: '15px',
+        dark: {
+          accent: '#38bdf8',
+          toogleBackground: '#ffffff',
+          background: '#0f172a',
+          textColor: '#e2e8f0',
+          codeTextColor: '#f8fafc',
+          codeBackgroundColor: '#1e293b',
+          borderColor: '#334155',
+          blockQuoteColor: '#94a3b8',
+          highlightColor: '#0284c7',
+          sidebarSublabel: '#94a3b8'
+        },
+        light: {
+          accent: '#2563eb',
+          toogleBackground: '#0f172a',
+          background: '#ffffff',
+          textColor: '#1e293b',
+          codeTextColor: '#0f172a',
+          codeBackgroundColor: '#f8fafc',
+          borderColor: '#e2e8f0',
+          blockQuoteColor: '#64748b',
+          highlightColor: '#2563eb',
+          sidebarSublabel: '#64748b'
+        }
+      },
+      markdown: {
+        renderer: {
+          code: function(code, lang) {
+            if (lang === "mermaid") {
+              return (
+                '<div class="mermaid">' + code + "</div>"
+              );
+            }
+            return this.origin.code.apply(this, arguments);
+          }
+        }
+      },
+      plugins: [
+        function(hook, vm) {
+          hook.doneEach(function() {
+            if (window.mermaid) {
+              window.mermaid.run({
+                querySelector: '.mermaid'
+              });
+            }
+          });
+        }
+      ]
+    };
+  </script>
+  <!-- Docsify Core -->
+  <script src="//cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>
+  <!-- Search Plugin -->
+  <script src="//cdn.jsdelivr.net/npm/docsify@4/lib/plugins/search.min.js"></script>
+  <!-- Copy Code Plugin -->
+  <script src="//cdn.jsdelivr.net/npm/docsify-copy-code/dist/docsify-copy-code.min.js"></script>
+  <!-- Dark/Light Theme Switcher -->
+  <script src="//cdn.jsdelivr.net/npm/docsify-darklight-theme@latest/dist/index.min.js"></script>
+  <!-- Prism Syntax Highlighting -->
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1/components/prism-bash.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1/components/prism-go.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1/components/prism-yaml.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1/components/prism-json.min.js"></script>
+  <script src="//cdn.jsdelivr.net/npm/prismjs@1/components/prism-sql.min.js"></script>
+</body>
+</html>

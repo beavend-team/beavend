@@ -1,4 +1,4 @@
-# Beavend — Architecture
+# Beavend: Architecture
 
 > Companion to `Beavend-PRD.md` and `techstack.md`.
 > Goals: **easy to maintain**, **stateless and horizontally scalable to millions of users**, **secure by construction**, and **simple to self-host**.
@@ -38,7 +38,7 @@ Why this is the easiest to maintain: one repo, one build, one deploy artifact, i
        │                                              │
        ▼                                              ▼
   ProviderAdapter                              PostgreSQL (config, usage, logs, memory)
-   ├── LiteLLM ──► Gemini / OpenAI / Anthropic / Ollama / …
+   ├── LiteLLM ──► Gemini / OpenAI / Anthropic / Ollama / etc.
    └── OpenAI-compatible adapter ──► OpenAI-compatible endpoints
 ```
 
@@ -55,7 +55,7 @@ Why this is the easiest to maintain: one repo, one build, one deploy artifact, i
 | Traffic | End users (high volume, streaming) | Admins (low volume) |
 | Auth | End-user JWT | Admin session / SSO, RBAC |
 | State | Stateless; reads snapshot; writes usage/logs async | Reads/writes Postgres config; audit log |
-| Scaling | Horizontal, autoscale on concurrent streams/CPU | 1–2 replicas usually enough |
+| Scaling | Horizontal, autoscale on concurrent streams/CPU | 1-2 replicas usually enough |
 | Failure impact | Product AI features down | Cannot edit config; runtime keeps working |
 | Exposed | Public (behind LB/WAF) | Private or SSO-protected |
 
@@ -119,6 +119,8 @@ The runtime is an explicit **pipeline of stages** sharing a request context. Eac
  │ Respond (SSE/JSON) │──► async: usage + logs + limit reconciliation
  └────────────────────┘
 ```
+
+**Multimodal route selection (ADR-017).** Between Input guardrails and Cache sits `RouteSelect`: a pure, in-memory function of the request and the snapshot that picks the *logical model* (explicit `model` if policy allows → first matching `model_routes` rule → `default`). Rules match on input modalities, requested `output_modalities`, request metadata, and optional CEL. `ModelRouting` (deployment/adapter resolution) stays after Cache. The cache key includes the selected logical model, output modalities, and attachment content digests, so differently routed requests never collide. Threads store canonical `[]Part`; when the routed model lacks a modality used in history, the context builder substitutes a text placeholder. Media generation runs through the `Generator` capability interface and the tool engine; long-running jobs are polled via `GET /v1/apps/{id}/jobs/{job_id}`. Model `input_modalities`/`output_modalities` are capability metadata used only for publish-time validation and dashboard pickers.
 
 **Design rules**
 
@@ -218,7 +220,7 @@ Runtime ──► ProviderAdapter (interface)
                 └── OpenAICompatAdapter   (native Go: high-volume, low-latency path)
 ```
 
-* Logical model (`fast`) → deployment → adapter, resolved from the snapshot.
+* Logical model (user-defined name, selected by per-app `model_routes`) → deployment → adapter, resolved from the snapshot. Beavend reserves no model names.
 * **LiteLLM runs as N stateless replicas** behind an internal load balancer; provider keys live only there (or in Beavend secrets for the native adapter).
 * Circuit breaker and health checks per deployment; provider errors normalized to the taxonomy (`502 provider_error`).
 * Streaming is passed through with **no intermediate buffering** except when `stream_mode: buffered` guardrails demand it.
@@ -261,7 +263,7 @@ Conventions:
 
 | Purpose | Keying | TTL |
 |---|---|---|
-| Limit counters | `lim:{project}:{env}:{user}:…` | window length |
+| Limit counters | `lim:{project}:{env}:{user}:*` | window length |
 | Response cache | `rc:{project}:{env}:{scope}:{hash}` (`scope` = user or shared) | per config |
 | Tool result cache | `tc:{project}:{env}:{user}:{tool}:{argshash}` | per tool |
 | Pending confirmation/tool state | `pend:{project}:{req_id}` | minutes |
@@ -302,7 +304,7 @@ batch writer: every N events or T ms
                                    │
          ┌─────────────────────────┼─────────────────────────┐
          ▼                         ▼                         ▼
-   Runtime pod 1             Runtime pod 2   …         Runtime pod N      (stateless, HPA)
+   Runtime pod 1             Runtime pod 2   ...         Runtime pod N      (stateless, HPA)
          │                         │                         │
          └───────────┬─────────────┴──────────────┬──────────┘
                      ▼                            ▼
@@ -399,7 +401,7 @@ Package boundaries enforce the modular monolith. Dependencies flow **inward**: a
 server/
 ├── cmd/beavend/            # main: role selection, wiring
 ├── internal/
-│   ├── core/                  # domain types + interfaces (Identity, Snapshot, ProviderAdapter, …)
+│   ├── core/                  # domain types + interfaces (Identity, Snapshot, ProviderAdapter, etc.)
 │   ├── runtime/               # pipeline stages, agent loop, SSE, request state
 │   │   ├── stages/
 │   │   ├── agent/
@@ -499,7 +501,7 @@ Client        Runtime                 Redis        Implementor API     LiteLLM/P
   │                      │◄──────────────── orders ────────────────────┤       │
   │                      │ cap/redact/wrap as untrusted data          │       │
   │                      ├──────────────── continue chat ─────────────────────►│
-  │◄── SSE delta …───────┤◄──────────────── tokens ───────────────────────────┤
+  │◄── SSE delta ...───────┤◄──────────────── tokens ───────────────────────────┤
   │◄── SSE usage, done ──┤                                                    │
   │                      ├── enqueue usage/log event (async) ──► batch writer ─► Postgres
   │                      ├── reconcile token counters ────────►│

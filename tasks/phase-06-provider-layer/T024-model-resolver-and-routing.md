@@ -1,4 +1,4 @@
-# T024 — Model Resolver & Routing [Completed]
+# T024 - Model Resolver & Routing [Completed]
 
 * **Status:** Completed
 

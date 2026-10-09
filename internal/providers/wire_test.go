@@ -96,6 +96,52 @@ func TestWireConversion(t *testing.T) {
 	if coreResp.Usage.CostUSD == nil || *coreResp.Usage.CostUSD != 0.0015 {
 		t.Fatalf("expected cost 0.0015, got %v", coreResp.Usage.CostUSD)
 	}
+	if len(coreResp.Message.Parts) != 1 || coreResp.Message.Parts[0].Type != core.PartTypeText {
+		t.Fatalf("expected 1 text part in message, got %+v", coreResp.Message.Parts)
+	}
+}
+
+func TestWireConversion_CanonicalParts(t *testing.T) {
+	req := core.ChatRequest{
+		Model: "vision-model",
+		Messages: []core.ChatMessage{
+			{
+				Role: "user",
+				Parts: []core.Part{
+					core.TextPart("Describe this image"),
+					core.MediaPart(&core.MediaRef{
+						MediaID:  "med_123",
+						MimeType: "image/jpeg",
+						URL:      "https://storage.beavend.io/med_123.jpg",
+						Caption:  "A golden retriever",
+					}),
+				},
+			},
+		},
+	}
+
+	wireReq := FromCoreChatRequest(req, "gpt-4o")
+	if len(wireReq.Messages) != 1 {
+		t.Fatalf("expected 1 wire message, got %d", len(wireReq.Messages))
+	}
+	msg := wireReq.Messages[0]
+	blocks, ok := msg.Content.([]map[string]any)
+	if !ok {
+		t.Fatalf("expected []map[string]any content, got %T: %+v", msg.Content, msg.Content)
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("expected 2 blocks, got %d", len(blocks))
+	}
+	if blocks[0]["type"] != "text" || blocks[0]["text"] != "Describe this image" {
+		t.Fatalf("unexpected text block: %+v", blocks[0])
+	}
+	if blocks[1]["type"] != "image_url" {
+		t.Fatalf("unexpected media block: %+v", blocks[1])
+	}
+	imgURL, ok := blocks[1]["image_url"].(map[string]any)
+	if !ok || imgURL["url"] != "https://storage.beavend.io/med_123.jpg" {
+		t.Fatalf("unexpected image_url payload: %+v", blocks[1])
+	}
 }
 
 func TestEmbedConversion(t *testing.T) {
@@ -392,5 +438,39 @@ data: [DONE]
 	}
 	if toolCalls[0].Arguments != `{"q":"golang"}` {
 		t.Fatalf(`expected arguments {"q":"golang"}, got %s`, toolCalls[0].Arguments)
+	}
+}
+
+func TestSSEParserReasoningContent(t *testing.T) {
+	sseData := []byte(`
+data: {"choices":[{"index":0,"delta":{"reasoning_content":"Step 1: Understand user request."}}]}
+
+data: {"choices":[{"index":0,"delta":{"content":"Here is the answer."}}]}
+
+data: [DONE]
+`)
+
+	events := ParseSSEBytes(context.Background(), sseData, "req_reasoning")
+	var thinkingCount int
+	var deltaCount int
+	var thinkingText string
+	var deltaText string
+
+	for _, e := range events {
+		if e.Type == "thinking" {
+			thinkingCount++
+			thinkingText += e.Delta
+		}
+		if e.Type == "delta" {
+			deltaCount++
+			deltaText += e.Delta
+		}
+	}
+
+	if thinkingCount != 1 || thinkingText != "Step 1: Understand user request." {
+		t.Fatalf("expected 1 thinking event with reasoning content, got %d with %q", thinkingCount, thinkingText)
+	}
+	if deltaCount != 1 || deltaText != "Here is the answer." {
+		t.Fatalf("expected 1 delta event with answer content, got %d with %q", deltaCount, deltaText)
 	}
 }

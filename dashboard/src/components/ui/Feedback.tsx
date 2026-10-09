@@ -163,3 +163,53 @@ export const Sparkline: React.FC<SparklineProps> = ({
     </svg>
   );
 };
+
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+  fallback?: (error: Error, reset: () => void) => React.ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('Unhandled React Error in Component Tree:', error, errorInfo);
+  }
+
+  handleReset = () => {
+    this.setState({ hasError: false, error: null });
+  };
+
+  render() {
+    if (this.state.hasError) {
+      if (this.props.fallback) {
+        return this.props.fallback(this.state.error || new Error('Unknown error'), this.handleReset);
+      }
+      return (
+        <div className="p-6 bg-red-950/30 border border-red-900/60 rounded-xl my-4 text-center">
+          <h3 className="text-sm font-semibold text-red-300 mb-1">Component Render Failed</h3>
+          <p className="text-xs text-red-400/80 font-mono mb-4">{this.state.error?.message || 'Unexpected error'}</p>
+          <button
+            onClick={this.handleReset}
+            className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs rounded-lg transition-colors border border-neutral-700"
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}

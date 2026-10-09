@@ -31,6 +31,9 @@ type LogEvent struct {
 	InputTokens     int               `json:"input_tokens"`
 	OutputTokens    int               `json:"output_tokens"`
 	TotalTokens     int               `json:"total_tokens"`
+	Images          int               `json:"images,omitempty"`
+	AudioSeconds    float64           `json:"audio_seconds,omitempty"`
+	VideoSeconds    float64           `json:"video_seconds,omitempty"`
 	CostUSD         float64           `json:"cost_usd"`
 	IsStreaming     bool              `json:"is_streaming"`
 	ToolCalls       []ToolCallSummary `json:"tool_calls"`
@@ -40,7 +43,7 @@ type LogEvent struct {
 	CreatedAt       time.Time         `json:"created_at"`
 }
 
-// Event represents a fine-grained token usage and billing event.
+// Event represents a fine-grained token and media usage and billing event.
 type Event struct {
 	ID           string    `json:"id"`
 	RequestID    string    `json:"request_id"`
@@ -53,6 +56,9 @@ type Event struct {
 	InputTokens  int       `json:"input_tokens"`
 	OutputTokens int       `json:"output_tokens"`
 	TotalTokens  int       `json:"total_tokens"`
+	Images       int       `json:"images,omitempty"`
+	AudioSeconds float64   `json:"audio_seconds,omitempty"`
+	VideoSeconds float64   `json:"video_seconds,omitempty"`
 	CostUSD      float64   `json:"cost_usd"`
 	CreatedAt    time.Time `json:"created_at"`
 }

@@ -1,4 +1,4 @@
-# T073 — Executor Registry & Agent Loop Integration
+# T073 - Executor Registry & Agent Loop Integration
 
 ## Status
 Completed

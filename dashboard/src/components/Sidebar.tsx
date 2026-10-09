@@ -11,6 +11,9 @@ import {
   History,
   Settings,
   ChevronRight,
+  Coins,
+  KeyRound,
+  Search,
 } from 'lucide-react';
 
 export type NavTab =
@@ -19,7 +22,8 @@ export type NavTab =
   | 'prompts'
   | 'models'
   | 'tools'
-  | 'policies'
+  | 'search'
+  | 'usage'
   | 'logs'
   | 'audit'
   | 'settings';
@@ -43,12 +47,13 @@ const navGroups = [
       { id: 'prompts', label: 'Prompts Studio', icon: MessageSquare },
       { id: 'models', label: 'Models & Routing', icon: Cpu },
       { id: 'tools', label: 'Tools Registry', icon: Wrench },
-      { id: 'policies', label: 'CEL Policies', icon: ShieldCheck },
+      { id: 'search', label: 'Search Engine', icon: Search },
     ],
   },
   {
     label: 'Observability',
     items: [
+      { id: 'usage', label: 'Usage & Cost', icon: Coins },
       { id: 'logs', label: 'Request Logs', icon: BarChart3 },
       { id: 'audit', label: 'Audit Trail', icon: History },
     ],
@@ -61,10 +66,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => 
       {/* Brand */}
       <div className="h-[60px] flex items-center gap-3 px-5 border-b border-neutral-800/80">
         <Logo theme="dark" className="h-7 w-auto flex-shrink-0" />
-        <div>
-          <span className="font-semibold text-neutral-100 text-sm tracking-tight">Beavend</span>
-          <span className="text-[10px] text-neutral-600 font-mono ml-1.5">v0.1</span>
-        </div>
+        <span className="font-semibold text-neutral-100 text-sm tracking-tight">Beavend</span>
       </div>
 
       {/* Nav */}

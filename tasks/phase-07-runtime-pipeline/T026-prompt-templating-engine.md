@@ -1,4 +1,4 @@
-# T026 — Prompt Templating Engine [Completed]
+# T026 - Prompt Templating Engine [Completed]
 
 * **Status:** Completed
 

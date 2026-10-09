@@ -1,8 +1,10 @@
 package control
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -10,7 +12,7 @@ import (
 	"github.com/beavend/beavend/internal/core"
 	"github.com/beavend/beavend/internal/identity"
 	"github.com/beavend/beavend/internal/store/db"
-	"github.com/go-chi/chi/v5"
+	chi "github.com/go-chi/chi/v5"
 )
 
 // Handler provides HTTP endpoints for administrative control plane operations.
@@ -390,4 +392,47 @@ func (h *Handler) HandleTestToken(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt: expiresAt,
 		Claims:    id.Claims,
 	})
+}
+
+// SeedDefaultProject ensures the "default" project and standard environments exist on startup.
+func SeedDefaultProject(ctx context.Context, queries *db.Queries) error {
+	if queries == nil {
+		return nil
+	}
+
+	_, err := queries.GetProject(ctx, "default")
+	if err == nil {
+		// Project already exists, ensure standard environments exist
+		ensureEnvironments(ctx, queries, "default")
+		return nil
+	}
+
+	_, err = queries.CreateProject(ctx, db.CreateProjectParams{
+		ID:          "default",
+		Name:        "Default Project",
+		Description: "Default project initialized automatically",
+	})
+	if err != nil && !strings.Contains(err.Error(), "duplicate key") && !strings.Contains(err.Error(), "unique constraint") {
+		return fmt.Errorf("create default project: %w", err)
+	}
+
+	ensureEnvironments(ctx, queries, "default")
+	slog.Info("seeded initial default project and environments")
+	return nil
+}
+
+func ensureEnvironments(ctx context.Context, queries *db.Queries, projectID string) {
+	defaultEnvs := []string{"development", "staging", "production"}
+	for _, env := range defaultEnvs {
+		_, _ = queries.CreateEnvironment(ctx, db.CreateEnvironmentParams{
+			ProjectID:   projectID,
+			Name:        env,
+			Description: env + " environment",
+		})
+		_, _ = queries.UpsertProjectRevision(ctx, db.UpsertProjectRevisionParams{
+			ProjectID:   projectID,
+			Environment: env,
+			Revision:    1,
+		})
+	}
 }

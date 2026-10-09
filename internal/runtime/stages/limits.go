@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -123,8 +124,10 @@ func (s *LimitsStage) Handle(ctx context.Context, state *core.ReqState) error {
 		return nil
 	}
 
+	evalMeta := state.Metadata
+
 	// Resolve active rules via TierResolver
-	activeRules, err := s.tierResolver.ResolveRules(ctx, state.AIApp.Limits, state.Identity, state.Metadata)
+	activeRules, err := s.tierResolver.ResolveRules(ctx, state.AIApp.Limits, state.Identity, evalMeta)
 	if err != nil {
 		span.RecordError(err)
 		if s.failClosed {
@@ -162,26 +165,72 @@ func (s *LimitsStage) Handle(ctx context.Context, state *core.ReqState) error {
 		state.Metadata["estimated_tokens"] = estimatedTokens
 	}
 
+	var projectRules []core.LimitRule
+	var userRules []core.LimitRule
+	for _, r := range activeRules {
+		if r.Scope == "project" {
+			projectRules = append(projectRules, r)
+		} else {
+			userRules = append(userRules, r)
+		}
+	}
+
+	// 1. Evaluate project-level rate limits if present
+	if len(projectRules) > 0 {
+		projKey := limits.ProjectKey(state.ProjectID, state.Environment)
+		pAllowed, pRetryAfter, pErr := s.store.CheckAndDebit(ctx, projKey, projectRules, estimatedTokens)
+		if pErr != nil {
+			span.RecordError(pErr)
+			if s.failClosed {
+				state.Error = &core.ErrorResponse{
+					Code:      "unavailable",
+					Message:   "rate limit store unavailable",
+					RequestID: state.RequestID,
+				}
+				return fmt.Errorf("project limit store check: %w", pErr)
+			}
+			slog.WarnContext(ctx, "project limit store check error, failing open", "error", pErr)
+		} else if !pAllowed {
+			retrySec := int(math.Ceil(pRetryAfter.Seconds()))
+			if retrySec <= 0 {
+				retrySec = 1
+			}
+			state.Error = &core.ErrorResponse{
+				Code:       "rate_limited",
+				Message:    "project rate limit exceeded",
+				RequestID:  state.RequestID,
+				RetryAfter: retrySec,
+			}
+			return ErrRateLimited
+		}
+	}
+
+	// 2. Evaluate user-level rate limits
 	userKey := limits.UserKey(state.ProjectID, state.Environment, state.Identity)
 	if state.Metadata == nil {
 		state.Metadata = make(map[string]any)
 	}
 	state.Metadata["limit_user_key"] = userKey
 
-	allowed, retryAfter, err := s.store.CheckAndDebit(ctx, userKey, activeRules, estimatedTokens)
-	if err != nil {
-		span.RecordError(err)
-		span.SetAttributes(attribute.Bool("limits.allowed", false))
-		if s.failClosed {
-			state.Error = &core.ErrorResponse{
-				Code:      "unavailable",
-				Message:   "rate limit store unavailable",
-				RequestID: state.RequestID,
+	allowed := true
+	var retryAfter time.Duration
+	var checkErr error
+	if len(userRules) > 0 {
+		allowed, retryAfter, checkErr = s.store.CheckAndDebit(ctx, userKey, userRules, estimatedTokens)
+		if checkErr != nil {
+			span.RecordError(checkErr)
+			span.SetAttributes(attribute.Bool("limits.allowed", false))
+			if s.failClosed {
+				state.Error = &core.ErrorResponse{
+					Code:      "unavailable",
+					Message:   "rate limit store unavailable",
+					RequestID: state.RequestID,
+				}
+				return fmt.Errorf("limit store check: %w", checkErr)
 			}
-			return fmt.Errorf("limit store check: %w", err)
+			slog.WarnContext(ctx, "limit store check error, failing open", "error", checkErr)
+			return nil
 		}
-		slog.WarnContext(ctx, "limit store check error, failing open", "error", err)
-		return nil
 	}
 
 	if limitChecksCounter != nil {
@@ -226,6 +275,21 @@ func (s *LimitsStage) Handle(ctx context.Context, state *core.ReqState) error {
 		)
 
 		return ErrRateLimited
+	}
+
+	var minLimit int64 = math.MaxInt64
+	var minWindow int64 = 60
+	for _, r := range activeRules {
+		if r.Max > 0 && r.Max < minLimit {
+			minLimit = r.Max
+			if r.Window.Seconds() > 0 {
+				minWindow = int64(r.Window.Seconds())
+			}
+		}
+	}
+	if minLimit != math.MaxInt64 {
+		state.Metadata["ratelimit_limit"] = minLimit
+		state.Metadata["ratelimit_reset"] = minWindow
 	}
 
 	span.SetAttributes(attribute.Bool("limits.allowed", true))

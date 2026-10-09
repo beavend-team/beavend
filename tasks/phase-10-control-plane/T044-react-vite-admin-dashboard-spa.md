@@ -1,4 +1,4 @@
-# T044 — React + Vite Admin Dashboard Single Page Application
+# T044 - React + Vite Admin Dashboard Single Page Application
 
 * **Status:** Completed
 

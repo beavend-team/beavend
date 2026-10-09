@@ -1,4 +1,4 @@
-# T067 — Exporter, Importer Engine & Dry-Run Diff Engine
+# T067 - Exporter, Importer Engine & Dry-Run Diff Engine
 
 ## Status
 Completed

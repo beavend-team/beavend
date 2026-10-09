@@ -1,4 +1,4 @@
-# T068 — Control Plane Export/Import Endpoints & OpenAPI Contract
+# T068 - Control Plane Export/Import Endpoints & OpenAPI Contract
 
 ## Status
 Completed

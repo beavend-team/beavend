@@ -56,8 +56,11 @@ type AppSpec struct {
 	Limits         []core.LimitRule      `json:"limits,omitempty" yaml:"limits,omitempty"`
 	Cache          *core.CacheConfig     `json:"cache,omitempty" yaml:"cache,omitempty"`
 	Guardrails     *core.GuardrailConfig `json:"guardrails,omitempty" yaml:"guardrails,omitempty"`
-	Memory         *core.MemoryConfig    `json:"memory,omitempty" yaml:"memory,omitempty"`
-	ResponseSchema string                `json:"response_schema,omitempty" yaml:"response_schema,omitempty"`
+	Memory             *core.MemoryConfig             `json:"memory,omitempty" yaml:"memory,omitempty"`
+	Search             *core.SearchConfig             `json:"search,omitempty" yaml:"search,omitempty"`
+	ResponseSchema     string                         `json:"response_schema,omitempty" yaml:"response_schema,omitempty"`
+	Auth               *core.AuthConfig               `json:"auth,omitempty" yaml:"auth,omitempty"`
+	ModelRoutes        *core.ModelRoutes              `json:"model_routes,omitempty" yaml:"model_routes,omitempty"`
 }
 
 // PromptSpec specifies a versioned prompt.
@@ -77,6 +80,10 @@ type ModelSpec struct {
 	Deployment          string        `json:"deployment" yaml:"deployment"`
 	Adapter             string        `json:"adapter" yaml:"adapter"`
 	FallbackDeployments []string      `json:"fallback_deployments,omitempty" yaml:"fallback_deployments,omitempty"`
+	InputCostPer1M      *float64      `json:"input_cost_per_1m,omitempty" yaml:"input_cost_per_1m,omitempty"`
+	OutputCostPer1M     *float64      `json:"output_cost_per_1m,omitempty" yaml:"output_cost_per_1m,omitempty"`
+	InputModalities     []string      `json:"input_modalities,omitempty" yaml:"input_modalities,omitempty"`
+	OutputModalities    []string      `json:"output_modalities,omitempty" yaml:"output_modalities,omitempty"`
 	ProviderConfig      *ProviderSpec `json:"provider,omitempty" yaml:"provider,omitempty"`
 }
 

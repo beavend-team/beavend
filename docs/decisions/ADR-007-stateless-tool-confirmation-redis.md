@@ -1,4 +1,4 @@
-# ADR-007 — Stateless Request Continuation via Redis for Tool Confirmation
+# ADR-007: Stateless Request Continuation via Redis for Tool Confirmation
 
 ## Status
 Accepted

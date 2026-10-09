@@ -1,4 +1,4 @@
-# T039 — Usage Rollup Background Aggregator
+# T039 - Usage Rollup Background Aggregator
 
 * **Status:** Completed
 

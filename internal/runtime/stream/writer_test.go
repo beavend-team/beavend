@@ -173,4 +173,16 @@ func TestStreamWriter_WriteEventTypes(t *testing.T) {
 		assert.Contains(t, buf.String(), `"token":"token_xyz"`)
 		assert.Contains(t, buf.String(), `"tool":"delete_account"`)
 	})
+
+	t.Run("thinking formatting", func(t *testing.T) {
+		var buf bytes.Buffer
+		evt := core.StreamEvent{
+			Type:  "thinking",
+			Delta: "Let me analyze step by step.",
+		}
+
+		err := wr.WriteEvent(&buf, evt)
+		require.NoError(t, err)
+		assert.Contains(t, buf.String(), "event: thinking\ndata: {\"text\":\"Let me analyze step by step.\"}\n\n")
+	})
 }

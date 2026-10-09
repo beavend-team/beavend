@@ -162,3 +162,129 @@ func TestMemoryCacheStoreConcurrency(_ *testing.T) {
 
 	wg.Wait()
 }
+
+func TestComputeRequestHashMultimodalAndRoutes(t *testing.T) {
+	app := &core.AIApp{
+		PromptVersion: 1,
+	}
+
+	reqBase := &core.ChatRequest{
+		Messages: []core.ChatMessage{
+			{Role: "user", Content: "Hello world"},
+		},
+	}
+
+	// 1. Same prompt with different selected model (routes) gets different hash keys
+	hashRouteA, err := ComputeRequestHash(reqBase, app, "model-a")
+	require.NoError(t, err)
+	hashRouteB, err := ComputeRequestHash(reqBase, app, "model-b")
+	require.NoError(t, err)
+	assert.NotEqual(t, hashRouteA, hashRouteB, "different routes must yield different cache keys")
+
+	// 2. Same prompt with different OutputModalities gets different hash keys
+	reqText := &core.ChatRequest{
+		Messages:         []core.ChatMessage{{Role: "user", Content: "Generate a scene"}},
+		OutputModalities: []string{"text"},
+	}
+	reqImage := &core.ChatRequest{
+		Messages:         []core.ChatMessage{{Role: "user", Content: "Generate a scene"}},
+		OutputModalities: []string{"image"},
+	}
+	hashText, err := ComputeRequestHash(reqText, app, "model-a")
+	require.NoError(t, err)
+	hashImage, err := ComputeRequestHash(reqImage, app, "model-a")
+	require.NoError(t, err)
+	assert.NotEqual(t, hashText, hashImage, "different output modalities must yield different cache keys")
+
+	// 3. Same attachment bytes with different URLs gets the same key
+	reqAttURL1 := &core.ChatRequest{
+		Messages: []core.ChatMessage{{Role: "user", Content: "Analyze this image"}},
+		Attachments: []core.Attachment{
+			{
+				Type:     "image",
+				MimeType: "image/png",
+				URL:      "https://storage.cdn1.com/images/cat.png",
+				Data:     []byte("binary-image-content-bytes-12345"),
+			},
+		},
+	}
+	reqAttURL2 := &core.ChatRequest{
+		Messages: []core.ChatMessage{{Role: "user", Content: "Analyze this image"}},
+		Attachments: []core.Attachment{
+			{
+				Type:     "image",
+				MimeType: "image/png",
+				URL:      "https://storage.cdn2.net/signed-url/cat.png?sig=xyz987",
+				Data:     []byte("binary-image-content-bytes-12345"),
+			},
+		},
+	}
+	hashAtt1, err := ComputeRequestHash(reqAttURL1, app, "model-a")
+	require.NoError(t, err)
+	hashAtt2, err := ComputeRequestHash(reqAttURL2, app, "model-a")
+	require.NoError(t, err)
+	assert.Equal(t, hashAtt1, hashAtt2, "identical attachment bytes with different URLs must produce identical cache keys")
+
+	// 4. Different attachment bytes get different keys
+	reqAttDifferent := &core.ChatRequest{
+		Messages: []core.ChatMessage{{Role: "user", Content: "Analyze this image"}},
+		Attachments: []core.Attachment{
+			{
+				Type:     "image",
+				MimeType: "image/png",
+				URL:      "https://storage.cdn1.com/images/cat.png",
+				Data:     []byte("completely-different-image-bytes"),
+			},
+		},
+	}
+	hashAttDiff, err := ComputeRequestHash(reqAttDifferent, app, "model-a")
+	require.NoError(t, err)
+	assert.NotEqual(t, hashAtt1, hashAttDiff, "different attachment content must produce different cache keys")
+}
+
+func TestShouldCacheResponseModalities(t *testing.T) {
+	appTextOnly := &core.AIApp{
+		Cache: core.CacheConfig{
+			Enabled: true,
+			// Modalities is empty / default -> only text allowed
+		},
+	}
+
+	appWithImage := &core.AIApp{
+		Cache: core.CacheConfig{
+			Enabled:    true,
+			Modalities: []string{"text", "image"},
+		},
+	}
+
+	reqText := &core.ChatRequest{OutputModalities: []string{"text"}}
+	reqImage := &core.ChatRequest{OutputModalities: []string{"image"}}
+	reqAudio := &core.ChatRequest{OutputModalities: []string{"audio"}}
+
+	respText := &core.ChatResponse{Message: core.ChatMessage{Content: "Hello"}}
+	respImage := &core.ChatResponse{
+		Message: core.ChatMessage{
+			ToolCalls: []core.ToolCall{
+				{Name: "generate_image", Arguments: `{"prompt":"a sunset"}`},
+			},
+		},
+	}
+
+	// Text request is cached for text-only app
+	assert.True(t, ShouldCacheResponse(reqText, respText, appTextOnly))
+
+	// Image request or response is NOT cached when modalities does not include image
+	assert.False(t, ShouldCacheResponse(reqImage, respText, appTextOnly))
+	assert.False(t, ShouldCacheResponse(reqText, respImage, appTextOnly))
+
+	// Image request is cached when app opts in to "image"
+	assert.True(t, ShouldCacheResponse(reqImage, respText, appWithImage))
+	assert.True(t, ShouldCacheResponse(reqText, respImage, appWithImage))
+
+	// Audio is not enabled, so it must not be cached
+	assert.False(t, ShouldCacheResponse(reqAudio, respText, appWithImage))
+
+	// Disabled cache always returns false
+	appDisabled := &core.AIApp{Cache: core.CacheConfig{Enabled: false}}
+	assert.False(t, ShouldCacheResponse(reqText, respText, appDisabled))
+}

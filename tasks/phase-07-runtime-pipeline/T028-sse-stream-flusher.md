@@ -1,4 +1,4 @@
-# T028 — SSE Stream Flusher & Heartbeat Engine [Completed]
+# T028 - SSE Stream Flusher & Heartbeat Engine [Completed]
 
 * **Status:** Completed
 

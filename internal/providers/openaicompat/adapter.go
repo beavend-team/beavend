@@ -81,6 +81,20 @@ func (a *Adapter) embedURL() string {
 	return a.baseURL + "/v1/embeddings"
 }
 
+func (a *Adapter) imagesURL() string {
+	if strings.HasSuffix(a.baseURL, "/v1") {
+		return a.baseURL + "/images/generations"
+	}
+	return a.baseURL + "/v1/images/generations"
+}
+
+func (a *Adapter) speechURL() string {
+	if strings.HasSuffix(a.baseURL, "/v1") {
+		return a.baseURL + "/audio/speech"
+	}
+	return a.baseURL + "/v1/audio/speech"
+}
+
 func (a *Adapter) modelsURL() string {
 	if strings.HasSuffix(a.baseURL, "/v1") {
 		return a.baseURL + "/models"
@@ -95,6 +109,14 @@ func (a *Adapter) applyHeaders(req *http.Request) {
 	}
 	if a.organization != "" {
 		req.Header.Set("OpenAI-Organization", a.organization)
+	}
+	if strings.Contains(a.baseURL, "openrouter.ai") {
+		if req.Header.Get("HTTP-Referer") == "" {
+			req.Header.Set("HTTP-Referer", "https://github.com/beavend/beavend")
+		}
+		if req.Header.Get("X-Title") == "" {
+			req.Header.Set("X-Title", "Beavend")
+		}
 	}
 	for k, v := range a.extraHeaders {
 		req.Header.Set(k, v)
@@ -268,3 +290,204 @@ func (a *Adapter) Health(ctx context.Context) error {
 
 	return nil
 }
+
+// Generate implements core.Generator for image, audio, or video media generation.
+func (a *Adapter) Generate(ctx context.Context, req core.GenerateRequest) (*core.GenerateResponse, error) {
+	modality := strings.ToLower(strings.TrimSpace(req.Modality))
+	switch modality {
+	case "image":
+		return a.generateImage(ctx, req)
+	case "audio", "speech":
+		return a.generateSpeech(ctx, req)
+	case "video":
+		return nil, &core.ErrorResponse{
+			Code:    "not_supported",
+			Message: "video generation is not supported natively by openai-compat adapter; use litellm adapter or async job executor",
+		}
+	default:
+		return nil, fmt.Errorf("unsupported generation modality: %q", req.Modality)
+	}
+}
+
+func (a *Adapter) generateImage(ctx context.Context, req core.GenerateRequest) (*core.GenerateResponse, error) {
+	count := req.Count
+	if count <= 0 {
+		count = 1
+	}
+	size := req.Size
+	if size == "" {
+		size = "1024x1024"
+	}
+	quality := req.Quality
+	if quality == "" {
+		quality = "standard"
+	}
+
+	wireReq := providers.OpenAIImageRequest{
+		Model:          req.Model,
+		Prompt:         req.Prompt,
+		N:              count,
+		Size:           size,
+		Quality:        quality,
+		ResponseFormat: "url",
+	}
+
+	bodyBytes, err := json.Marshal(wireReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal image request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.imagesURL(), bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("create image request: %w", err)
+	}
+	a.applyHeaders(httpReq)
+
+	resp, err := a.httpClient.Do(httpReq)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, &core.ErrorResponse{
+			Code:    "unavailable",
+			Message: fmt.Sprintf("failed to reach provider image endpoint: %v", err),
+		}
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read image response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, providers.NormalizeHTTPError(resp.StatusCode, respBody, resp.Header, "")
+	}
+
+	var wireResp providers.OpenAIImageResponse
+	if err := json.Unmarshal(respBody, &wireResp); err != nil {
+		return nil, &core.ErrorResponse{
+			Code:    "provider_error",
+			Message: fmt.Sprintf("malformed image json response: %v", err),
+		}
+	}
+
+	items := make([]core.GeneratedItem, len(wireResp.Data))
+	for i, d := range wireResp.Data {
+		mimeType := "image/png"
+		if req.Format == "jpeg" || req.Format == "jpg" {
+			mimeType = "image/jpeg"
+		} else if req.Format == "webp" {
+			mimeType = "image/webp"
+		}
+		items[i] = core.GeneratedItem{
+			Index:         i,
+			URL:           d.URL,
+			MimeType:      mimeType,
+			RevisedPrompt: d.RevisedPrompt,
+		}
+	}
+
+	return &core.GenerateResponse{
+		ID:        fmt.Sprintf("img_%d", time.Now().UnixNano()),
+		Model:     req.Model,
+		Modality:  "image",
+		Items:     items,
+		Usage:     core.UsageStats{Images: len(items)},
+		CreatedAt: wireResp.Created,
+	}, nil
+}
+
+func (a *Adapter) generateSpeech(ctx context.Context, req core.GenerateRequest) (*core.GenerateResponse, error) {
+	voice := req.Voice
+	if voice == "" {
+		voice = "alloy"
+	}
+	format := req.Format
+	if format == "" {
+		format = "mp3"
+	}
+
+	wireReq := providers.OpenAISpeechRequest{
+		Model:          req.Model,
+		Input:          req.Prompt,
+		Voice:          voice,
+		ResponseFormat: format,
+	}
+
+	bodyBytes, err := json.Marshal(wireReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal speech request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.speechURL(), bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("create speech request: %w", err)
+	}
+	a.applyHeaders(httpReq)
+
+	resp, err := a.httpClient.Do(httpReq)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, &core.ErrorResponse{
+			Code:    "unavailable",
+			Message: fmt.Sprintf("failed to reach provider audio endpoint: %v", err),
+		}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return nil, providers.NormalizeHTTPError(resp.StatusCode, respBody, resp.Header, "")
+	}
+
+	audioBytes, err := io.ReadAll(io.LimitReader(resp.Body, 128<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read audio response: %w", err)
+	}
+
+	mimeType := "audio/mpeg"
+	switch format {
+	case "opus":
+		mimeType = "audio/opus"
+	case "aac":
+		mimeType = "audio/aac"
+	case "flac":
+		mimeType = "audio/flac"
+	case "wav":
+		mimeType = "audio/wav"
+	}
+
+	// Approximate audio duration from character length if not supplied
+	estDuration := req.Duration
+	if estDuration <= 0 {
+		// Speech rate ~15 chars per second
+		estDuration = float64(len(req.Prompt)) / 15.0
+		if estDuration < 1 {
+			estDuration = 1
+		}
+	}
+
+	item := core.GeneratedItem{
+		Index:    0,
+		Data:     audioBytes,
+		MimeType: mimeType,
+	}
+
+	return &core.GenerateResponse{
+		ID:        fmt.Sprintf("aud_%d", time.Now().UnixNano()),
+		Model:     req.Model,
+		Modality:  "audio",
+		Items:     []core.GeneratedItem{item},
+		Usage:     core.UsageStats{AudioSeconds: estDuration},
+		CreatedAt: time.Now().Unix(),
+	}, nil
+}
+
+var (
+	_ core.ProviderAdapter = (*Adapter)(nil)
+	_ core.Generator       = (*Adapter)(nil)
+)
+

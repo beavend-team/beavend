@@ -13,7 +13,7 @@ import (
 	"github.com/beavend/beavend/internal/control/auth"
 	"github.com/beavend/beavend/internal/core"
 	"github.com/beavend/beavend/internal/store/db"
-	"github.com/go-chi/chi/v5"
+	chi "github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

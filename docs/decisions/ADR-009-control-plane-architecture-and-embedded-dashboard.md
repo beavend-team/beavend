@@ -1,4 +1,4 @@
-# ADR-009 — Control Plane Architecture and Embedded Dashboard
+# ADR-009: Control Plane Architecture and Embedded Dashboard
 
 ## Status
 Accepted

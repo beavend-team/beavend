@@ -186,9 +186,11 @@ func (s *testStore) GetSnapshotApps(_ context.Context, _ db.GetSnapshotAppsParam
 				ToolIds:        av.ToolIds,
 				Limits:         av.Limits,
 				CacheConfig:    av.CacheConfig,
-				Guardrails:     av.Guardrails,
+				Guardrails:         av.Guardrails,
 				MemoryConfig:   av.MemoryConfig,
 				ResponseSchema: av.ResponseSchema,
+				AuthConfig:     a.AuthConfig,
+				ModelRoutes:    a.ModelRoutes,
 			})
 		}
 	}
@@ -357,6 +359,8 @@ func (s *testStore) UpsertModelRouting(_ context.Context, arg db.UpsertModelRout
 		Deployment:          arg.Deployment,
 		Adapter:             arg.Adapter,
 		FallbackDeployments: arg.FallbackDeployments,
+		InputModalities:     arg.InputModalities,
+		OutputModalities:    arg.OutputModalities,
 	}
 	s.models[arg.LogicalModel] = m
 	return m, nil
@@ -375,6 +379,8 @@ func (s *testStore) CreateAIApp(_ context.Context, arg db.CreateAIAppParams) (db
 		Name:          arg.Name,
 		Description:   arg.Description,
 		ActiveVersion: arg.ActiveVersion,
+		AuthConfig:    arg.AuthConfig,
+		ModelRoutes:   arg.ModelRoutes,
 	}
 	s.apps[arg.ID] = a
 	return a, nil
@@ -394,6 +400,7 @@ func (s *testStore) CreateAIAppVersion(_ context.Context, arg db.CreateAIAppVers
 		CacheConfig:    arg.CacheConfig,
 		Guardrails:     arg.Guardrails,
 		ResponseSchema: arg.ResponseSchema,
+		MemoryConfig:   arg.MemoryConfig,
 	}
 	s.appVersions[arg.AppID] = av
 	return av, nil
@@ -421,6 +428,7 @@ func (s *testStore) GetActiveAIAppVersion(_ context.Context, id string) (db.GetA
 func (s *testStore) UpdateAIAppActiveVersion(_ context.Context, arg db.UpdateAIAppActiveVersionParams) (db.AiApps, error) {
 	if a, ok := s.apps[arg.ID]; ok {
 		a.ActiveVersion = arg.ActiveVersion
+		a.AuthConfig = arg.AuthConfig
 		s.apps[arg.ID] = a
 		return a, nil
 	}
@@ -461,6 +469,9 @@ func TestEngine_ApplyAndExportRoundTrip(t *testing.T) {
 				PromptID:       "retail_prompt",
 				ModelRoutingID: "fast",
 				ToolIDs:        []string{"get_order_status"},
+				Auth: &core.AuthConfig{
+					Provider: "anonymous",
+				},
 			},
 		},
 		Prompts: []PromptSpec{
@@ -531,6 +542,8 @@ func TestEngine_ApplyAndExportRoundTrip(t *testing.T) {
 	assert.Equal(t, doc.Auth.Provider, exported.Auth.Provider)
 	require.Len(t, exported.Apps, 1)
 	assert.Equal(t, "order_assistant", exported.Apps[0].ID)
+	require.NotNil(t, exported.Apps[0].Auth)
+	assert.Equal(t, "anonymous", exported.Apps[0].Auth.Provider)
 	require.Len(t, exported.Prompts, 1)
 	assert.Equal(t, "retail_prompt", exported.Prompts[0].ID)
 	require.Len(t, exported.Policies, 1)

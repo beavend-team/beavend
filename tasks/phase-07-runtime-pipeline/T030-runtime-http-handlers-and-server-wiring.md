@@ -1,4 +1,4 @@
-# T030 — Runtime HTTP Handlers & Server Wiring [Completed]
+# T030 - Runtime HTTP Handlers & Server Wiring [Completed]
 
 * **Status:** Completed
 

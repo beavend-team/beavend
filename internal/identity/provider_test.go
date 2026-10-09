@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/beavend/beavend/internal/core"
-	"github.com/beavend/beavend/internal/snapshot"
 )
 
 func TestProvider_ValidateToken(t *testing.T) {
@@ -20,7 +19,7 @@ func TestProvider_ValidateToken(t *testing.T) {
 	mgr.SetManual(testURL, fixture.jwksSet, 1*time.Hour)
 
 	verifier := NewVerifier(mgr)
-	registry := snapshot.NewRegistry()
+	registry := newMockSnapshotResolver()
 
 	projectID := "proj_prov"
 	env := "development"

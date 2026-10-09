@@ -324,6 +324,100 @@ paths:
         "200":
           description: Thread deleted
 
+  /v1/apps/{ai_app_id}/jobs/{job_id}:
+    get:
+      summary: Get asynchronous media job status
+      description: Returns the status and result of an asynchronous media generation job (e.g. video generation).
+      parameters:
+        - name: ai_app_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/ProjectIDHeader"
+        - $ref: "#/components/parameters/EnvironmentHeader"
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Job status retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  project_id:
+                    type: string
+                  ai_app_id:
+                    type: string
+                  model:
+                    type: string
+                  modality:
+                    type: string
+                  status:
+                    type: string
+                    enum: [queued, processing, completed, failed]
+                  result:
+                    type: object
+                  error:
+                    type: string
+                  created_at:
+                    type: string
+                    format: date-time
+                  updated_at:
+                    type: string
+                    format: date-time
+        "404":
+          $ref: "#/components/responses/404Error"
+
+  /v1/media/{project_id}/{media_id}:
+    get:
+      summary: Retrieve media object
+      description: Serves a media object with HMAC signature and expiration verification.
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: media_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: exp
+          in: query
+          required: true
+          description: UNIX timestamp when the signed URL expires
+          schema:
+            type: integer
+            format: int64
+        - name: sig
+          in: query
+          required: true
+          description: HMAC signature authenticating the media request
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Media binary stream
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: Invalid or expired signature
+        "404":
+          description: Media object not found
+
   /v1/admin/health:
     get:
       summary: Control plane health check
@@ -815,6 +909,68 @@ paths:
         "200":
           description: AI App deleted
 
+  /v1/admin/apps/{id}/keys:
+    get:
+      summary: List App API Keys
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: List of App API keys
+    post:
+      summary: Generate App API Key
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                expires_in_days:
+                  type: integer
+      responses:
+        "201":
+          description: App API key generated with one-time token
+
+  /v1/admin/apps/{id}/keys/{key_id}:
+    delete:
+      summary: Revoke App API Key
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: key_id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: App API key revoked
+
   /v1/admin/prompts:
     get:
       summary: List Prompts
@@ -854,6 +1010,37 @@ paths:
       responses:
         "200":
           description: Prompt details
+    put:
+      summary: Update Prompt
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                template:
+                  type: string
+                variables:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: Prompt updated
     delete:
       summary: Delete Prompt
       parameters:
@@ -890,6 +1077,33 @@ paths:
       responses:
         "201":
           description: Prompt version created
+
+  /v1/admin/prompts/{id}/active-version:
+    put:
+      summary: Set Active Prompt Version
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - version
+              properties:
+                version:
+                  type: integer
+      responses:
+        "200":
+          description: Active version updated
 
   /v1/admin/models:
     get:
@@ -947,6 +1161,42 @@ paths:
         "200":
           description: List of provider configurations
 
+  /v1/admin/providers/test-connection:
+    post:
+      summary: Test Provider Connectivity
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                provider_name:
+                  type: string
+                base_url:
+                  type: string
+                api_key:
+                  type: string
+      responses:
+        "200":
+          description: Connectivity test result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  status_code:
+                    type: integer
+                  latency_ms:
+                    type: integer
+                  message:
+                    type: string
+
   /v1/admin/providers/{provider_name}:
     put:
       summary: Upsert Provider Configuration
@@ -979,9 +1229,32 @@ paths:
       security:
         - AdminSessionAuth: []
         - AdminBearerAuth: []
+  /v1/admin/providers/{provider_name}/models:
+    get:
+      summary: Fetch Available Models from Provider
+      parameters:
+        - name: provider_name
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
       responses:
         "200":
-          description: Provider deleted
+          description: List of available models from provider
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  provider_name:
+                    type: string
+                  models:
+                    type: array
+                    items:
+                      type: string
 
   /v1/admin/tools:
     get:
@@ -1057,6 +1330,33 @@ paths:
         "200":
           description: Tool deleted
 
+  /v1/admin/tools/{id}/active-version:
+    put:
+      summary: Set Active Tool Version
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - version
+              properties:
+                version:
+                  type: integer
+      responses:
+        "200":
+          description: Active version updated
+
   /v1/admin/tools/{id}/secrets/{secret_ref}:
     put:
       summary: Set Tool Secret
@@ -1117,6 +1417,89 @@ paths:
                     type: boolean
                   metadata:
                     type: object
+
+  /v1/admin/search/status:
+    get:
+      summary: Get SearXNG Search Engine Health Status
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Search engine health and configuration status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  configured:
+                    type: boolean
+                  enabled:
+                    type: boolean
+                  url:
+                    type: string
+                  status:
+                    type: string
+                  latency_ms:
+                    type: integer
+                  error:
+                    type: string
+
+  /v1/admin/search/test:
+    post:
+      summary: Test SearXNG Web Search
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - query
+              properties:
+                query:
+                  type: string
+                categories:
+                  type: array
+                  items:
+                    type: string
+                max_results:
+                  type: integer
+      responses:
+        "200":
+          description: Search results from SearXNG
+
+  /v1/admin/search/config:
+    put:
+      summary: Update SearXNG Search Engine Configuration
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - url
+              properties:
+                url:
+                  type: string
+                enabled:
+                  type: boolean
+                timeout_seconds:
+                  type: integer
+      responses:
+        "200":
+          description: Updated search engine health and configuration status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchHealthStatus"
 
   /v1/admin/policies:
     get:
@@ -1193,6 +1576,72 @@ paths:
       responses:
         "201":
           description: Policy version created
+
+  /v1/admin/policies/{id}/active-version:
+    put:
+      summary: Set Active Policy Version
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - version
+              properties:
+                version:
+                  type: integer
+      responses:
+        "200":
+          description: Active version updated
+
+  /v1/admin/policies/test:
+    post:
+      summary: Test CEL Policy
+      description: Compiles and evaluates a Google CEL policy against mock JWT claims and identity without persisting.
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - expression
+              properties:
+                expression:
+                  type: string
+                claims:
+                  type: object
+                identity:
+                  type: object
+                meta:
+                  type: object
+      responses:
+        "200":
+          description: Policy evaluation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                  allowed:
+                    type: boolean
+                  error:
+                    type: string
 
   /v1/admin/usage:
     get:
@@ -1361,6 +1810,113 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
+    Modality:
+      type: string
+      enum: [text, image, audio, video, document]
+
+    MediaRef:
+      type: object
+      description: Reference to media in object storage. Generated media is returned as a signed URL, never inlined.
+      properties:
+        media_id:
+          type: string
+        mime_type:
+          type: string
+        digest:
+          type: string
+        url:
+          type: string
+        caption:
+          type: string
+        filename:
+          type: string
+        size:
+          type: integer
+          format: int64
+      required:
+        - mime_type
+
+    MessagePart:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [text, media, tool_call, tool_result]
+        text:
+          type: string
+        media:
+          $ref: "#/components/schemas/MediaRef"
+        tool_call:
+          type: object
+        tool_result:
+          type: object
+      required:
+        - type
+
+    Attachment:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [image, audio, video, document]
+        mime_type:
+          type: string
+        url:
+          type: string
+          description: HTTPS URL fetched via the SSRF-safe dialer.
+        data:
+          type: string
+          format: byte
+          description: Base64 inline content (size-limited).
+      required:
+        - type
+        - mime_type
+
+    ModelRoutes:
+      type: object
+      description: Per-app routing rules, compiled into the snapshot. First matching rule wins; otherwise default.
+      properties:
+        default:
+          type: string
+          description: Logical model used when no rule matches.
+        rules:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelRouteRule"
+      required:
+        - default
+
+    ModelRouteRule:
+      type: object
+      properties:
+        when:
+          $ref: "#/components/schemas/RouteCondition"
+        use:
+          type: string
+          description: Logical model name.
+      required:
+        - when
+        - use
+
+    RouteCondition:
+      type: object
+      properties:
+        input_has:
+          type: array
+          items:
+            $ref: "#/components/schemas/Modality"
+        output:
+          type: array
+          items:
+            $ref: "#/components/schemas/Modality"
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        expr:
+          type: string
+          description: Optional CEL expression (ADR-004).
+
     ChatMessage:
       type: object
       properties:
@@ -1369,6 +1925,11 @@ components:
           enum: [system, user, assistant, tool]
         content:
           type: string
+        parts:
+          type: array
+          description: Canonical parts (text, media, tool_call, tool_result). Generated media appears here as signed-URL media parts.
+          items:
+            $ref: "#/components/schemas/MessagePart"
       required:
         - role
         - content
@@ -1379,10 +1940,22 @@ components:
         thread_id:
           type: string
           description: Optional server-side conversation thread ID
+        model:
+          type: string
+          description: Optional explicit logical model, honored only if allowed by policy; otherwise routing rules apply.
         messages:
           type: array
           items:
             $ref: "#/components/schemas/ChatMessage"
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Attachment"
+        output_modalities:
+          type: array
+          description: Requested output modalities. Defaults to [text]; never inferred from prompt text.
+          items:
+            $ref: "#/components/schemas/Modality"
         metadata:
           type: object
           additionalProperties:
@@ -1614,9 +2187,15 @@ components:
           type: string
         model_routing_id:
           type: string
+          deprecated: true
+          description: Legacy; migrated to model_routes.default. Used only if model_routes is omitted.
+        model_routes:
+          $ref: "#/components/schemas/ModelRoutes"
         prompt_id:
           type: string
         memory_enabled:
+          type: boolean
+        search_enabled:
           type: boolean
         rate_limit_rpm:
           type: integer
@@ -1630,9 +2209,37 @@ components:
           type: array
           items:
             type: string
+        auth:
+          $ref: "#/components/schemas/AppAuthConfig"
       required:
         - id
         - name
+
+    AppAuthConfig:
+      type: object
+      description: Per-app identity provider authentication configuration
+      properties:
+        provider:
+          type: string
+          enum: [firebase, supabase, oidc, jwt, anonymous]
+          description: Identity provider type (firebase, supabase, oidc, jwt, anonymous)
+        issuer:
+          type: string
+          description: Expected JWT token issuer (iss claim)
+        audience:
+          type: array
+          items:
+            type: string
+          description: Expected JWT token audiences (aud claim)
+        jwks_url:
+          type: string
+          description: HTTPS URL to fetch JWKS public key set for token verification
+        project_id:
+          type: string
+          description: Identity provider project ID (for Firebase)
+        allow_anonymous:
+          type: boolean
+          description: If true, allows requests without an Authorization header
 
     AdminPrompt:
       type: object
@@ -1683,10 +2290,34 @@ components:
           type: string
         fallback_models:
           type: array
+          description: Ordered failover chain of fallback deployments, supporting cross-provider routing (e.g. "openai/gpt-4o-mini", "groq/llama-3.3-70b", or "claude-3-haiku").
           items:
             type: string
+        fallback_deployments:
+          type: array
+          description: Ordered failover chain of fallback deployments, supporting cross-provider routing (e.g. "openai/gpt-4o-mini", "groq/llama-3.3-70b", or "claude-3-haiku").
+          items:
+            type: string
+        input_cost_per_1m:
+          type: number
+          format: double
+          description: Optional custom USD rate per 1 Million prompt/input tokens. Overrides default catalog pricing.
+        output_cost_per_1m:
+          type: number
+          format: double
+          description: Optional custom USD rate per 1 Million completion/output tokens. Overrides default catalog pricing.
         retry_max_attempts:
           type: integer
+        input_modalities:
+          type: array
+          description: Capability metadata (validation and dashboard pickers only; never used to route). Defaults to [text].
+          items:
+            $ref: "#/components/schemas/Modality"
+        output_modalities:
+          type: array
+          description: Capability metadata (validation only). Rules routing to an incapable model are rejected on publish; fallbacks must be equal-or-superset.
+          items:
+            $ref: "#/components/schemas/Modality"
       required:
         - logical_model
         - deployment

@@ -13,6 +13,7 @@ import (
 	"github.com/beavend/beavend/internal/policy"
 	synckit "github.com/beavend/beavend/internal/snapshot/sync"
 	"github.com/beavend/beavend/internal/store/db"
+	"github.com/beavend/beavend/internal/tools"
 )
 
 // Service coordinates administrative business logic, database queries,
@@ -27,6 +28,7 @@ type Service struct {
 	memoryProvider core.MemoryProvider
 	threadStore    core.ThreadStore
 	configEngine   *configcode.Engine
+	searxngClient  *tools.SearXNGClient
 }
 
 // NewService constructs a new control plane service.
@@ -59,6 +61,16 @@ func (s *Service) SetConfigEngine(engine *configcode.Engine) {
 // ConfigEngine returns the configured configcode Engine.
 func (s *Service) ConfigEngine() *configcode.Engine {
 	return s.configEngine
+}
+
+// SetSearXNGClient sets the SearXNG client for search status and test executions.
+func (s *Service) SetSearXNGClient(client *tools.SearXNGClient) {
+	s.searxngClient = client
+}
+
+// SearXNGClient returns the configured SearXNG client.
+func (s *Service) SearXNGClient() *tools.SearXNGClient {
+	return s.searxngClient
 }
 
 // SetCacheStore sets the cache store for subject cache purges.

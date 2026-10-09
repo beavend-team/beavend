@@ -1,4 +1,4 @@
-# ADR-002 — In-Memory Compiled Configuration Snapshots on Hot Path
+# ADR-002: In-Memory Compiled Configuration Snapshots on Hot Path
 
 ## Status
 Accepted

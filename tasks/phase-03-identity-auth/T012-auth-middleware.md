@@ -1,4 +1,4 @@
-# T012 — Ingress Authentication Middleware and Error Mapping [Completed]
+# T012 - Ingress Authentication Middleware and Error Mapping [Completed]
 
 * **Status:** Completed
 

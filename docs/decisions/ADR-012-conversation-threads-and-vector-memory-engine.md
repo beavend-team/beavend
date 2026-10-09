@@ -1,4 +1,4 @@
-# ADR-012 — Conversation Threads and Vector Memory Engine
+# ADR-012: Conversation Threads and Vector Memory Engine
 
 ## Status
 Accepted

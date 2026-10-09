@@ -1,4 +1,4 @@
-# T011 — Identity Normalization and Claims Extraction [Completed]
+# T011 - Identity Normalization and Claims Extraction [Completed]
 
 * **Status:** Completed
 

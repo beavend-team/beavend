@@ -1,4 +1,4 @@
-# T043 — Management API: Observability, Logs & Privacy Operations
+# T043 - Management API: Observability, Logs & Privacy Operations
 
 * **Status:** Completed
 

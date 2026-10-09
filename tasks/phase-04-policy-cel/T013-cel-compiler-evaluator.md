@@ -1,4 +1,4 @@
-# T013 — CEL Policy Compiler and Evaluator [Completed]
+# T013 - CEL Policy Compiler and Evaluator [Completed]
 
 * **Status:** Completed
 

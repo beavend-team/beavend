@@ -1,4 +1,4 @@
-# T029 — Pipeline Orchestrator & Execution Stage [Completed]
+# T029 - Pipeline Orchestrator & Execution Stage [Completed]
 
 * **Status:** Completed
 

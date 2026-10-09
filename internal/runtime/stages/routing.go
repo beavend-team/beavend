@@ -91,7 +91,17 @@ func (s *ModelRoutingStage) Handle(ctx context.Context, state *core.ReqState) er
 		return ErrMissingAIApp
 	}
 
-	route, err := s.resolver.Resolve(state.Snapshot, state.AIApp, state.ChatRequest)
+	var route *routing.ResolvedRoute
+	var err error
+
+	if state.SelectedModel != "" {
+		route, err = s.resolver.ResolveModel(state.Snapshot, state.SelectedModel)
+	} else {
+		route, err = s.resolver.Resolve(state.Snapshot, state.AIApp, state.ChatRequest)
+		if err == nil && route != nil && route.ModelRouting != nil {
+			state.SelectedModel = route.ModelRouting.LogicalModel
+		}
+	}
 	if err != nil {
 		routingFailures.Add(ctx, 1)
 		span.RecordError(err)
@@ -120,6 +130,7 @@ func (s *ModelRoutingStage) Handle(ctx context.Context, state *core.ReqState) er
 	}
 
 	state.ResolvedModel = route.ModelRouting
+	state.ResolvedAdapter = route.Adapter
 	if state.ChatRequest != nil {
 		state.ChatRequest.Model = route.Deployment
 	}

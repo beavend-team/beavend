@@ -1,4 +1,4 @@
-# T061 — MemoryProvider & ThreadStore Domain Interfaces and Entities
+# T061 - MemoryProvider & ThreadStore Domain Interfaces and Entities
 
 ## Status
 Completed

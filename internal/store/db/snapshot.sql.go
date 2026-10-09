@@ -11,8 +11,50 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getSnapshotAppAPIKeys = `-- name: GetSnapshotAppAPIKeys :many
+SELECT id, app_id, project_id, environment, name, key_prefix, key_hash, created_at, last_used_at, expires_at
+FROM app_api_keys
+WHERE project_id = $1 AND environment = $2 AND (expires_at IS NULL OR expires_at > NOW())
+`
+
+type GetSnapshotAppAPIKeysParams struct {
+	ProjectID   string `json:"project_id"`
+	Environment string `json:"environment"`
+}
+
+func (q *Queries) GetSnapshotAppAPIKeys(ctx context.Context, arg GetSnapshotAppAPIKeysParams) ([]AppApiKeys, error) {
+	rows, err := q.db.Query(ctx, getSnapshotAppAPIKeys, arg.ProjectID, arg.Environment)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppApiKeys{}
+	for rows.Next() {
+		var i AppApiKeys
+		if err := rows.Scan(
+			&i.ID,
+			&i.AppID,
+			&i.ProjectID,
+			&i.Environment,
+			&i.Name,
+			&i.KeyPrefix,
+			&i.KeyHash,
+			&i.CreatedAt,
+			&i.LastUsedAt,
+			&i.ExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getSnapshotApps = `-- name: GetSnapshotApps :many
-SELECT aav.id, aav.app_id, aav.project_id, aav.environment, aav.version, aav.access_policy, aav.prompt_id, aav.prompt_version, aav.model_routing_id, aav.tool_ids, aav.limits, aav.cache_config, aav.guardrails, aav.response_schema, aav.is_active, aav.created_at, aav.memory_config, a.name, a.description
+SELECT aav.id, aav.app_id, aav.project_id, aav.environment, aav.version, aav.access_policy, aav.prompt_id, aav.prompt_version, aav.model_routing_id, aav.tool_ids, aav.limits, aav.cache_config, aav.guardrails, aav.response_schema, aav.is_active, aav.created_at, aav.memory_config, aav.search_config, a.name, a.description, a.auth_config, a.model_routes
 FROM ai_app_versions aav
 JOIN ai_apps a ON a.id = aav.app_id AND a.active_version = aav.version
 WHERE a.project_id = $1 AND a.environment = $2
@@ -41,8 +83,11 @@ type GetSnapshotAppsRow struct {
 	IsActive       bool               `json:"is_active"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	MemoryConfig   []byte             `json:"memory_config"`
+	SearchConfig   []byte             `json:"search_config"`
 	Name           string             `json:"name"`
 	Description    string             `json:"description"`
+	AuthConfig     []byte             `json:"auth_config"`
+	ModelRoutes    []byte             `json:"model_routes"`
 }
 
 func (q *Queries) GetSnapshotApps(ctx context.Context, arg GetSnapshotAppsParams) ([]GetSnapshotAppsRow, error) {
@@ -72,8 +117,11 @@ func (q *Queries) GetSnapshotApps(ctx context.Context, arg GetSnapshotAppsParams
 			&i.IsActive,
 			&i.CreatedAt,
 			&i.MemoryConfig,
+			&i.SearchConfig,
 			&i.Name,
 			&i.Description,
+			&i.AuthConfig,
+			&i.ModelRoutes,
 		); err != nil {
 			return nil, err
 		}
@@ -103,7 +151,7 @@ func (q *Queries) GetSnapshotEnvironment(ctx context.Context, arg GetSnapshotEnv
 }
 
 const getSnapshotModelRoutings = `-- name: GetSnapshotModelRoutings :many
-SELECT id, project_id, environment, logical_model, deployment, adapter, fallback_deployments, created_at, updated_at FROM model_routings
+SELECT id, project_id, environment, logical_model, deployment, adapter, fallback_deployments, created_at, updated_at, input_cost_per_1m, output_cost_per_1m, input_modalities, output_modalities FROM model_routings
 WHERE project_id = $1 AND environment = $2
 `
 
@@ -131,6 +179,10 @@ func (q *Queries) GetSnapshotModelRoutings(ctx context.Context, arg GetSnapshotM
 			&i.FallbackDeployments,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.InputCostPer1m,
+			&i.OutputCostPer1m,
+			&i.InputModalities,
+			&i.OutputModalities,
 		); err != nil {
 			return nil, err
 		}

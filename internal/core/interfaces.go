@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"io"
 	"time"
 )
 
@@ -88,6 +89,14 @@ type UsageStore interface {
 // KeyProvider provides the master key for envelope encryption.
 type KeyProvider interface {
 	GetMasterKey(ctx context.Context) ([]byte, error)
+}
+
+// MediaStore manages media assets (images, audio, video) stored for multimodal message turns.
+type MediaStore interface {
+	Put(ctx context.Context, projectID string, data io.Reader, mimeType string, filename string) (*MediaRef, error)
+	Get(ctx context.Context, projectID, mediaID string) (io.ReadCloser, *MediaRef, error)
+	SignedURL(ctx context.Context, projectID, mediaID string, ttl time.Duration) (string, error)
+	Delete(ctx context.Context, projectID, mediaID string) error
 }
 
 // CacheStore handles ephemeral caching for responses and tool results.

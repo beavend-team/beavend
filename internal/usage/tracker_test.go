@@ -294,3 +294,74 @@ func TestTracker_TruncateString(t *testing.T) {
 		t.Errorf("expected empty string untouched")
 	}
 }
+
+func TestTracker_RecordUsage_ModelPricingCalculation(t *testing.T) {
+	buf := NewBuffer(BufferConfig{Capacity: 10, Policy: DropOnFull})
+	limitStore := &mockLimitStore{}
+	tracker := NewTracker(buf, limitStore)
+
+	// Case 1: CostUSD is nil, but model is gpt-4o (2.50 in, 10.00 out per 1M)
+	// 1000 in, 500 out => 0.0025 + 0.0050 = 0.0075
+	state := &core.ReqState{
+		RequestID:   "req_model_price",
+		ProjectID:   "proj_abc",
+		Environment: "production",
+		AIAppID:     "app_support",
+		ResolvedModel: &core.ModelRouting{
+			LogicalModel: "standard",
+			Deployment:   "gpt-4o",
+			Adapter:      "openai_compat",
+		},
+		Usage: core.UsageStats{
+			InputTokens:  1000,
+			OutputTokens: 500,
+			TotalTokens:  1500,
+			CostUSD:      nil,
+		},
+	}
+
+	if err := tracker.RecordUsage(context.Background(), state); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	rec := <-buf.Events()
+	if rec.Log == nil {
+		t.Fatal("expected log event")
+	}
+	if math.Abs(rec.Log.CostUSD-0.0075) > 0.000001 {
+		t.Errorf("expected calculated cost 0.0075, got %f", rec.Log.CostUSD)
+	}
+	if rec.Usage == nil || math.Abs(rec.Usage.CostUSD-0.0075) > 0.000001 {
+		t.Errorf("expected usage event cost 0.0075, got %f", rec.Usage.CostUSD)
+	}
+
+	// Case 2: Custom override in ModelRouting
+	customIn := 1.0
+	customOut := 2.0
+	stateCustom := &core.ReqState{
+		RequestID:   "req_custom_override",
+		ProjectID:   "proj_abc",
+		Environment: "production",
+		AIAppID:     "app_support",
+		ResolvedModel: &core.ModelRouting{
+			LogicalModel:    "custom",
+			Deployment:      "my-custom-model",
+			InputCostPer1M:  &customIn,
+			OutputCostPer1M: &customOut,
+		},
+		Usage: core.UsageStats{
+			InputTokens:  1000,
+			OutputTokens: 500,
+			CostUSD:      nil,
+		},
+	}
+	if err := tracker.RecordUsage(context.Background(), stateCustom); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	recCustom := <-buf.Events()
+	if math.Abs(recCustom.Log.CostUSD-0.002) > 0.000001 {
+		t.Errorf("expected custom cost 0.002, got %f", recCustom.Log.CostUSD)
+	}
+}
+

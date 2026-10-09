@@ -1,4 +1,4 @@
-# ADR-013 — Configuration as Code (Export, Import & Environment Promotion)
+# ADR-013: Configuration as Code (Export, Import & Environment Promotion)
 
 ## Status
 Accepted

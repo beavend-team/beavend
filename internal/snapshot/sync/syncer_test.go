@@ -60,6 +60,10 @@ func (m *mockQuerySource) GetSnapshotModelRoutings(_ context.Context, _ db.GetSn
 	return m.models, nil
 }
 
+func (m *mockQuerySource) GetSnapshotAppAPIKeys(_ context.Context, _ db.GetSnapshotAppAPIKeysParams) ([]db.AppApiKeys, error) {
+	return nil, nil
+}
+
 func (m *mockQuerySource) ListAllProjectEnvironments(_ context.Context) ([]db.ListAllProjectEnvironmentsRow, error) {
 	if m.failRev {
 		return nil, errors.New("db error")

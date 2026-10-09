@@ -1,4 +1,4 @@
-# T006 — PostgreSQL Schema Migrations with Goose
+# T006 - PostgreSQL Schema Migrations with Goose
 
 ## Goal
 Author versioned PostgreSQL DDL migrations using `goose` to define tenant, configuration, and operational tables in `internal/store/migrations`.

@@ -1,4 +1,4 @@
-# T064 — Conversation Thread Stores & Runtime HTTP Endpoints
+# T064 - Conversation Thread Stores & Runtime HTTP Endpoints
 
 ## Status
 Completed

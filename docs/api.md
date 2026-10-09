@@ -82,11 +82,17 @@ POST /v1/apps/{ai_app_id}/chat
     }
   ],
   "attachments": [],
+  "output_modalities": ["text"],
   "metadata": {
     "device_locale": "en-US"
   }
 }
 ```
+
+* `attachments[]`: `{type: image|audio|video|document, mime_type, url | data}`. URLs are fetched via the SSRF-safe dialer; content digests (not URLs) participate in cache keys.
+* `output_modalities`: requested output (default `["text"]`); never inferred from the prompt. Routing rules in the app's `model_routes` may select a model by input modality, output modality, or metadata.
+* `model`: optional explicit logical model, honored only if allowed by policy.
+* Generated media is returned as signed-URL `media` parts in `message.parts`, never inlined.
 
 #### Response `200 OK`
 ```json
@@ -245,11 +251,17 @@ GET /v1/apps/{ai_app_id}
 
 ---
 
+### 3.6.1 Poll Asynchronous Media Job
+```http
+GET /v1/apps/{ai_app_id}/jobs/{job_id}
+```
+Returns `{id, ai_app_id, model, modality, status: queued|processing|completed|failed, result, error, created_at, updated_at}` for long-running generation (e.g. video). `404` if the job does not exist for the caller.
+
 ### 3.7 Memory Endpoints (Opt-in, v0.3)
 Scoped to `project + issuer + subject + ai_app_id`.
 
-* `GET /v1/apps/{ai_app_id}/memory` — Fetch active memory entries for the caller.
-* `POST /v1/apps/{ai_app_id}/memory` — Explicitly upsert a semantic memory entry.
+* `GET /v1/apps/{ai_app_id}/memory`: Fetch active memory entries for the caller.
+* `POST /v1/apps/{ai_app_id}/memory`: Explicitly upsert a semantic memory entry.
 
 ---
 
@@ -260,9 +272,9 @@ Management endpoints require administrative authentication (Bearer admin token o
 | Path | Methods | Description |
 |---|---|---|
 | `/v1/admin/projects` | `GET`, `POST`, `PUT` | Manage tenant projects and environments |
-| `/v1/admin/apps` | `GET`, `POST`, `PUT`, `DELETE` | Configure AI Apps, assigned prompts, models, and tools |
+| `/v1/admin/apps` | `GET`, `POST`, `PUT`, `DELETE` | Configure AI Apps, assigned prompts, tools, and `model_routes` (default model + ordered routing rules; validated on write and again on snapshot publish; included in config-as-code export/import) |
 | `/v1/admin/providers` | `GET`, `POST`, `PUT`, `DELETE` | Configure LiteLLM credentials and native provider connections |
-| `/v1/admin/models` | `GET`, `POST`, `PUT` | Manage logical model aliases (`fast`, `reasoning`, `vision`) |
+| `/v1/admin/models` | `GET`, `POST`, `PUT` | Manage user-defined logical models, including `input_modalities`/`output_modalities` capability metadata |
 | `/v1/admin/prompts` | `GET`, `POST` | Create and publish immutable prompt versions |
 | `/v1/admin/tools` | `GET`, `POST`, `PUT` | Manage custom tools, JSON schemas, identity bindings, and executors |
 | `/v1/admin/guardrails`| `GET`, `POST`, `PUT` | Define input and output safety guardrails |

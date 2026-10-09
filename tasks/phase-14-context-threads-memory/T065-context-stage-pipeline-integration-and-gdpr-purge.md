@@ -1,4 +1,4 @@
-# T065 — ContextStage Pipeline Integration, GDPR Subject Purge Hook & ADR-012
+# T065 - ContextStage Pipeline Integration, GDPR Subject Purge Hook & ADR-012
 
 ## Status
 Completed

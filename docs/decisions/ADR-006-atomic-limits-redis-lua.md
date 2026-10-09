@@ -1,4 +1,4 @@
-# ADR-006 — Atomic Multi-Window Limits in Redis with PostgreSQL Fallback
+# ADR-006: Atomic Multi-Window Limits in Redis with PostgreSQL Fallback
 
 ## Status
 Accepted

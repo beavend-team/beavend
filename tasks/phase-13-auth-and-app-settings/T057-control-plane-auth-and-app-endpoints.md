@@ -1,4 +1,4 @@
-# T057 — Control Plane AuthConfig and AI App Management Endpoints
+# T057 - Control Plane AuthConfig and AI App Management Endpoints
 
 * **Status:** Completed
 

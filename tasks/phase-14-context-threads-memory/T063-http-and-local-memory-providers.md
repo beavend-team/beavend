@@ -1,4 +1,4 @@
-# T063 — Implementor-Hosted HTTP Memory Provider & In-Memory Local Provider
+# T063 - Implementor-Hosted HTTP Memory Provider & In-Memory Local Provider
 
 ## Status
 Completed

@@ -1,4 +1,4 @@
-# T007 — Type-Safe SQL Query Generation with Sqlc
+# T007 - Type-Safe SQL Query Generation with Sqlc
 
 ## Goal
 Configure `sqlc` to generate type-safe Go repository code from pure SQL queries in `internal/store`.

@@ -1,4 +1,4 @@
-# T015 — Authorization Pipeline Stage [Completed]
+# T015 - Authorization Pipeline Stage [Completed]
 
 * **Status:** Completed
 

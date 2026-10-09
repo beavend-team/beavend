@@ -1,4 +1,4 @@
-# T069 — CLI Export & Import Commands
+# T069 - CLI Export & Import Commands
 
 ## Status
 Completed

@@ -26,4 +26,19 @@ func TestEmbeddedMigrations(t *testing.T) {
 		}
 	}
 	require.True(t, foundSchema, "expected to find 00001_initial_schema.sql")
+
+	foundModelRoutes := false
+	for _, file := range files {
+		if file.Name() == "00009_model_routes.sql" {
+			foundModelRoutes = true
+			content, err := fs.ReadFile(store.EmbedMigrations, "migrations/"+file.Name())
+			require.NoError(t, err)
+			require.Contains(t, string(content), "-- +goose Up")
+			require.Contains(t, string(content), "ALTER TABLE ai_apps ADD COLUMN IF NOT EXISTS model_routes JSONB")
+			require.Contains(t, string(content), "ALTER TABLE model_routings ADD COLUMN IF NOT EXISTS input_modalities")
+			require.Contains(t, string(content), "ALTER TABLE model_routings ADD COLUMN IF NOT EXISTS output_modalities")
+			require.Contains(t, string(content), "-- +goose Down")
+		}
+	}
+	require.True(t, foundModelRoutes, "expected to find 00009_model_routes.sql")
 }

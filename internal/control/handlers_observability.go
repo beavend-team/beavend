@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/beavend/beavend/internal/store/db"
+	"github.com/beavend/beavend/internal/usage"
 	chi "github.com/go-chi/chi/v5"
 	pgx "github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -40,6 +41,12 @@ func (h *Handler) HandleGetUsage(w http.ResponseWriter, r *http.Request) {
 			toTime = t
 		}
 	}
+
+	// Synchronize recent usage events into rollups for the requested timeframe and active buckets
+	// so the Usage & Cost page immediately reflects any recent AI hits without waiting for background cron.
+	rollupStore := usage.NewPostgresRollupStore(h.svc.queries)
+	agg := usage.NewRollupAggregator(rollupStore, usage.DefaultRollupAggregatorConfig())
+	_ = agg.SyncRange(r.Context(), granularity, fromTime, toTime)
 
 	rollups, err := h.svc.queries.GetUsageRollups(r.Context(), db.GetUsageRollupsParams{
 		ProjectID:   projectID,

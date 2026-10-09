@@ -1,4 +1,4 @@
-# ADR-003 — External Identity Validation Without Token Revocation Tracking
+# ADR-003: External Identity Validation Without Token Revocation Tracking
 
 ## Status
 Accepted

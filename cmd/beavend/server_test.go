@@ -345,6 +345,48 @@ func TestRuntimeEndpointsWiring(t *testing.T) {
 	if recToolResults.Code != http.StatusOK {
 		t.Fatalf("expected 200 for tool-results, got %d: %s", recToolResults.Code, recToolResults.Body.String())
 	}
+
+	// 5. Cancel
+	cancelBody := `{"request_id":"req_confirm_svr"}`
+	reqCancel := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/cancel", bytes.NewBufferString(cancelBody))
+	reqCancel.Header.Set("X-Project-ID", "proj_test")
+	reqCancel.Header.Set("X-Environment", "development")
+	reqCancel = reqCancel.WithContext(identity.ContextWithIdentity(reqCancel.Context(), &core.Identity{Subject: "user_test", Project: "proj_test"}))
+	recCancel := httptest.NewRecorder()
+
+	router.ServeHTTP(recCancel, reqCancel)
+	if recCancel.Code != http.StatusOK {
+		t.Fatalf("expected 200 for cancel, got %d: %s", recCancel.Code, recCancel.Body.String())
+	}
+
+	// 6. Get App metadata
+	reqGetApp := httptest.NewRequest(http.MethodGet, "/v1/apps/assistant", nil)
+	reqGetApp.Header.Set("X-Project-ID", "proj_test")
+	reqGetApp.Header.Set("X-Environment", "development")
+	recGetApp := httptest.NewRecorder()
+
+	router.ServeHTTP(recGetApp, reqGetApp)
+	if recGetApp.Code != http.StatusOK {
+		t.Fatalf("expected 200 for get app, got %d: %s", recGetApp.Code, recGetApp.Body.String())
+	}
+	var appMeta map[string]any
+	if err := json.Unmarshal(recGetApp.Body.Bytes(), &appMeta); err != nil {
+		t.Fatalf("failed to decode get app response: %v", err)
+	}
+	if appMeta["id"] != "assistant" || appMeta["status"] != "active" {
+		t.Fatalf("unexpected app metadata: %v", appMeta)
+	}
+
+	// 7. Content-Type check (reject non-JSON)
+	reqBadCT := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/chat", bytes.NewBufferString("plain text body"))
+	reqBadCT.Header.Set("Content-Type", "text/plain")
+	reqBadCT.Header.Set("X-Project-ID", "proj_test")
+	recBadCT := httptest.NewRecorder()
+
+	router.ServeHTTP(recBadCT, reqBadCT)
+	if recBadCT.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("expected 415 for text/plain content type, got %d", recBadCT.Code)
+	}
 }
 
 func TestControlPlaneAndDashboardRoutes(t *testing.T) {

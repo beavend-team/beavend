@@ -1,4 +1,4 @@
-# Beavend — Tech Stack
+# Beavend: Tech Stack
 
 > Companion to `Beavend-PRD.md` and `architecture.md`.
 > Goal: the most **efficient** (runtime cost, latency, scale to millions of users) and **effective** (easy to build, operate, and contribute to) stack for a self-hosted AI application backend.
@@ -26,8 +26,8 @@ The stack is chosen for what Beavend actually does, not for general preference.
 ```text
 1,000,000 daily active users × 10 AI requests/day  = 10M requests/day
 Average                                            ≈ 115 requests/sec
-Peak (assume 10× average)                          ≈ 1,000–1,500 requests/sec
-Average stream duration ~10 s → concurrent streams ≈ 10,000–15,000 at peak
+Peak (assume 10x average)                          ≈ 1,000-1,500 requests/sec
+Average stream duration ~10 s → concurrent streams ≈ 10,000-15,000 at peak
 ```
 
 That load is comfortably handled by a small cluster of modest Go instances. In practice the limiting factors are **provider rate limits, cost, Redis/Postgres write throughput, and LiteLLM**, not the Beavend server language. The stack and architecture are designed so each of those can be scaled or bypassed independently. Validate with load tests early (§11).
@@ -67,7 +67,7 @@ That load is comfortably handled by a small cluster of modest Go instances. In p
 ### 3.1 Why Go
 
 * **Concurrency model fits exactly.** Goroutines make tens of thousands of open SSE streams cheap, with simple blocking-style code instead of async/await or callback complexity.
-* **Efficient.** Low memory per connection, fast startup, predictable GC pauses, small footprint. Runs well on a $5–20 VPS for small installs and scales linearly in clusters.
+* **Efficient.** Low memory per connection, fast startup, predictable GC pauses, small footprint. Runs well on a $5-20 VPS for small installs and scales linearly in clusters.
 * **Easiest to operate.** One static binary, no runtime to install, tiny container images. This directly serves the "docker compose up" goal.
 * **Easy to maintain.** Small language, one obvious way to do things, fast compiles, excellent tooling (formatter, vet, race detector, pprof built in). New contributors become productive quickly.
 * **Ecosystem fits.** First-class libraries for HTTP, JWT/JWKS, OpenTelemetry, Prometheus, pgx (Postgres), Redis, CEL, and JSON Schema. The infrastructure category Beavend belongs to (proxies, gateways, backends like Supabase pieces, Traefik, Caddy, Vault) is heavily Go, so the open-source contributor pool matches.
@@ -213,7 +213,7 @@ The **OpenAPI 3.1 spec** (plus a documented SSE event schema) is the single sour
 
 | Repository | Language | Distributes to |
 |---|---|---|
-| `beavend/beavend` | Go + React | — (server + dashboard) |
+| `beavend/beavend` | Go + React | Server + dashboard |
 | `beavend/beavend-sdk-kmp` | Kotlin Multiplatform | Maven Central (Android) |
 | `beavend/beavend-sdk-ios` | Swift | Swift Package Manager |
 | `beavend/beavend-sdk-web` | TypeScript | npm |
@@ -234,7 +234,7 @@ update-spec:
          -o api/openapi.yaml
 ```
 
-SDK CI runs contract conformance tests against the committed spec. Updating to a new API version is an explicit, reviewable PR in each SDK repo. This gives clean separation — SDK contributors never need the server codebase — while keeping the contract versioned and auditable.
+SDK CI runs contract conformance tests against the committed spec. Updating to a new API version is an explicit, reviewable PR in each SDK repo. This gives clean separation (SDK contributors never need the server codebase) while keeping the contract versioned and auditable.
 
 #### SDK versioning policy
 
@@ -243,25 +243,25 @@ SDK CI runs contract conformance tests against the committed spec. Updating to a
 * The SDK sends `X-Beavend-SDK-Version: <version>` on every request so the server can log and warn on version skew.
 * Breaking server API changes are introduced only in minor or major server versions; SDKs have at least one minor version cycle to adapt before the old endpoint is removed.
 
-### 7.2 Kotlin Multiplatform SDK (`beavend-sdk-kmp`) — Android
+### 7.2 Kotlin Multiplatform SDK (`beavend-sdk-kmp`): Android
 
 * Targets: `androidTarget` (primary distribution), with the multiplatform module structure ready to add other targets later.
 * **Ktor client** (OkHttp engine on Android), **kotlinx.serialization**, **coroutines/Flow** for streaming.
 * Public API: `ai(id).chat/stream`, token provider callback, retries with backoff, cancellation, client-tool handlers, confirmation flow.
 * Distributed via **Maven Central**. Publishing pipeline uses the Sonatype Portal with GPG signing.
-* Gradle setup: `kotlin("multiplatform")` convention plugin, `build-logic/` for shared build logic, `gradle/libs.versions.toml` version catalog. This is why a separate repo is essential — this Gradle setup conflicts with a Go server workspace.
+* Gradle setup: `kotlin("multiplatform")` convention plugin, `build-logic/` for shared build logic, `gradle/libs.versions.toml` version catalog. This is why a separate repo is essential: this Gradle setup conflicts with a Go server workspace.
 * Conformance tests run against a mock Beavend server (Docker) in CI.
 
-### 7.3 iOS SDK (`beavend-sdk-ios`) — Swift native
+### 7.3 iOS SDK (`beavend-sdk-ios`): Swift native
 
-* **Pure Swift** implementation — no KMP dependency. Implements the same thin client against the REST/SSE API using `URLSession` and `AsyncStream`.
+* **Pure Swift** implementation with no KMP dependency. Implements the same thin client against the REST/SSE API using `URLSession` and `AsyncStream`.
 * Public API mirrors the KMP SDK surface: `ai(id).chat/stream`, token provider callback, retries, cancellation, client-tool handlers, confirmation flow.
 * Idiomatic Swift: `async/await`, `AsyncSequence` for streaming, `Sendable`-conforming types.
 * Distributed via **Swift Package Manager** (published as a source package to this repo's tags).
 * Minimum deployment target: iOS 16+ (for `AsyncStream` and structured concurrency).
 * CI: `xcodebuild` on macOS runners; unit tests + integration tests against a mock server container.
 
-### 7.4 Web SDK (`beavend-sdk-web`) — TypeScript
+### 7.4 Web SDK (`beavend-sdk-web`): TypeScript
 
 * Zero runtime dependencies; `fetch` + `ReadableStream` SSE parser; works in browsers, Node, Deno, Bun, edge runtimes.
 * Built with **`tsup`** (esbuild-based): produces ESM + CJS dual outputs with `.d.ts` declarations.
@@ -328,7 +328,7 @@ Build/release: GoReleaser produces multi-arch binaries and images; SemVer; migra
 
 SDKs live in their own repos. The main repo contains the server, dashboard, and the API contract.
 
-### `beavend/beavend` — server + dashboard
+### `beavend/beavend`: server + dashboard
 
 ```text
 beavend/
@@ -344,7 +344,7 @@ beavend/
 └── .github/             # CI workflows
 ```
 
-### `beavend/beavend-sdk-kmp` — Android (Kotlin Multiplatform)
+### `beavend/beavend-sdk-kmp`: Android (Kotlin Multiplatform)
 
 ```text
 beavend-sdk-kmp/
@@ -360,7 +360,7 @@ beavend-sdk-kmp/
 └── .github/             # CI: lint, test, publish to Maven Central
 ```
 
-### `beavend/beavend-sdk-ios` — Swift native
+### `beavend/beavend-sdk-ios`: Swift native
 
 ```text
 beavend-sdk-ios/
@@ -374,7 +374,7 @@ beavend-sdk-ios/
 └── .github/             # CI: xcodebuild on macOS runners
 ```
 
-### `beavend/beavend-sdk-web` — TypeScript
+### `beavend/beavend-sdk-web`: TypeScript
 
 ```text
 beavend-sdk-web/
@@ -393,7 +393,7 @@ When a new `beavend` version is tagged, the main repo CI:
 
 1. Validates `api/openapi.yaml` against the live server handlers.
 2. Publishes `openapi.yaml` as a GitHub Release asset at the tagged version.
-3. Opens automated PRs in each SDK repo bumping the pinned spec version — SDK maintainers get a ready-to-review diff.
+3. Opens automated PRs in each SDK repo bumping the pinned spec version, giving SDK maintainers a ready-to-review diff.
 
 Each SDK repo pins a spec version explicitly; updating is a deliberate, reviewable PR. SDK contributors never need the server codebase.
 

@@ -1,4 +1,4 @@
-# T036 — PostgreSQL Partitioned Tables for Request Logs & Usage Events
+# T036 - PostgreSQL Partitioned Tables for Request Logs & Usage Events
 
 * **Status:** Completed
 

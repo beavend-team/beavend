@@ -7,6 +7,8 @@ package db
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const deleteModelRouting = `-- name: DeleteModelRouting :exec
@@ -42,7 +44,7 @@ func (q *Queries) DeleteProviderConfig(ctx context.Context, arg DeleteProviderCo
 }
 
 const getModelRouting = `-- name: GetModelRouting :one
-SELECT id, project_id, environment, logical_model, deployment, adapter, fallback_deployments, created_at, updated_at FROM model_routings
+SELECT id, project_id, environment, logical_model, deployment, adapter, fallback_deployments, created_at, updated_at, input_cost_per_1m, output_cost_per_1m, input_modalities, output_modalities FROM model_routings
 WHERE project_id = $1 AND environment = $2 AND logical_model = $3
 `
 
@@ -65,6 +67,10 @@ func (q *Queries) GetModelRouting(ctx context.Context, arg GetModelRoutingParams
 		&i.FallbackDeployments,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.InputCostPer1m,
+		&i.OutputCostPer1m,
+		&i.InputModalities,
+		&i.OutputModalities,
 	)
 	return i, err
 }
@@ -99,7 +105,7 @@ func (q *Queries) GetProviderConfig(ctx context.Context, arg GetProviderConfigPa
 }
 
 const listModelRoutings = `-- name: ListModelRoutings :many
-SELECT id, project_id, environment, logical_model, deployment, adapter, fallback_deployments, created_at, updated_at FROM model_routings
+SELECT id, project_id, environment, logical_model, deployment, adapter, fallback_deployments, created_at, updated_at, input_cost_per_1m, output_cost_per_1m, input_modalities, output_modalities FROM model_routings
 WHERE project_id = $1 AND environment = $2
 ORDER BY logical_model ASC
 `
@@ -128,6 +134,10 @@ func (q *Queries) ListModelRoutings(ctx context.Context, arg ListModelRoutingsPa
 			&i.FallbackDeployments,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.InputCostPer1m,
+			&i.OutputCostPer1m,
+			&i.InputModalities,
+			&i.OutputModalities,
 		); err != nil {
 			return nil, err
 		}
@@ -184,26 +194,35 @@ func (q *Queries) ListProviderConfigs(ctx context.Context, arg ListProviderConfi
 const upsertModelRouting = `-- name: UpsertModelRouting :one
 INSERT INTO model_routings (
     id, project_id, environment, logical_model, deployment,
-    adapter, fallback_deployments, created_at, updated_at
+    adapter, fallback_deployments, input_cost_per_1m, output_cost_per_1m,
+    input_modalities, output_modalities, created_at, updated_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
 ON CONFLICT (project_id, environment, logical_model)
 DO UPDATE SET
     deployment = EXCLUDED.deployment,
     adapter = EXCLUDED.adapter,
     fallback_deployments = EXCLUDED.fallback_deployments,
+    input_cost_per_1m = EXCLUDED.input_cost_per_1m,
+    output_cost_per_1m = EXCLUDED.output_cost_per_1m,
+    input_modalities = EXCLUDED.input_modalities,
+    output_modalities = EXCLUDED.output_modalities,
     updated_at = NOW()
-RETURNING id, project_id, environment, logical_model, deployment, adapter, fallback_deployments, created_at, updated_at
+RETURNING id, project_id, environment, logical_model, deployment, adapter, fallback_deployments, created_at, updated_at, input_cost_per_1m, output_cost_per_1m, input_modalities, output_modalities
 `
 
 type UpsertModelRoutingParams struct {
-	ID                  string `json:"id"`
-	ProjectID           string `json:"project_id"`
-	Environment         string `json:"environment"`
-	LogicalModel        string `json:"logical_model"`
-	Deployment          string `json:"deployment"`
-	Adapter             string `json:"adapter"`
-	FallbackDeployments []byte `json:"fallback_deployments"`
+	ID                  string         `json:"id"`
+	ProjectID           string         `json:"project_id"`
+	Environment         string         `json:"environment"`
+	LogicalModel        string         `json:"logical_model"`
+	Deployment          string         `json:"deployment"`
+	Adapter             string         `json:"adapter"`
+	FallbackDeployments []byte         `json:"fallback_deployments"`
+	InputCostPer1m      pgtype.Numeric `json:"input_cost_per_1m"`
+	OutputCostPer1m     pgtype.Numeric `json:"output_cost_per_1m"`
+	InputModalities     []string       `json:"input_modalities"`
+	OutputModalities    []string       `json:"output_modalities"`
 }
 
 func (q *Queries) UpsertModelRouting(ctx context.Context, arg UpsertModelRoutingParams) (ModelRoutings, error) {
@@ -215,6 +234,10 @@ func (q *Queries) UpsertModelRouting(ctx context.Context, arg UpsertModelRouting
 		arg.Deployment,
 		arg.Adapter,
 		arg.FallbackDeployments,
+		arg.InputCostPer1m,
+		arg.OutputCostPer1m,
+		arg.InputModalities,
+		arg.OutputModalities,
 	)
 	var i ModelRoutings
 	err := row.Scan(
@@ -227,6 +250,10 @@ func (q *Queries) UpsertModelRouting(ctx context.Context, arg UpsertModelRouting
 		&i.FallbackDeployments,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.InputCostPer1m,
+		&i.OutputCostPer1m,
+		&i.InputModalities,
+		&i.OutputModalities,
 	)
 	return i, err
 }

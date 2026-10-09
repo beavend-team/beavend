@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { api } from '../api/client';
+import { api, parseAuthConfig } from '../api/client';
 import {
   Bot,
   Cpu,
@@ -18,14 +18,6 @@ import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Sparkline } from '../components/ui/Feedback';
 import { formatNumber } from '../lib/utils';
-
-// Simulated sparkline data for demo
-const mockSparklines: Record<string, number[]> = {
-  apps: [3, 3, 4, 4, 5, 5, 5],
-  models: [1, 2, 2, 2, 3, 3, 3],
-  tools: [0, 1, 2, 2, 3, 3, 4],
-  policies: [0, 0, 1, 1, 2, 2, 2],
-};
 
 interface StatCardProps {
   label: string;
@@ -95,21 +87,40 @@ export const OverviewPage: React.FC = () => {
   const [modelsCount, setModelsCount] = useState(0);
   const [toolsCount, setToolsCount] = useState(0);
   const [policiesCount, setPoliciesCount] = useState(0);
+  const [providersCount, setProvidersCount] = useState(0);
+  const [hasAuthConfig, setHasAuthConfig] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [usageData, setUsageData] = useState<any[]>([]);
+  const [totalRequests, setTotalRequests] = useState(0);
+  const [totalTokens, setTotalTokens] = useState(0);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [apps, models, tools, policies] = await Promise.all([
+        const [apps, models, tools, policies, providers, auth, usage] = await Promise.all([
           api.listApps().catch(() => []),
           api.listModels().catch(() => []),
           api.listTools().catch(() => []),
           api.listPolicies().catch(() => []),
+          api.listProviders().catch(() => []),
+          api.getEnvironmentAuthConfig(api.currentProject, api.currentEnv).catch(() => null),
+          api.getUsage('hour').catch(() => []),
         ]);
         setAppsCount(apps.length);
         setModelsCount(models.length);
         setToolsCount(tools.length);
         setPoliciesCount(policies.length);
+        setProvidersCount(providers.length);
+        const appsWithAuth = apps.filter((a) => {
+          const cfg = parseAuthConfig(a.auth || a.auth_config);
+          return cfg && cfg.provider && cfg.provider !== 'anonymous';
+        });
+        const hasEnvAuth = Boolean(auth?.provider && auth.provider !== 'anonymous');
+        const hasActiveAuth = hasEnvAuth || appsWithAuth.length > 0;
+        setHasAuthConfig(hasActiveAuth);
+        setUsageData(usage);
+        setTotalRequests(usage.reduce((s: number, u: any) => s + (u.total_requests ?? u.request_count ?? 0), 0));
+        setTotalTokens(usage.reduce((s: number, u: any) => s + (u.total_tokens ?? 0), 0));
       } finally {
         setLoading(false);
       }
@@ -117,11 +128,12 @@ export const OverviewPage: React.FC = () => {
     fetchData();
   }, []);
 
-  const curlExample = `POST /v1/apps/{app_id}/chat
-Authorization: Bearer <user-jwt>
-X-Project-ID: default
-
-{ "messages": [{ "role": "user", "content": "Hello!" }] }`;
+  const curlExample = `curl -X POST "http://localhost:8080/v1/apps/{app_id}/chat" \\
+  -H "Content-Type: application/json" \\
+  -H "X-Project-ID: ${api.currentProject}" \\
+  -H "X-Environment: ${api.currentEnv}" \\
+  -H "Authorization: Bearer <USER_JWT_OR_APP_KEY>" \\
+  -d '{"messages":[{"role":"user","content":"Hello!"}]}'`;
 
   return (
     <div className="space-y-6 max-w-[1100px]">
@@ -141,8 +153,7 @@ X-Project-ID: default
           loading={loading}
           icon={<Bot className="w-4 h-4" />}
           color="bg-emerald-500/10 text-emerald-400"
-          sparkData={mockSparklines.apps}
-          trend="Active deployments"
+          trend="Configured applications"
         />
         <StatCard
           label="Model Routings"
@@ -150,8 +161,7 @@ X-Project-ID: default
           loading={loading}
           icon={<Cpu className="w-4 h-4" />}
           color="bg-blue-500/10 text-blue-400"
-          sparkData={mockSparklines.models}
-          trend="Logical aliases"
+          trend={`${providersCount} provider(s) configured`}
         />
         <StatCard
           label="Registered Tools"
@@ -159,8 +169,7 @@ X-Project-ID: default
           loading={loading}
           icon={<Wrench className="w-4 h-4" />}
           color="bg-amber-500/10 text-amber-400"
-          sparkData={mockSparklines.tools}
-          trend="HTTP executors"
+          trend="Custom executors"
         />
         <StatCard
           label="CEL Policies"
@@ -168,10 +177,44 @@ X-Project-ID: default
           loading={loading}
           icon={<ShieldCheck className="w-4 h-4" />}
           color="bg-purple-500/10 text-purple-400"
-          sparkData={mockSparklines.policies}
           trend="Authorization rules"
         />
       </div>
+
+      {/* Usage Stats (last 24h from real API) */}
+      {(totalRequests > 0 || totalTokens > 0) && (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard
+            label="Requests (24h)"
+            value={formatNumber(totalRequests)}
+            loading={loading}
+            icon={<Activity className="w-4 h-4" />}
+            color="bg-emerald-500/10 text-emerald-400"
+            sparkData={usageData.slice(-7).map((u: any) => u.total_requests ?? u.request_count ?? 0)}
+            trend="From usage rollups"
+          />
+          <StatCard
+            label="Tokens (24h)"
+            value={formatNumber(totalTokens)}
+            loading={loading}
+            icon={<Zap className="w-4 h-4" />}
+            color="bg-yellow-500/10 text-yellow-400"
+            sparkData={usageData.slice(-7).map((u: any) => u.total_tokens ?? 0)}
+            trend="Input + output"
+          />
+          <div className="col-span-2 bg-neutral-900 border border-neutral-800 rounded-xl p-4 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/15 flex items-center justify-center flex-shrink-0">
+              <TrendingUp className="w-4 h-4 text-emerald-400" />
+            </div>
+            <div>
+              <p className="text-xs font-medium text-neutral-300">Live usage data from <code className="text-emerald-400 text-[11px]">/v1/admin/usage</code></p>
+              <p className="text-[11px] text-neutral-600 mt-0.5">
+                Aggregated hourly rollups ({usageData.length} bucket{usageData.length !== 1 ? 's' : ''} in the last 24h)
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main content grid */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
@@ -180,30 +223,44 @@ X-Project-ID: default
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
               <Activity className="w-4 h-4 text-neutral-500" />
-              Runtime Architecture
+              Runtime Architecture &amp; Health
             </h2>
-            <Badge variant="success" dot>All systems operational</Badge>
+            <Badge variant={hasAuthConfig && providersCount > 0 ? 'success' : 'warning'} dot>
+              {hasAuthConfig && providersCount > 0 ? 'All systems operational' : 'Setup incomplete'}
+            </Badge>
           </div>
 
           <div className="space-y-2">
+            <InvariantItem
+              title="Identity &amp; Auth Validation"
+              description={hasAuthConfig ? 'End-user JWT verification active with automated JWKS key rotation (app & environment auth providers active).' : '⚠️ No auth provider configured for this environment or applications. Configure Identity & Auth in an AI App or Environment.'}
+              icon={<Shield className="w-3.5 h-3.5" />}
+              status={hasAuthConfig ? 'active' : 'warning'}
+            />
+            <InvariantItem
+              title="AI Model Providers"
+              description={providersCount > 0 ? `${providersCount} upstream provider credential(s) active with AES-256-GCM envelope encryption.` : '⚠️ No upstream providers configured. Configure LiteLLM or OpenAI in Models & Routing.'}
+              icon={<Cpu className="w-3.5 h-3.5" />}
+              status={providersCount > 0 ? 'active' : 'warning'}
+            />
             <InvariantItem
               title="Zero DB Reads on the Hot Path"
               description="Runtime instances compile configuration into atomic in-memory snapshots. Config changes propagate via Redis pub/sub without interrupting active requests."
               icon={<Database className="w-3.5 h-3.5" />}
             />
             <InvariantItem
-              title="SSRF Guard & Confused-Deputy Defense"
+              title="SSRF Guard &amp; Confused-Deputy Defense"
               description="All HTTP tool executor calls use DNS-rebinding-safe dialers that block loopback, private ranges, and cloud metadata endpoints. Identity fields are injected from verified JWT claims."
               icon={<Shield className="w-3.5 h-3.5" />}
             />
             <InvariantItem
-              title="Bounded Agent Loop & Stateless Replication"
+              title="Bounded Agent Loop &amp; Stateless Replication"
               description="Tool execution is capped at 5 iterations. Suspended confirmation state is persisted to Redis with 5-minute TTL, enabling any replica to resume requests."
               icon={<Network className="w-3.5 h-3.5" />}
             />
             <InvariantItem
               title="Async Usage Pipeline"
-              description="Token usage and cost are written via a bounded channel pipeline with batched async writes — never in the request hot path."
+              description="Token usage and cost are written via a bounded channel pipeline with batched async writes; never in the request hot path."
               icon={<Zap className="w-3.5 h-3.5" />}
             />
           </div>
@@ -217,10 +274,15 @@ X-Project-ID: default
           </h2>
 
           <Card padding="md">
+            <div className="flex items-center gap-2 mb-2.5">
+              <span className="text-[11px] text-neutral-500">Target Env:</span>
+              <Badge variant="purple">{api.currentEnv}</Badge>
+              <span className="text-[11px] text-neutral-500 ml-1">Project:</span>
+              <Badge variant="mono">{api.currentProject}</Badge>
+            </div>
             <p className="text-xs text-neutral-500 mb-3">
-              Pass your authenticated end-user JWT in the Authorization header.
-              Beavend validates the token, evaluates CEL policies, and routes to
-              the configured provider.
+              Pass your authenticated end-user JWT or scoped App API Key (<code className="text-neutral-400">bv_app_sec_...</code>) in the Authorization header.
+              Requests are dynamically routed to the active <b className="text-neutral-300 font-mono text-[11px]">{api.currentEnv}</b> environment.
             </p>
             <div className="bg-neutral-950 border border-neutral-800 rounded-lg p-3 font-mono text-[11px] text-neutral-400 overflow-x-auto">
               <pre className="whitespace-pre">{curlExample}</pre>

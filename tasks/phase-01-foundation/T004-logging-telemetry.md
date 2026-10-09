@@ -1,4 +1,4 @@
-# T004 — Structured Logging and OpenTelemetry Setup
+# T004 - Structured Logging and OpenTelemetry Setup
 
 ## Goal
 Set up structured JSON logging using Go `slog` and OpenTelemetry tracing/metrics in `internal/telemetry`.

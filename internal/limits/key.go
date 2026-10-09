@@ -50,3 +50,16 @@ func RuleKey(userKey string, rule core.LimitRule) string {
 func TokenWindowsKey(userKey string) string {
 	return fmt.Sprintf("%s:token_windows", userKey)
 }
+
+// ProjectKey generates a Redis Cluster-compatible hash-tagged key for project-level limits.
+func ProjectKey(projectID, environment string) string {
+	projectID = strings.TrimSpace(projectID)
+	environment = strings.TrimSpace(environment)
+	if projectID == "" {
+		projectID = "default"
+	}
+	if environment == "" {
+		environment = "default"
+	}
+	return fmt.Sprintf("{lim:%s:%s:project}", projectID, environment)
+}

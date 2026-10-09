@@ -1,4 +1,4 @@
-# ADR-001 — Modular Monolith with Runtime and Control Role Separation
+# ADR-001: Modular Monolith with Runtime and Control Role Separation
 
 ## Status
 Accepted

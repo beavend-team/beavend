@@ -1,4 +1,4 @@
-# T008 — In-Memory Configuration Snapshot Compiler and Atomic Swap
+# T008 - In-Memory Configuration Snapshot Compiler and Atomic Swap
 
 ## Goal
 Implement the configuration compiler in `internal/snapshot` that compiles raw database models into pre-compiled in-memory `Snapshot` objects and swaps them atomically.

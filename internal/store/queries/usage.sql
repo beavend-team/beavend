@@ -100,7 +100,7 @@ WHERE project_id = $1
   AND granularity = $3
   AND bucket_start >= $4
   AND bucket_start <= $5
-ORDER BY bucket_start ASC;
+ORDER BY bucket_start DESC;
 
 -- name: GetRequestLogs :many
 SELECT

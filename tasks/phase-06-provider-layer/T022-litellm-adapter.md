@@ -1,4 +1,4 @@
-# T022 — LiteLLM Provider Adapter [Completed]
+# T022 - LiteLLM Provider Adapter [Completed]
 
 * **Status:** Completed
 

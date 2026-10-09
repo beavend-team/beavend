@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -63,8 +64,13 @@ func HashString(s string) string {
 }
 
 // ComputeRequestHash generates a deterministic SHA-256 hash for a ChatRequest.
-// It canonicalizes messages (role, content, tool calls), model, temperature, max_tokens, and response schema.
-func ComputeRequestHash(req *core.ChatRequest, app *core.AIApp) (string, error) {
+// In accordance with ADR-011 and ADR-017 §8, it canonicalizes:
+// - Selected logical model (or requested model, or app default)
+// - Messages (role, content, tool calls)
+// - Attachments by content digest (Type, MimeType, Digest) - excluding remote URLs
+// - OutputModalities (defaults to ["text"])
+// - Temperature, MaxTokens, ResponseSchema, and PromptVersion.
+func ComputeRequestHash(req *core.ChatRequest, app *core.AIApp, selectedModel ...string) (string, error) {
 	if req == nil {
 		return "", errors.New("nil chat request")
 	}
@@ -79,6 +85,12 @@ func ComputeRequestHash(req *core.ChatRequest, app *core.AIApp) (string, error) 
 		Content    string              `json:"content"`
 		ToolCalls  []canonicalToolCall `json:"tool_calls,omitempty"`
 		ToolCallID string              `json:"tool_call_id,omitempty"`
+	}
+
+	type canonicalAttachment struct {
+		Type     string `json:"type,omitempty"`
+		MimeType string `json:"mime_type,omitempty"`
+		Digest   string `json:"digest"`
 	}
 
 	messages := make([]canonicalMessage, 0, len(req.Messages))
@@ -101,19 +113,66 @@ func ComputeRequestHash(req *core.ChatRequest, app *core.AIApp) (string, error) 
 		})
 	}
 
+	var attachments []canonicalAttachment
+	if len(req.Attachments) > 0 {
+		attachments = make([]canonicalAttachment, 0, len(req.Attachments))
+		for _, att := range req.Attachments {
+			digest := strings.TrimSpace(att.Digest)
+			if digest == "" && len(att.Data) > 0 {
+				digest = HashBytes(att.Data)
+			} else if digest == "" && strings.TrimSpace(att.URL) != "" {
+				digest = HashString(strings.TrimSpace(att.URL))
+			}
+			attachments = append(attachments, canonicalAttachment{
+				Type:     strings.ToLower(strings.TrimSpace(att.Type)),
+				MimeType: strings.ToLower(strings.TrimSpace(att.MimeType)),
+				Digest:   digest,
+			})
+		}
+	}
+
+	// Model to hash: explicit selectedModel > req.Model > app.ModelRoutes.Default > app.ModelRoutingID
+	modelToHash := ""
+	if len(selectedModel) > 0 && strings.TrimSpace(selectedModel[0]) != "" {
+		modelToHash = strings.TrimSpace(selectedModel[0])
+	} else if strings.TrimSpace(req.Model) != "" {
+		modelToHash = strings.TrimSpace(req.Model)
+	} else if app != nil && app.ModelRoutes != nil && strings.TrimSpace(app.ModelRoutes.Default) != "" {
+		modelToHash = strings.TrimSpace(app.ModelRoutes.Default)
+	} else if app != nil && strings.TrimSpace(app.ModelRoutingID) != "" {
+		modelToHash = strings.TrimSpace(app.ModelRoutingID)
+	}
+
+	// Output modalities (ADR-017 §4: default ["text"])
+	outputMods := []string{"text"}
+	if len(req.OutputModalities) > 0 {
+		outputMods = make([]string, 0, len(req.OutputModalities))
+		for _, m := range req.OutputModalities {
+			trimmed := strings.ToLower(strings.TrimSpace(m))
+			if trimmed != "" {
+				outputMods = append(outputMods, trimmed)
+			}
+		}
+		sort.Strings(outputMods)
+	}
+
 	canonicalPayload := struct {
-		Messages       []canonicalMessage `json:"messages"`
-		Model          string             `json:"model,omitempty"`
-		Temperature    *float32           `json:"temperature,omitempty"`
-		MaxTokens      *int               `json:"max_tokens,omitempty"`
-		ResponseSchema string             `json:"response_schema,omitempty"`
-		PromptVersion  int                `json:"prompt_version,omitempty"`
+		Messages         []canonicalMessage    `json:"messages"`
+		Attachments      []canonicalAttachment `json:"attachments,omitempty"`
+		Model            string                `json:"model,omitempty"`
+		OutputModalities []string              `json:"output_modalities,omitempty"`
+		Temperature      *float32              `json:"temperature,omitempty"`
+		MaxTokens        *int                  `json:"max_tokens,omitempty"`
+		ResponseSchema   string                `json:"response_schema,omitempty"`
+		PromptVersion    int                   `json:"prompt_version,omitempty"`
 	}{
-		Messages:       messages,
-		Model:          req.Model,
-		Temperature:    req.Temperature,
-		MaxTokens:      req.MaxTokens,
-		ResponseSchema: req.ResponseSchema,
+		Messages:         messages,
+		Attachments:      attachments,
+		Model:            modelToHash,
+		OutputModalities: outputMods,
+		Temperature:      req.Temperature,
+		MaxTokens:        req.MaxTokens,
+		ResponseSchema:   req.ResponseSchema,
 	}
 
 	if app != nil {
@@ -129,6 +188,63 @@ func ComputeRequestHash(req *core.ChatRequest, app *core.AIApp) (string, error) 
 	}
 
 	return HashBytes(b), nil
+}
+
+// ShouldCacheResponse checks if a response is permitted to be cached.
+// By default, text responses are cacheable when Cache.Enabled is true.
+// Responses containing generated media (e.g. image, audio, video) are NOT cached
+// unless the app explicitly enables that modality in app.Cache.Modalities (ADR-017 §8).
+func ShouldCacheResponse(req *core.ChatRequest, resp *core.ChatResponse, app *core.AIApp) bool {
+	if app == nil || !app.Cache.Enabled {
+		return false
+	}
+
+	mediaModality := DetectResponseMediaModality(req, resp)
+	if mediaModality == "" {
+		// Plain text response: cacheable!
+		return true
+	}
+
+	// Response contains generated media: only cache if app.Cache.Modalities explicitly opts in
+	for _, mod := range app.Cache.Modalities {
+		if strings.EqualFold(strings.TrimSpace(mod), mediaModality) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// DetectResponseMediaModality detects if the request or response represents generated media (e.g. "image", "audio", "video").
+// Returns the media modality if detected, or "" if it is plain text.
+func DetectResponseMediaModality(req *core.ChatRequest, resp *core.ChatResponse) string {
+	// 1. Check req.OutputModalities
+	if req != nil {
+		for _, mod := range req.OutputModalities {
+			trimmed := strings.ToLower(strings.TrimSpace(mod))
+			if trimmed != "" && trimmed != "text" {
+				return trimmed
+			}
+		}
+	}
+
+	// 2. Check resp tool calls for generation tools
+	if resp != nil {
+		for _, tc := range resp.Message.ToolCalls {
+			name := strings.ToLower(tc.Name)
+			if strings.Contains(name, "image") {
+				return "image"
+			}
+			if strings.Contains(name, "speech") || strings.Contains(name, "audio") {
+				return "audio"
+			}
+			if strings.Contains(name, "video") {
+				return "video"
+			}
+		}
+	}
+
+	return ""
 }
 
 // ComputeToolArgsHash generates a deterministic SHA-256 hash for tool arguments.

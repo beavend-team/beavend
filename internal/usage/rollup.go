@@ -182,6 +182,7 @@ func (s *PostgresRollupStore) UpsertRollup(ctx context.Context, row AggregatedUs
 		TotalTokens:  row.TotalTokens,
 		CostUsd:      floatToNumericWithMax(row.CostUSD, 99999999.999999),
 		ErrorCount:   row.ErrorCount,
+		UpdatedAt:    timeToTimestamptz(time.Now().UTC()),
 	}
 
 	if err := s.queries.UpsertUsageRollup(ctx, params); err != nil {
@@ -289,6 +290,56 @@ func (a *RollupAggregator) RunOnce(ctx context.Context) error {
 	}
 	if err := a.AggregateDaily(ctx, now.Add(-24*time.Hour)); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+// SyncRange ensures all time buckets in [from, to] as well as the active in-progress
+// window are aggregated from raw usage events into usage rollups.
+func (a *RollupAggregator) SyncRange(ctx context.Context, granularity string, from, to time.Time) error {
+	now := time.Now().UTC()
+
+	// 1. Always aggregate current & previous hour, today & yesterday (captures active ongoing requests)
+	if err := a.RunOnce(ctx); err != nil {
+		return err
+	}
+
+	if from.IsZero() {
+		from = now.Add(-24 * time.Hour)
+	}
+	if to.IsZero() || to.After(now.Add(time.Hour)) {
+		to = now
+	}
+	if from.After(to) {
+		from = to.Add(-24 * time.Hour)
+	}
+
+	// 2. Aggregate all time buckets across the requested [from, to] interval
+	if granularity == "day" {
+		start := from.UTC().Truncate(24 * time.Hour)
+		end := to.UTC().Truncate(24 * time.Hour)
+		days := int(end.Sub(start).Hours() / 24)
+		if days > 365 {
+			start = end.Add(-365 * 24 * time.Hour)
+		}
+		for d := start; !d.After(end); d = d.Add(24 * time.Hour) {
+			if err := a.AggregateDaily(ctx, d); err != nil {
+				return err
+			}
+		}
+	} else {
+		start := from.UTC().Truncate(time.Hour)
+		end := to.UTC().Truncate(time.Hour)
+		hours := int(end.Sub(start).Hours())
+		if hours > 720 {
+			start = end.Add(-720 * time.Hour)
+		}
+		for hr := start; !hr.After(end); hr = hr.Add(time.Hour) {
+			if err := a.AggregateHourly(ctx, hr); err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil

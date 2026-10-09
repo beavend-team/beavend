@@ -1,4 +1,4 @@
-# T056 — AuthConfig Database Schema, SQLC Queries & Snapshot Compilation
+# T056 - AuthConfig Database Schema, SQLC Queries & Snapshot Compilation
 
 * **Status:** Completed
 

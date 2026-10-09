@@ -7,7 +7,7 @@ SELECT auth_config FROM environments
 WHERE project_id = $1 AND name = $2;
 
 -- name: GetSnapshotApps :many
-SELECT aav.*, a.name, a.description
+SELECT aav.*, a.name, a.description, a.auth_config, a.model_routes
 FROM ai_app_versions aav
 JOIN ai_apps a ON a.id = aav.app_id AND a.active_version = aav.version
 WHERE a.project_id = $1 AND a.environment = $2;
@@ -39,3 +39,9 @@ SELECT e.project_id, e.name AS environment, COALESCE(pr.revision, 1)::BIGINT AS 
 FROM environments e
 LEFT JOIN project_revisions pr ON pr.project_id = e.project_id AND pr.environment = e.name
 ORDER BY e.project_id, e.name;
+
+-- name: GetSnapshotAppAPIKeys :many
+SELECT id, app_id, project_id, environment, name, key_prefix, key_hash, created_at, last_used_at, expires_at
+FROM app_api_keys
+WHERE project_id = $1 AND environment = $2 AND (expires_at IS NULL OR expires_at > NOW());
+

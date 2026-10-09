@@ -5,8 +5,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/beavend/beavend/internal/core"
+	"github.com/beavend/beavend/internal/policy"
 	"github.com/beavend/beavend/internal/store/db"
-	"github.com/go-chi/chi/v5"
+	chi "github.com/go-chi/chi/v5"
 )
 
 type CreatePolicyRequest struct {
@@ -211,4 +213,136 @@ func (h *Handler) HandleDeletePolicy(w http.ResponseWriter, r *http.Request) {
 	h.svc.RecordAudit(r.Context(), projectID, env, "delete_policy", "policy", policyID, nil)
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "id": policyID})
+}
+
+type TestPolicyRequest struct {
+	Expression string         `json:"expression"`
+	Claims     map[string]any `json:"claims"`
+	Identity   map[string]any `json:"identity"`
+	Meta       map[string]any `json:"meta"`
+}
+
+type TestPolicyResponse struct {
+	Valid   bool   `json:"valid"`
+	Allowed bool   `json:"allowed"`
+	Error   string `json:"error,omitempty"`
+}
+
+func (h *Handler) HandleTestPolicy(w http.ResponseWriter, r *http.Request) {
+	var req TestPolicyRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	req.Expression = strings.TrimSpace(req.Expression)
+	if req.Expression == "" {
+		writeError(w, http.StatusBadRequest, "bad_request", "expression is required")
+		return
+	}
+
+	if h.svc.policyCompiler == nil {
+		writeError(w, http.StatusInternalServerError, "compiler_unavailable", "policy compiler not initialized")
+		return
+	}
+
+	prg, err := h.svc.policyCompiler.Compile(req.Expression)
+	if err != nil {
+		writeJSON(w, http.StatusOK, TestPolicyResponse{
+			Valid:   false,
+			Allowed: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	id := &core.Identity{
+		Claims: req.Claims,
+	}
+	if req.Identity != nil {
+		if v, ok := req.Identity["project"].(string); ok {
+			id.Project = v
+		}
+		if v, ok := req.Identity["environment"].(string); ok {
+			id.Environment = v
+		}
+		if v, ok := req.Identity["issuer"].(string); ok {
+			id.Issuer = v
+		}
+		if v, ok := req.Identity["subject"].(string); ok {
+			id.Subject = v
+		}
+		if v, ok := req.Identity["audience"].(string); ok {
+			id.Audience = v
+		}
+	}
+	if id.Project == "" {
+		projectID, env := getProjectAndEnv(r)
+		id.Project = projectID
+		id.Environment = env
+	}
+
+	evaluator, err := policy.NewEvaluator(h.svc.policyCompiler)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "evaluator_error", err.Error())
+		return
+	}
+
+	allowed, err := evaluator.EvaluateProgram(r.Context(), prg, id, req.Meta)
+	if err != nil {
+		writeJSON(w, http.StatusOK, TestPolicyResponse{
+			Valid:   true,
+			Allowed: false,
+			Error:   err.Error(),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, TestPolicyResponse{
+		Valid:   true,
+		Allowed: allowed,
+	})
+}
+
+type SetActiveVersionRequest struct {
+	Version int32 `json:"version"`
+}
+
+func (h *Handler) HandleSetActivePolicyVersion(w http.ResponseWriter, r *http.Request) {
+	if h.svc.queries == nil {
+		writeError(w, http.StatusInternalServerError, "database_unavailable", "database not configured")
+		return
+	}
+	policyID := chi.URLParam(r, "id")
+	projectID, env := getProjectAndEnv(r)
+
+	var req SetActiveVersionRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.Version <= 0 {
+		writeError(w, http.StatusBadRequest, "bad_request", "valid version is required")
+		return
+	}
+
+	_, err := h.svc.queries.GetPolicyVersion(r.Context(), db.GetPolicyVersionParams{
+		PolicyID: policyID,
+		Version:  req.Version,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "policy version not found")
+		return
+	}
+
+	updated, err := h.svc.queries.UpdatePolicyActiveVersion(r.Context(), db.UpdatePolicyActiveVersionParams{
+		ID:            policyID,
+		ActiveVersion: req.Version,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "database_error", err.Error())
+		return
+	}
+
+	_, _ = h.svc.InvalidateSnapshot(r.Context(), projectID, env)
+	h.svc.RecordAudit(r.Context(), projectID, env, "set_active_policy_version", "policy", policyID, req)
+
+	writeJSON(w, http.StatusOK, updated)
 }

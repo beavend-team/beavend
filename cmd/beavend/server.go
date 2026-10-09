@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/beavend/beavend/internal/config"
@@ -110,7 +111,13 @@ func handleReadyz(checker ReadyChecker) http.HandlerFunc {
 
 func mountRuntimeRoutes(r chi.Router, handler *runtime.Handler, authMiddleware func(http.Handler) http.Handler) {
 	r.Route("/v1/apps", func(apps chi.Router) {
+		apps.Use(jsonContentTypeMiddleware)
+
 		apps.Get("/{ai_app_id}", func(w http.ResponseWriter, r *http.Request) {
+			if handler != nil {
+				handler.HandleGetApp(w, r)
+				return
+			}
 			appID := chi.URLParam(r, "ai_app_id")
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -126,17 +133,21 @@ func mountRuntimeRoutes(r chi.Router, handler *runtime.Handler, authMiddleware f
 				apps.With(authMiddleware).Post("/{ai_app_id}/stream", handler.HandleStream)
 				apps.With(authMiddleware).Post("/{ai_app_id}/confirm", handler.HandleConfirm)
 				apps.With(authMiddleware).Post("/{ai_app_id}/tool-results", handler.HandleToolResults)
+				apps.With(authMiddleware).Post("/{ai_app_id}/cancel", handler.HandleCancel)
 				apps.With(authMiddleware).Get("/{ai_app_id}/threads/{thread_id}", handler.HandleGetThread)
 				apps.With(authMiddleware).Delete("/{ai_app_id}/threads/{thread_id}", handler.HandleDeleteThread)
 				apps.With(authMiddleware).Post("/{ai_app_id}/threads", handler.HandleCreateThread)
+				apps.With(authMiddleware).Get("/{ai_app_id}/jobs/{job_id}", handler.HandleGetJob)
 			} else {
 				apps.Post("/{ai_app_id}/chat", handler.HandleChat)
 				apps.Post("/{ai_app_id}/stream", handler.HandleStream)
 				apps.Post("/{ai_app_id}/confirm", handler.HandleConfirm)
 				apps.Post("/{ai_app_id}/tool-results", handler.HandleToolResults)
+				apps.Post("/{ai_app_id}/cancel", handler.HandleCancel)
 				apps.Get("/{ai_app_id}/threads/{thread_id}", handler.HandleGetThread)
 				apps.Delete("/{ai_app_id}/threads/{thread_id}", handler.HandleDeleteThread)
 				apps.Post("/{ai_app_id}/threads", handler.HandleCreateThread)
+				apps.Get("/{ai_app_id}/jobs/{job_id}", handler.HandleGetJob)
 			}
 		} else {
 			apps.Post("/{ai_app_id}/chat", func(w http.ResponseWriter, _ *http.Request) {
@@ -178,15 +189,41 @@ func mountRuntimeRoutes(r chi.Router, handler *runtime.Handler, authMiddleware f
 					"message": "Client-side tools handler not configured",
 				})
 			})
-		}
 
-		apps.Post("/{ai_app_id}/cancel", func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]string{
-				"status": "cancelled",
+			apps.Post("/{ai_app_id}/cancel", func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotImplemented)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"code":    "not_implemented",
+					"message": "Cancel handler not configured",
+				})
 			})
-		})
+		}
+	})
+
+	if handler != nil {
+		r.Get("/v1/media/{project_id}/{media_id}", handler.HandleGetMedia)
+	}
+}
+
+func jsonContentTypeMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost || r.Method == http.MethodPut {
+			ct := r.Header.Get("Content-Type")
+			if ct != "" {
+				mediaType := strings.ToLower(strings.TrimSpace(strings.Split(ct, ";")[0]))
+				if mediaType != "application/json" {
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusUnsupportedMediaType)
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"code":    "invalid_argument",
+						"message": "Content-Type must be application/json",
+					})
+					return
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

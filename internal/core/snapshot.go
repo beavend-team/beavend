@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -25,6 +26,16 @@ func SnapshotFromContext(ctx context.Context) (*Snapshot, bool) {
 	return snap, ok
 }
 
+// ProviderConfig defines decrypted credentials and endpoint settings for an upstream model provider.
+type ProviderConfig struct {
+	ID           string `json:"id" yaml:"id"`
+	ProjectID    string `json:"project_id" yaml:"project_id"`
+	Environment  string `json:"environment" yaml:"environment"`
+	ProviderName string `json:"provider_name" yaml:"provider_name"`
+	BaseURL      string `json:"base_url" yaml:"base_url"`
+	APIKey       string `json:"api_key,omitempty" yaml:"-"`
+}
+
 // Snapshot represents an immutable compiled project configuration in memory.
 // It is swapped atomically and read without touching PostgreSQL on the request hot path.
 type Snapshot struct {
@@ -38,8 +49,10 @@ type Snapshot struct {
 	Models           map[string]*ModelRouting     `json:"models"`
 	Tools            map[string]*ToolDefinition   `json:"tools"`
 	Policies         map[string]*PolicyDefinition `json:"policies"`
-	CompiledPolicies map[string]any               `json:"-"` // Pre-compiled CEL programs
-	CompiledSchemas  map[string]any               `json:"-"` // Pre-compiled JSON Schemas
+	AppAPIKeys       map[string]*AppAPIKey        `json:"app_api_keys,omitempty"` // Keyed by key_hash
+	Providers        map[string]*ProviderConfig   `json:"providers,omitempty"`    // Keyed by provider_name (lowercase)
+	CompiledPolicies map[string]any               `json:"-"`                      // Pre-compiled CEL programs
+	CompiledSchemas  map[string]any               `json:"-"`                      // Pre-compiled JSON Schemas
 }
 
 // NewSnapshot initializes an empty Snapshot with allocated maps.
@@ -54,9 +67,36 @@ func NewSnapshot(projectID, environment string, revision int64) *Snapshot {
 		Models:           make(map[string]*ModelRouting),
 		Tools:            make(map[string]*ToolDefinition),
 		Policies:         make(map[string]*PolicyDefinition),
+		AppAPIKeys:       make(map[string]*AppAPIKey),
+		Providers:        make(map[string]*ProviderConfig),
 		CompiledPolicies: make(map[string]any),
 		CompiledSchemas:  make(map[string]any),
 	}
+}
+
+// Provider returns the ProviderConfig by provider name if present.
+func (s *Snapshot) Provider(name string) (*ProviderConfig, bool) {
+	if s == nil || s.Providers == nil {
+		return nil, false
+	}
+	p, ok := s.Providers[name]
+	if !ok {
+		for k, v := range s.Providers {
+			if strings.EqualFold(k, name) {
+				return v, true
+			}
+		}
+	}
+	return p, ok
+}
+
+// AppAPIKeyByHash returns the AppAPIKey by key hash if present.
+func (s *Snapshot) AppAPIKeyByHash(hash string) (*AppAPIKey, bool) {
+	if s == nil || s.AppAPIKeys == nil {
+		return nil, false
+	}
+	key, ok := s.AppAPIKeys[hash]
+	return key, ok
 }
 
 // App returns the AIApp by ID if present.

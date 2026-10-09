@@ -1,4 +1,4 @@
-# T010 — JWT Validation and Cached JWKS Verifier [Completed]
+# T010 - JWT Validation and Cached JWKS Verifier [Completed]
 
 * **Status:** Completed
 

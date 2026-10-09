@@ -1,5 +1,13 @@
-# Multi-stage Docker build for Beavend
-FROM golang:1.22-alpine AS builder
+# Frontend build stage
+FROM node:20-alpine AS frontend-builder
+WORKDIR /app/dashboard
+COPY dashboard/package*.json ./
+RUN npm ci
+COPY dashboard/ ./
+RUN npm run build
+
+# Go build stage
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
 RUN apk add --no-cache git ca-certificates
@@ -8,12 +16,13 @@ RUN apk add --no-cache git ca-certificates
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy source code (including embedded dashboard in dashboard/dist)
+# Copy source code and compiled dashboard dist
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
-COPY dashboard/ ./dashboard/
+COPY dashboard/dashboard.go ./dashboard/dashboard.go
+COPY --from=frontend-builder /app/dashboard/dist ./dashboard/dist
 
-# Build static binary
+# Build static binary with embedded dist
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /beavend ./cmd/beavend
 
 # Runtime image

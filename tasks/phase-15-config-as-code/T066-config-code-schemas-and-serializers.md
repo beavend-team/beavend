@@ -1,4 +1,4 @@
-# T066 — Config-as-Code Declarative Schemas and Serializers
+# T066 - Config-as-Code Declarative Schemas and Serializers
 
 ## Status
 Completed

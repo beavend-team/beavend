@@ -14,6 +14,7 @@ import (
 	synckit "github.com/beavend/beavend/internal/snapshot/sync"
 	"github.com/beavend/beavend/internal/store/db"
 	pgx "github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // ResourceAction describes the operation needed for a resource.
@@ -250,7 +251,26 @@ func (e *Engine) Export(ctx context.Context, projectID, env string) (*ProjectDoc
 		for _, m := range models {
 			var fallbacks []string
 			if len(m.FallbackDeployments) > 0 {
-				_ = json.Unmarshal(m.FallbackDeployments, &fallbacks)
+				if err := json.Unmarshal(m.FallbackDeployments, &fallbacks); err != nil {
+					var rawObjects []map[string]any
+					if objErr := json.Unmarshal(m.FallbackDeployments, &rawObjects); objErr == nil {
+						for _, obj := range rawObjects {
+							prov, _ := obj["provider"].(string)
+							if prov == "" {
+								prov, _ = obj["adapter"].(string)
+							}
+							dep, _ := obj["deployment"].(string)
+							if dep == "" {
+								dep, _ = obj["model"].(string)
+							}
+							if prov != "" && dep != "" {
+								fallbacks = append(fallbacks, prov+"/"+dep)
+							} else if dep != "" {
+								fallbacks = append(fallbacks, dep)
+							}
+						}
+					}
+				}
 			}
 
 			var provSpec *ProviderSpec
@@ -268,6 +288,10 @@ func (e *Engine) Export(ctx context.Context, projectID, env string) (*ProjectDoc
 				Deployment:          m.Deployment,
 				Adapter:             m.Adapter,
 				FallbackDeployments: fallbacks,
+				InputCostPer1M:      numericToFloatPtr(m.InputCostPer1m),
+				OutputCostPer1M:     numericToFloatPtr(m.OutputCostPer1m),
+				InputModalities:     m.InputModalities,
+				OutputModalities:    m.OutputModalities,
 				ProviderConfig:      provSpec,
 			})
 		}
@@ -309,6 +333,29 @@ func (e *Engine) Export(ctx context.Context, projectID, env string) (*ProjectDoc
 					memory = &mc
 				}
 			}
+			var searchCfg *core.SearchConfig
+			if len(a.SearchConfig) > 0 {
+				var sc core.SearchConfig
+				if err := json.Unmarshal(a.SearchConfig, &sc); err == nil && sc.Enabled {
+					searchCfg = &sc
+				}
+			}
+
+			var appAuth *core.AuthConfig
+			if len(a.AuthConfig) > 0 && string(a.AuthConfig) != "{}" && string(a.AuthConfig) != "null" {
+				var ac core.AuthConfig
+				if err := json.Unmarshal(a.AuthConfig, &ac); err == nil && (ac.Provider != "" || ac.Issuer != "" || ac.JWKSURL != "") {
+					appAuth = &ac
+				}
+			}
+
+			var modelRoutes *core.ModelRoutes
+			if len(a.ModelRoutes) > 0 && string(a.ModelRoutes) != "{}" && string(a.ModelRoutes) != "null" {
+				var mr core.ModelRoutes
+				if err := json.Unmarshal(a.ModelRoutes, &mr); err == nil {
+					modelRoutes = &mr
+				}
+			}
 
 			doc.Apps = append(doc.Apps, AppSpec{
 				ID:             a.AppID,
@@ -318,12 +365,15 @@ func (e *Engine) Export(ctx context.Context, projectID, env string) (*ProjectDoc
 				PromptID:       a.PromptID,
 				PromptVersion:  int(a.PromptVersion),
 				ModelRoutingID: a.ModelRoutingID,
+				ModelRoutes:    modelRoutes,
 				ToolIDs:        toolIDs,
 				Limits:         limits,
 				Cache:          cacheCfg,
 				Guardrails:     guardrails,
 				Memory:         memory,
+				Search:         searchCfg,
 				ResponseSchema: a.ResponseSchema,
+				Auth:           appAuth,
 			})
 		}
 	}
@@ -571,6 +621,15 @@ func (e *Engine) Diff(ctx context.Context, doc *ProjectDocument) (*DiffReport, e
 			}
 			if existing.AccessPolicy != aSpec.AccessPolicy {
 				changes = append(changes, fmt.Sprintf("access_policy: %s -> %s", existing.AccessPolicy, aSpec.AccessPolicy))
+			}
+			var existingAuth *core.AuthConfig
+			if len(existing.AuthConfig) > 0 && string(existing.AuthConfig) != "{}" && string(existing.AuthConfig) != "null" {
+				var ac core.AuthConfig
+				_ = json.Unmarshal(existing.AuthConfig, &ac)
+				existingAuth = &ac
+			}
+			if (existingAuth == nil && aSpec.Auth != nil) || (existingAuth != nil && aSpec.Auth == nil) || (existingAuth != nil && aSpec.Auth != nil && existingAuth.Provider != aSpec.Auth.Provider) {
+				changes = append(changes, "auth provider changed")
 			}
 			action := ActionUnchanged
 			if len(changes) > 0 {
@@ -862,6 +921,14 @@ func (e *Engine) Apply(ctx context.Context, doc *ProjectDocument) (*DiffReport, 
 		if modelID == "" {
 			modelID = fmt.Sprintf("%s_%s_%s", doc.Project.ID, doc.Environment, mSpec.LogicalModel)
 		}
+		inMods := mSpec.InputModalities
+		if inMods == nil {
+			inMods = []string{}
+		}
+		outMods := mSpec.OutputModalities
+		if outMods == nil {
+			outMods = []string{}
+		}
 		_, err = e.queries.UpsertModelRouting(ctx, db.UpsertModelRoutingParams{
 			ID:                  modelID,
 			ProjectID:           doc.Project.ID,
@@ -870,6 +937,10 @@ func (e *Engine) Apply(ctx context.Context, doc *ProjectDocument) (*DiffReport, 
 			Deployment:          mSpec.Deployment,
 			Adapter:             mSpec.Adapter,
 			FallbackDeployments: fallbacksBytes,
+			InputCostPer1m:      floatPtrToNumeric(mSpec.InputCostPer1M),
+			OutputCostPer1m:     floatPtrToNumeric(mSpec.OutputCostPer1M),
+			InputModalities:     inMods,
+			OutputModalities:    outMods,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("upsert model routing %s: %w", mSpec.LogicalModel, err)
@@ -882,6 +953,22 @@ func (e *Engine) Apply(ctx context.Context, doc *ProjectDocument) (*DiffReport, 
 		limitsBytes, _ := json.Marshal(aSpec.Limits)
 		cacheBytes, _ := json.Marshal(aSpec.Cache)
 		guardBytes, _ := json.Marshal(aSpec.Guardrails)
+		memBytes, _ := json.Marshal(aSpec.Memory)
+		if len(memBytes) == 0 {
+			memBytes = []byte("{}")
+		}
+
+		var authBytes []byte
+		if aSpec.Auth != nil {
+			authBytes, _ = json.Marshal(aSpec.Auth)
+		}
+
+		var routesBytes []byte
+		if aSpec.ModelRoutes != nil {
+			routesBytes, _ = json.Marshal(aSpec.ModelRoutes)
+		} else if aSpec.ModelRoutingID != "" {
+			routesBytes, _ = json.Marshal(core.ModelRoutes{Default: aSpec.ModelRoutingID})
+		}
 
 		_, err := e.queries.GetAIApp(ctx, aSpec.ID)
 		if err != nil && errors.Is(err, pgx.ErrNoRows) {
@@ -892,10 +979,19 @@ func (e *Engine) Apply(ctx context.Context, doc *ProjectDocument) (*DiffReport, 
 				Name:          aSpec.Name,
 				Description:   aSpec.Description,
 				ActiveVersion: 1,
+				AuthConfig:    authBytes,
+				ModelRoutes:   routesBytes,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("create ai app %s: %w", aSpec.ID, err)
 			}
+			var searchBytes []byte
+			if aSpec.Search != nil {
+				searchBytes, _ = json.Marshal(aSpec.Search)
+			} else {
+				searchBytes = []byte("{}")
+			}
+
 			_, err = e.queries.CreateAIAppVersion(ctx, db.CreateAIAppVersionParams{
 				ID:             fmt.Sprintf("%s_v1", aSpec.ID),
 				AppID:          aSpec.ID,
@@ -912,6 +1008,8 @@ func (e *Engine) Apply(ctx context.Context, doc *ProjectDocument) (*DiffReport, 
 				Guardrails:     guardBytes,
 				ResponseSchema: aSpec.ResponseSchema,
 				IsActive:       true,
+				MemoryConfig:   memBytes,
+				SearchConfig:   searchBytes,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("create ai app version %s_v1: %w", aSpec.ID, err)
@@ -919,6 +1017,13 @@ func (e *Engine) Apply(ctx context.Context, doc *ProjectDocument) (*DiffReport, 
 		} else if err == nil {
 			activeV, err := e.queries.GetActiveAIAppVersion(ctx, aSpec.ID)
 			if err == nil {
+				var searchBytes []byte
+				if aSpec.Search != nil {
+					searchBytes, _ = json.Marshal(aSpec.Search)
+				} else {
+					searchBytes = []byte("{}")
+				}
+
 				newV := activeV.Version + 1
 				_, err = e.queries.CreateAIAppVersion(ctx, db.CreateAIAppVersionParams{
 					ID:             fmt.Sprintf("%s_v%d", aSpec.ID, newV),
@@ -936,6 +1041,8 @@ func (e *Engine) Apply(ctx context.Context, doc *ProjectDocument) (*DiffReport, 
 					Guardrails:     guardBytes,
 					ResponseSchema: aSpec.ResponseSchema,
 					IsActive:       true,
+					MemoryConfig:   memBytes,
+					SearchConfig:   searchBytes,
 				})
 				if err != nil {
 					return nil, fmt.Errorf("create ai app version %s_v%d: %w", aSpec.ID, newV, err)
@@ -943,6 +1050,8 @@ func (e *Engine) Apply(ctx context.Context, doc *ProjectDocument) (*DiffReport, 
 				_, _ = e.queries.UpdateAIAppActiveVersion(ctx, db.UpdateAIAppActiveVersionParams{
 					ID:            aSpec.ID,
 					ActiveVersion: newV,
+					AuthConfig:    authBytes,
+					ModelRoutes:   routesBytes,
 				})
 			}
 		}
@@ -968,4 +1077,25 @@ func generateID(prefix string) string {
 	b := make([]byte, 8)
 	_, _ = rand.Read(b)
 	return fmt.Sprintf("%s_%x", prefix, b)
+}
+
+func floatPtrToNumeric(f *float64) pgtype.Numeric {
+	if f == nil {
+		return pgtype.Numeric{Valid: false}
+	}
+	var num pgtype.Numeric
+	_ = num.Scan(fmt.Sprintf("%.6f", *f))
+	return num
+}
+
+func numericToFloatPtr(num pgtype.Numeric) *float64 {
+	if !num.Valid {
+		return nil
+	}
+	f, err := num.Float64Value()
+	if err != nil || !f.Valid {
+		return nil
+	}
+	val := f.Float64
+	return &val
 }

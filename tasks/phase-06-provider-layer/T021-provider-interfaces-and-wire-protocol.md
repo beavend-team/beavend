@@ -1,4 +1,4 @@
-# T021 — Provider Interfaces & Wire Protocol [Completed]
+# T021 - Provider Interfaces & Wire Protocol [Completed]
 
 * **Status:** Completed
 

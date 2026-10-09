@@ -12,9 +12,9 @@ import (
 )
 
 const createAIApp = `-- name: CreateAIApp :one
-INSERT INTO ai_apps (id, project_id, environment, name, description, active_version, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
-RETURNING id, project_id, environment, name, description, active_version, created_at, updated_at
+INSERT INTO ai_apps (id, project_id, environment, name, description, active_version, auth_config, model_routes, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+RETURNING id, project_id, environment, name, description, active_version, created_at, updated_at, auth_config, model_routes
 `
 
 type CreateAIAppParams struct {
@@ -24,6 +24,8 @@ type CreateAIAppParams struct {
 	Name          string `json:"name"`
 	Description   string `json:"description"`
 	ActiveVersion int32  `json:"active_version"`
+	AuthConfig    []byte `json:"auth_config"`
+	ModelRoutes   []byte `json:"model_routes"`
 }
 
 func (q *Queries) CreateAIApp(ctx context.Context, arg CreateAIAppParams) (AiApps, error) {
@@ -34,6 +36,8 @@ func (q *Queries) CreateAIApp(ctx context.Context, arg CreateAIAppParams) (AiApp
 		arg.Name,
 		arg.Description,
 		arg.ActiveVersion,
+		arg.AuthConfig,
+		arg.ModelRoutes,
 	)
 	var i AiApps
 	err := row.Scan(
@@ -45,6 +49,8 @@ func (q *Queries) CreateAIApp(ctx context.Context, arg CreateAIAppParams) (AiApp
 		&i.ActiveVersion,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AuthConfig,
+		&i.ModelRoutes,
 	)
 	return i, err
 }
@@ -53,10 +59,10 @@ const createAIAppVersion = `-- name: CreateAIAppVersion :one
 INSERT INTO ai_app_versions (
     id, app_id, project_id, environment, version, access_policy,
     prompt_id, prompt_version, model_routing_id, tool_ids,
-    limits, cache_config, guardrails, response_schema, is_active, created_at
+    limits, cache_config, guardrails, response_schema, is_active, memory_config, search_config, created_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
-RETURNING id, app_id, project_id, environment, version, access_policy, prompt_id, prompt_version, model_routing_id, tool_ids, limits, cache_config, guardrails, response_schema, is_active, created_at, memory_config
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
+RETURNING id, app_id, project_id, environment, version, access_policy, prompt_id, prompt_version, model_routing_id, tool_ids, limits, cache_config, guardrails, response_schema, is_active, created_at, memory_config, search_config
 `
 
 type CreateAIAppVersionParams struct {
@@ -75,6 +81,8 @@ type CreateAIAppVersionParams struct {
 	Guardrails     []byte `json:"guardrails"`
 	ResponseSchema string `json:"response_schema"`
 	IsActive       bool   `json:"is_active"`
+	MemoryConfig   []byte `json:"memory_config"`
+	SearchConfig   []byte `json:"search_config"`
 }
 
 func (q *Queries) CreateAIAppVersion(ctx context.Context, arg CreateAIAppVersionParams) (AiAppVersions, error) {
@@ -94,6 +102,8 @@ func (q *Queries) CreateAIAppVersion(ctx context.Context, arg CreateAIAppVersion
 		arg.Guardrails,
 		arg.ResponseSchema,
 		arg.IsActive,
+		arg.MemoryConfig,
+		arg.SearchConfig,
 	)
 	var i AiAppVersions
 	err := row.Scan(
@@ -114,6 +124,53 @@ func (q *Queries) CreateAIAppVersion(ctx context.Context, arg CreateAIAppVersion
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.MemoryConfig,
+		&i.SearchConfig,
+	)
+	return i, err
+}
+
+const createAppAPIKey = `-- name: CreateAppAPIKey :one
+INSERT INTO app_api_keys (
+    id, app_id, project_id, environment, name, key_prefix, key_hash, created_at, expires_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8)
+RETURNING id, app_id, project_id, environment, name, key_prefix, key_hash, created_at, last_used_at, expires_at
+`
+
+type CreateAppAPIKeyParams struct {
+	ID          string             `json:"id"`
+	AppID       string             `json:"app_id"`
+	ProjectID   string             `json:"project_id"`
+	Environment string             `json:"environment"`
+	Name        string             `json:"name"`
+	KeyPrefix   string             `json:"key_prefix"`
+	KeyHash     string             `json:"key_hash"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+}
+
+func (q *Queries) CreateAppAPIKey(ctx context.Context, arg CreateAppAPIKeyParams) (AppApiKeys, error) {
+	row := q.db.QueryRow(ctx, createAppAPIKey,
+		arg.ID,
+		arg.AppID,
+		arg.ProjectID,
+		arg.Environment,
+		arg.Name,
+		arg.KeyPrefix,
+		arg.KeyHash,
+		arg.ExpiresAt,
+	)
+	var i AppApiKeys
+	err := row.Scan(
+		&i.ID,
+		&i.AppID,
+		&i.ProjectID,
+		&i.Environment,
+		&i.Name,
+		&i.KeyPrefix,
+		&i.KeyHash,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+		&i.ExpiresAt,
 	)
 	return i, err
 }
@@ -128,8 +185,23 @@ func (q *Queries) DeleteAIApp(ctx context.Context, id string) error {
 	return err
 }
 
+const deleteAppAPIKey = `-- name: DeleteAppAPIKey :exec
+DELETE FROM app_api_keys
+WHERE id = $1 AND app_id = $2
+`
+
+type DeleteAppAPIKeyParams struct {
+	ID    string `json:"id"`
+	AppID string `json:"app_id"`
+}
+
+func (q *Queries) DeleteAppAPIKey(ctx context.Context, arg DeleteAppAPIKeyParams) error {
+	_, err := q.db.Exec(ctx, deleteAppAPIKey, arg.ID, arg.AppID)
+	return err
+}
+
 const getAIApp = `-- name: GetAIApp :one
-SELECT id, project_id, environment, name, description, active_version, created_at, updated_at FROM ai_apps
+SELECT id, project_id, environment, name, description, active_version, created_at, updated_at, auth_config, model_routes FROM ai_apps
 WHERE id = $1
 `
 
@@ -145,12 +217,14 @@ func (q *Queries) GetAIApp(ctx context.Context, id string) (AiApps, error) {
 		&i.ActiveVersion,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AuthConfig,
+		&i.ModelRoutes,
 	)
 	return i, err
 }
 
 const getAIAppVersion = `-- name: GetAIAppVersion :one
-SELECT id, app_id, project_id, environment, version, access_policy, prompt_id, prompt_version, model_routing_id, tool_ids, limits, cache_config, guardrails, response_schema, is_active, created_at, memory_config FROM ai_app_versions
+SELECT id, app_id, project_id, environment, version, access_policy, prompt_id, prompt_version, model_routing_id, tool_ids, limits, cache_config, guardrails, response_schema, is_active, created_at, memory_config, search_config FROM ai_app_versions
 WHERE app_id = $1 AND version = $2
 `
 
@@ -180,12 +254,13 @@ func (q *Queries) GetAIAppVersion(ctx context.Context, arg GetAIAppVersionParams
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.MemoryConfig,
+		&i.SearchConfig,
 	)
 	return i, err
 }
 
 const getActiveAIAppVersion = `-- name: GetActiveAIAppVersion :one
-SELECT aav.id, aav.app_id, aav.project_id, aav.environment, aav.version, aav.access_policy, aav.prompt_id, aav.prompt_version, aav.model_routing_id, aav.tool_ids, aav.limits, aav.cache_config, aav.guardrails, aav.response_schema, aav.is_active, aav.created_at, aav.memory_config, a.name, a.description
+SELECT aav.id, aav.app_id, aav.project_id, aav.environment, aav.version, aav.access_policy, aav.prompt_id, aav.prompt_version, aav.model_routing_id, aav.tool_ids, aav.limits, aav.cache_config, aav.guardrails, aav.response_schema, aav.is_active, aav.created_at, aav.memory_config, aav.search_config, a.name, a.description, a.auth_config, a.model_routes
 FROM ai_app_versions aav
 JOIN ai_apps a ON a.id = aav.app_id AND a.active_version = aav.version
 WHERE a.id = $1
@@ -209,8 +284,11 @@ type GetActiveAIAppVersionRow struct {
 	IsActive       bool               `json:"is_active"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	MemoryConfig   []byte             `json:"memory_config"`
+	SearchConfig   []byte             `json:"search_config"`
 	Name           string             `json:"name"`
 	Description    string             `json:"description"`
+	AuthConfig     []byte             `json:"auth_config"`
+	ModelRoutes    []byte             `json:"model_routes"`
 }
 
 func (q *Queries) GetActiveAIAppVersion(ctx context.Context, id string) (GetActiveAIAppVersionRow, error) {
@@ -234,14 +312,40 @@ func (q *Queries) GetActiveAIAppVersion(ctx context.Context, id string) (GetActi
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.MemoryConfig,
+		&i.SearchConfig,
 		&i.Name,
 		&i.Description,
+		&i.AuthConfig,
+		&i.ModelRoutes,
+	)
+	return i, err
+}
+
+const getAppAPIKeyByHash = `-- name: GetAppAPIKeyByHash :one
+SELECT id, app_id, project_id, environment, name, key_prefix, key_hash, created_at, last_used_at, expires_at FROM app_api_keys
+WHERE key_hash = $1 AND (expires_at IS NULL OR expires_at > NOW())
+`
+
+func (q *Queries) GetAppAPIKeyByHash(ctx context.Context, keyHash string) (AppApiKeys, error) {
+	row := q.db.QueryRow(ctx, getAppAPIKeyByHash, keyHash)
+	var i AppApiKeys
+	err := row.Scan(
+		&i.ID,
+		&i.AppID,
+		&i.ProjectID,
+		&i.Environment,
+		&i.Name,
+		&i.KeyPrefix,
+		&i.KeyHash,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+		&i.ExpiresAt,
 	)
 	return i, err
 }
 
 const listAIAppVersions = `-- name: ListAIAppVersions :many
-SELECT id, app_id, project_id, environment, version, access_policy, prompt_id, prompt_version, model_routing_id, tool_ids, limits, cache_config, guardrails, response_schema, is_active, created_at, memory_config FROM ai_app_versions
+SELECT id, app_id, project_id, environment, version, access_policy, prompt_id, prompt_version, model_routing_id, tool_ids, limits, cache_config, guardrails, response_schema, is_active, created_at, memory_config, search_config FROM ai_app_versions
 WHERE app_id = $1
 ORDER BY version DESC
 `
@@ -273,6 +377,7 @@ func (q *Queries) ListAIAppVersions(ctx context.Context, appID string) ([]AiAppV
 			&i.IsActive,
 			&i.CreatedAt,
 			&i.MemoryConfig,
+			&i.SearchConfig,
 		); err != nil {
 			return nil, err
 		}
@@ -285,7 +390,7 @@ func (q *Queries) ListAIAppVersions(ctx context.Context, appID string) ([]AiAppV
 }
 
 const listAIApps = `-- name: ListAIApps :many
-SELECT id, project_id, environment, name, description, active_version, created_at, updated_at FROM ai_apps
+SELECT id, project_id, environment, name, description, active_version, created_at, updated_at, auth_config, model_routes FROM ai_apps
 WHERE project_id = $1 AND environment = $2
 ORDER BY name ASC
 `
@@ -313,6 +418,8 @@ func (q *Queries) ListAIApps(ctx context.Context, arg ListAIAppsParams) ([]AiApp
 			&i.ActiveVersion,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AuthConfig,
+			&i.ModelRoutes,
 		); err != nil {
 			return nil, err
 		}
@@ -325,7 +432,7 @@ func (q *Queries) ListAIApps(ctx context.Context, arg ListAIAppsParams) ([]AiApp
 }
 
 const listActiveAIAppVersions = `-- name: ListActiveAIAppVersions :many
-SELECT aav.id, aav.app_id, aav.project_id, aav.environment, aav.version, aav.access_policy, aav.prompt_id, aav.prompt_version, aav.model_routing_id, aav.tool_ids, aav.limits, aav.cache_config, aav.guardrails, aav.response_schema, aav.is_active, aav.created_at, aav.memory_config, a.name, a.description
+SELECT aav.id, aav.app_id, aav.project_id, aav.environment, aav.version, aav.access_policy, aav.prompt_id, aav.prompt_version, aav.model_routing_id, aav.tool_ids, aav.limits, aav.cache_config, aav.guardrails, aav.response_schema, aav.is_active, aav.created_at, aav.memory_config, aav.search_config, a.name, a.description, a.auth_config, a.model_routes
 FROM ai_app_versions aav
 JOIN ai_apps a ON a.id = aav.app_id AND a.active_version = aav.version
 WHERE a.project_id = $1 AND a.environment = $2
@@ -354,8 +461,11 @@ type ListActiveAIAppVersionsRow struct {
 	IsActive       bool               `json:"is_active"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	MemoryConfig   []byte             `json:"memory_config"`
+	SearchConfig   []byte             `json:"search_config"`
 	Name           string             `json:"name"`
 	Description    string             `json:"description"`
+	AuthConfig     []byte             `json:"auth_config"`
+	ModelRoutes    []byte             `json:"model_routes"`
 }
 
 func (q *Queries) ListActiveAIAppVersions(ctx context.Context, arg ListActiveAIAppVersionsParams) ([]ListActiveAIAppVersionsRow, error) {
@@ -385,8 +495,11 @@ func (q *Queries) ListActiveAIAppVersions(ctx context.Context, arg ListActiveAIA
 			&i.IsActive,
 			&i.CreatedAt,
 			&i.MemoryConfig,
+			&i.SearchConfig,
 			&i.Name,
 			&i.Description,
+			&i.AuthConfig,
+			&i.ModelRoutes,
 		); err != nil {
 			return nil, err
 		}
@@ -398,20 +511,88 @@ func (q *Queries) ListActiveAIAppVersions(ctx context.Context, arg ListActiveAIA
 	return items, nil
 }
 
-const updateAIAppActiveVersion = `-- name: UpdateAIAppActiveVersion :one
-UPDATE ai_apps
-SET active_version = $2, updated_at = NOW()
-WHERE id = $1
-RETURNING id, project_id, environment, name, description, active_version, created_at, updated_at
+const listAppAPIKeys = `-- name: ListAppAPIKeys :many
+SELECT id, app_id, project_id, environment, name, key_prefix, created_at, last_used_at, expires_at
+FROM app_api_keys
+WHERE project_id = $1 AND environment = $2 AND app_id = $3
+ORDER BY created_at DESC
 `
 
-type UpdateAIAppActiveVersionParams struct {
-	ID            string `json:"id"`
-	ActiveVersion int32  `json:"active_version"`
+type ListAppAPIKeysParams struct {
+	ProjectID   string `json:"project_id"`
+	Environment string `json:"environment"`
+	AppID       string `json:"app_id"`
 }
 
-func (q *Queries) UpdateAIAppActiveVersion(ctx context.Context, arg UpdateAIAppActiveVersionParams) (AiApps, error) {
-	row := q.db.QueryRow(ctx, updateAIAppActiveVersion, arg.ID, arg.ActiveVersion)
+type ListAppAPIKeysRow struct {
+	ID          string             `json:"id"`
+	AppID       string             `json:"app_id"`
+	ProjectID   string             `json:"project_id"`
+	Environment string             `json:"environment"`
+	Name        string             `json:"name"`
+	KeyPrefix   string             `json:"key_prefix"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+}
+
+func (q *Queries) ListAppAPIKeys(ctx context.Context, arg ListAppAPIKeysParams) ([]ListAppAPIKeysRow, error) {
+	rows, err := q.db.Query(ctx, listAppAPIKeys, arg.ProjectID, arg.Environment, arg.AppID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAppAPIKeysRow{}
+	for rows.Next() {
+		var i ListAppAPIKeysRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AppID,
+			&i.ProjectID,
+			&i.Environment,
+			&i.Name,
+			&i.KeyPrefix,
+			&i.CreatedAt,
+			&i.LastUsedAt,
+			&i.ExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateAIApp = `-- name: UpdateAIApp :one
+UPDATE ai_apps
+SET name = $2,
+    description = $3,
+    auth_config = $4,
+    model_routes = $5,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, project_id, environment, name, description, active_version, created_at, updated_at, auth_config, model_routes
+`
+
+type UpdateAIAppParams struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	AuthConfig  []byte `json:"auth_config"`
+	ModelRoutes []byte `json:"model_routes"`
+}
+
+func (q *Queries) UpdateAIApp(ctx context.Context, arg UpdateAIAppParams) (AiApps, error) {
+	row := q.db.QueryRow(ctx, updateAIApp,
+		arg.ID,
+		arg.Name,
+		arg.Description,
+		arg.AuthConfig,
+		arg.ModelRoutes,
+	)
 	var i AiApps
 	err := row.Scan(
 		&i.ID,
@@ -422,6 +603,59 @@ func (q *Queries) UpdateAIAppActiveVersion(ctx context.Context, arg UpdateAIAppA
 		&i.ActiveVersion,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AuthConfig,
+		&i.ModelRoutes,
 	)
 	return i, err
+}
+
+const updateAIAppActiveVersion = `-- name: UpdateAIAppActiveVersion :one
+UPDATE ai_apps
+SET active_version = $2,
+    auth_config = $3,
+    model_routes = $4,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, project_id, environment, name, description, active_version, created_at, updated_at, auth_config, model_routes
+`
+
+type UpdateAIAppActiveVersionParams struct {
+	ID            string `json:"id"`
+	ActiveVersion int32  `json:"active_version"`
+	AuthConfig    []byte `json:"auth_config"`
+	ModelRoutes   []byte `json:"model_routes"`
+}
+
+func (q *Queries) UpdateAIAppActiveVersion(ctx context.Context, arg UpdateAIAppActiveVersionParams) (AiApps, error) {
+	row := q.db.QueryRow(ctx, updateAIAppActiveVersion,
+		arg.ID,
+		arg.ActiveVersion,
+		arg.AuthConfig,
+		arg.ModelRoutes,
+	)
+	var i AiApps
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Environment,
+		&i.Name,
+		&i.Description,
+		&i.ActiveVersion,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AuthConfig,
+		&i.ModelRoutes,
+	)
+	return i, err
+}
+
+const updateAppAPIKeyLastUsed = `-- name: UpdateAppAPIKeyLastUsed :exec
+UPDATE app_api_keys
+SET last_used_at = NOW()
+WHERE id = $1
+`
+
+func (q *Queries) UpdateAppAPIKeyLastUsed(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, updateAppAPIKeyLastUsed, id)
+	return err
 }

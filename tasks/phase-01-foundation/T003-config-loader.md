@@ -1,4 +1,4 @@
-# T003 — Application Configuration Loader
+# T003 - Application Configuration Loader
 
 ## Goal
 Implement environment variable and YAML-based configuration loading for server instances in `internal/config`.

@@ -1,4 +1,4 @@
-# T017 — Tier Resolution Engine [Completed]
+# T017 - Tier Resolution Engine [Completed]
 
 * **Status:** Completed
 

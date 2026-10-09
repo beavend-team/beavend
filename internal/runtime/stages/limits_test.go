@@ -262,4 +262,52 @@ func TestLimitsStage_TableDriven(t *testing.T) {
 		require.NotNil(t, state.Error)
 		assert.Equal(t, "not_found", state.Error.Code)
 	})
+
+	t.Run("project-level rate limit blocks across different users", func(t *testing.T) {
+		store := limits.NewMemoryLimitStore(nil)
+		stage, err := NewLimitsStage(store, nil, nil)
+		require.NoError(t, err)
+
+		snapProj := core.NewSnapshot("proj-shared", "production", 1)
+		snapProj.Apps["app-proj-limit"] = &core.AIApp{
+			ID: "app-proj-limit",
+			Limits: []core.LimitRule{
+				{
+					Resource: "inference",
+					Window:   10 * time.Second,
+					Max:      1,
+					Scope:    "project",
+				},
+			},
+		}
+
+		// User A makes request 1 -> allowed
+		stateA := &core.ReqState{
+			RequestID:   "req-a",
+			ProjectID:   "proj-shared",
+			Environment: "production",
+			AIAppID:     "app-proj-limit",
+			Snapshot:    snapProj,
+			Identity:    &core.Identity{Subject: "user-a", Issuer: "test"},
+		}
+		err = stage.Handle(ctx, stateA)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(1), stateA.Metadata["ratelimit_limit"])
+
+		// User B makes request 2 -> blocked by project-level limit
+		stateB := &core.ReqState{
+			RequestID:   "req-b",
+			ProjectID:   "proj-shared",
+			Environment: "production",
+			AIAppID:     "app-proj-limit",
+			Snapshot:    snapProj,
+			Identity:    &core.Identity{Subject: "user-b", Issuer: "test"},
+		}
+		err = stage.Handle(ctx, stateB)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, ErrRateLimited)
+		require.NotNil(t, stateB.Error)
+		assert.Equal(t, "rate_limited", stateB.Error.Code)
+		assert.Contains(t, stateB.Error.Message, "project rate limit exceeded")
+	})
 }

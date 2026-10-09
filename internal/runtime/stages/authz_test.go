@@ -235,3 +235,70 @@ func TestAuthZStage_AuthorizeTool(t *testing.T) {
 	_, err = stage.AuthorizeTool(cancCtx, snap, toolRestricted, adminID, nil)
 	require.ErrorIs(t, err, context.Canceled)
 }
+
+func TestAuthZStage_JWTClaimsCELPolicies(t *testing.T) {
+	evaluator, err := policy.NewEvaluator(nil)
+	require.NoError(t, err)
+
+	compiler := evaluator.Compiler()
+	prgClaims, err := compiler.Compile(`claims.plan == "pro" && claims.verified == true`)
+	require.NoError(t, err)
+
+	snap := core.NewSnapshot("proj-claims", "prod", 1)
+	snap.CompiledPolicies["pro_verified"] = prgClaims
+	snap.Policies["pro_verified"] = &core.PolicyDefinition{
+		ID:         "pro_verified",
+		Name:       "Pro & Verified",
+		Expression: `claims.plan == "pro" && claims.verified == true`,
+	}
+
+	snap.Apps["app_pro"] = &core.AIApp{
+		ID:           "app_pro",
+		AccessPolicy: "pro_verified",
+	}
+
+	ctx := context.Background()
+	stage, err := NewAuthZStage(evaluator)
+	require.NoError(t, err)
+
+	t.Run("matching jwt claims allows access", func(t *testing.T) {
+		state := &core.ReqState{
+			RequestID: "req_claims_1",
+			Snapshot:  snap,
+			AIAppID:   "app_pro",
+			Identity: &core.Identity{
+				Subject: "alice",
+				Claims: map[string]any{
+					"plan":     "pro",
+					"verified": true,
+				},
+			},
+		}
+
+		err = stage.Handle(ctx, state)
+		require.NoError(t, err)
+		assert.Nil(t, state.Error)
+	})
+
+	t.Run("non-matching jwt claims denies access with 403", func(t *testing.T) {
+		state := &core.ReqState{
+			RequestID: "req_claims_2",
+			Snapshot:  snap,
+			AIAppID:   "app_pro",
+			Identity: &core.Identity{
+				Subject: "bob",
+				Claims: map[string]any{
+					"plan":     "free",
+					"verified": true,
+				},
+			},
+		}
+
+		err = stage.Handle(ctx, state)
+		require.ErrorIs(t, err, ErrForbidden)
+		require.NotNil(t, state.Error)
+		assert.Equal(t, "forbidden", state.Error.Code)
+	})
+}
+
+

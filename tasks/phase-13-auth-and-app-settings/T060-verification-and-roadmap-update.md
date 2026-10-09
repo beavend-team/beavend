@@ -1,4 +1,4 @@
-# T060 — Integration Verification & Roadmap Update
+# T060 - Integration Verification & Roadmap Update
 
 * **Status:** Completed
 

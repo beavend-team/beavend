@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/beavend/beavend/internal/control/auth"
-	"github.com/go-chi/chi/v5"
+	chi "github.com/go-chi/chi/v5"
 )
 
 // maxBodySizeMiddleware limits the maximum request body size read by downstream handlers.
@@ -85,12 +85,17 @@ func MountRoutes(
 		admin.With(requireViewer).Get("/apps/{id}", ctrlHandler.HandleGetAIApp)
 		admin.With(requireEditor).Put("/apps/{id}", ctrlHandler.HandleUpdateAIApp)
 		admin.With(requireEditor).Delete("/apps/{id}", ctrlHandler.HandleDeleteAIApp)
+		admin.With(requireViewer).Get("/apps/{id}/keys", ctrlHandler.HandleListAppAPIKeys)
+		admin.With(requireEditor).Post("/apps/{id}/keys", ctrlHandler.HandleCreateAppAPIKey)
+		admin.With(requireEditor).Delete("/apps/{id}/keys/{key_id}", ctrlHandler.HandleDeleteAppAPIKey)
 
 		// Prompts
 		admin.With(requireViewer).Get("/prompts", ctrlHandler.HandleListPrompts)
 		admin.With(requireEditor).Post("/prompts", ctrlHandler.HandleCreatePrompt)
 		admin.With(requireViewer).Get("/prompts/{id}", ctrlHandler.HandleGetPrompt)
+		admin.With(requireEditor).Put("/prompts/{id}", ctrlHandler.HandleUpdatePrompt)
 		admin.With(requireEditor).Post("/prompts/{id}/versions", ctrlHandler.HandleCreatePromptVersion)
+		admin.With(requireEditor).Put("/prompts/{id}/active-version", ctrlHandler.HandleSetActivePromptVersion)
 		admin.With(requireEditor).Delete("/prompts/{id}", ctrlHandler.HandleDeletePrompt)
 
 		// Model Routings & Providers
@@ -98,6 +103,8 @@ func MountRoutes(
 		admin.With(requireEditor).Put("/models/{logical_model}", ctrlHandler.HandleUpsertModelRouting)
 		admin.With(requireEditor).Delete("/models/{logical_model}", ctrlHandler.HandleDeleteModelRouting)
 		admin.With(requireViewer).Get("/providers", ctrlHandler.HandleListProviderConfigs)
+		admin.With(requireViewer).Get("/providers/{provider_name}/models", ctrlHandler.HandleFetchProviderModels)
+		admin.With(requireViewer).Post("/providers/test-connection", ctrlHandler.HandleTestProviderConfig)
 		admin.With(requireOwner).Put("/providers/{provider_name}", ctrlHandler.HandleUpsertProviderConfig)
 		admin.With(requireOwner).Delete("/providers/{provider_name}", ctrlHandler.HandleDeleteProviderConfig)
 
@@ -106,16 +113,24 @@ func MountRoutes(
 		admin.With(requireEditor).Post("/tools", ctrlHandler.HandleCreateTool)
 		admin.With(requireViewer).Get("/tools/{id}", ctrlHandler.HandleGetTool)
 		admin.With(requireEditor).Put("/tools/{id}", ctrlHandler.HandleUpdateTool)
+		admin.With(requireEditor).Put("/tools/{id}/active-version", ctrlHandler.HandleSetActiveToolVersion)
 		admin.With(requireEditor).Delete("/tools/{id}", ctrlHandler.HandleDeleteTool)
 		admin.With(requireEditor).Put("/tools/{id}/secrets/{secret_ref}", ctrlHandler.HandleUpsertToolSecret)
 		admin.With(requireViewer).Post("/tools/{id}/test", ctrlHandler.HandleTestTool)
+
+		// Search Engine (SearXNG)
+		admin.With(requireViewer).Get("/search/status", ctrlHandler.HandleGetSearchStatus)
+		admin.With(requireViewer).Post("/search/test", ctrlHandler.HandleTestSearch)
+		admin.With(requireEditor).Put("/search/config", ctrlHandler.HandleUpdateSearchConfig)
 
 		// Policies
 		admin.With(requireViewer).Get("/policies", ctrlHandler.HandleListPolicies)
 		admin.With(requireEditor).Post("/policies", ctrlHandler.HandleCreatePolicy)
 		admin.With(requireViewer).Get("/policies/{id}", ctrlHandler.HandleGetPolicy)
 		admin.With(requireEditor).Post("/policies/{id}/versions", ctrlHandler.HandleCreatePolicyVersion)
+		admin.With(requireEditor).Put("/policies/{id}/active-version", ctrlHandler.HandleSetActivePolicyVersion)
 		admin.With(requireEditor).Delete("/policies/{id}", ctrlHandler.HandleDeletePolicy)
+		admin.With(requireViewer).Post("/policies/test", ctrlHandler.HandleTestPolicy)
 
 		// Observability, Logs & Privacy
 		admin.With(requireViewer).Get("/usage", ctrlHandler.HandleGetUsage)

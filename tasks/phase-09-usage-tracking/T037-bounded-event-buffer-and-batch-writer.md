@@ -1,4 +1,4 @@
-# T037 — Bounded Event Buffer & Batch Writer
+# T037 - Bounded Event Buffer & Batch Writer
 
 * **Status:** Completed
 

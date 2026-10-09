@@ -1,4 +1,4 @@
-# AGENTS.md — Beavend Backend Contributor & AI Agent Guide
+# AGENTS.md: Beavend Backend Contributor & AI Agent Guide
 
 Welcome to the **Beavend** backend repository. This document provides practical, non-generic instructions for AI coding agents and human engineers contributing to the server, control plane, and administrative dashboard.
 
@@ -6,21 +6,21 @@ Welcome to the **Beavend** backend repository. This document provides practical,
 
 ## 1. Project Purpose & Scope
 
-**Beavend** is an open-source, self-hosted AI application backend designed for mobile, web, and client applications. It serves as an application-facing AI runtime—analogous to Firebase AI Logic—while remaining:
+**Beavend** is an open-source, self-hosted AI application backend designed for mobile, web, and client applications. It serves as an application-facing AI runtime (analogous to Firebase AI Logic) while remaining:
 * **Self-hostable & Open-Source:** Deployed as a single binary via Docker Compose or Kubernetes.
 * **Provider-Agnostic:** Mediates between client applications and AI model providers via LiteLLM and native adapters.
 * **Data-Agnostic:** Stores **zero** implementor business data. Live application data is fetched at request-time via custom Tools on behalf of authenticated end users.
 * **Identity-Provider Agnostic:** Consumes and validates identity tokens (JWTs) issued by the implementor's existing auth provider (Firebase Auth, Supabase Auth, generic OIDC).
 
 **Ownership Model:**
-* `docs/PRD.md` — What the product does and why.
-* `docs/architecture.md` — How the system is structured.
-* `docs/techstack.md` — Exact technology and library choices.
-* `docs/decisions/` — Architectural Decision Records (ADRs).
-* `docs/api.md` — API design contracts.
-* `docs/security.md` — Security requirements and boundaries.
-* `docs/development.md` — Local setup, testing, and validation commands.
-* `tasks/` — Executable implementation roadmap and tasks.
+* `docs/PRD.md`: What the product does and why.
+* `docs/architecture.md`: How the system is structured.
+* `docs/techstack.md`: Exact technology and library choices.
+* `docs/decisions/`: Architectural Decision Records (ADRs).
+* `docs/api.md`: API design contracts.
+* `docs/security.md`: Security requirements and boundaries.
+* `docs/development.md`: Local setup, testing, and validation commands.
+* `tasks/`: Executable implementation roadmap and tasks.
 
 ---
 
@@ -192,4 +192,4 @@ Before submitting any code, agents and contributors must execute the following c
   * Modifying the streaming protocol or SSE event taxonomy.
   * Changing the configuration snapshot synchronization model.
 * ADR files must be placed in `docs/decisions/` following the format:
-  `ADR-NNN — Title.md` with sections: `Status`, `Context`, `Decision`, `Consequences`, `Alternatives Considered`.
+  `ADR-NNN - Title.md` with sections: `Status`, `Context`, `Decision`, `Consequences`, `Alternatives Considered`.

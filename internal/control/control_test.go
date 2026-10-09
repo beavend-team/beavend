@@ -13,7 +13,8 @@ import (
 	"github.com/beavend/beavend/internal/control/audit"
 	"github.com/beavend/beavend/internal/control/auth"
 	synckit "github.com/beavend/beavend/internal/snapshot/sync"
-	"github.com/go-chi/chi/v5"
+	"github.com/beavend/beavend/internal/store/db"
+	chi "github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -243,3 +244,144 @@ func TestHandler_TestToken(t *testing.T) {
 	assert.False(t, resp2.Valid)
 	assert.Contains(t, resp2.Error, "no auth configuration")
 }
+
+func TestHandler_HandleTestPolicy(t *testing.T) {
+	svc := NewService(nil, nil, nil, []byte("test-key-32-chars-long-security!"))
+	h := NewHandler(svc)
+
+	// 1. Empty expression
+	req1 := httptest.NewRequest("POST", "/v1/admin/policies/test", bytes.NewReader([]byte(`{"expression":""}`)))
+	rec1 := httptest.NewRecorder()
+	h.HandleTestPolicy(rec1, req1)
+	assert.Equal(t, http.StatusBadRequest, rec1.Code)
+
+	// 2. Syntax error
+	req2 := httptest.NewRequest("POST", "/v1/admin/policies/test", bytes.NewReader([]byte(`{"expression":"claims.invalid >>> 123"}`)))
+	rec2 := httptest.NewRecorder()
+	h.HandleTestPolicy(rec2, req2)
+	assert.Equal(t, http.StatusOK, rec2.Code)
+	var resp2 TestPolicyResponse
+	require.NoError(t, json.Unmarshal(rec2.Body.Bytes(), &resp2))
+	assert.False(t, resp2.Valid)
+	assert.NotEmpty(t, resp2.Error)
+
+	// 3. Valid expression evaluating to true
+	body3 := `{"expression":"claims.plan == 'pro' && claims.email_verified == true", "claims":{"plan":"pro","email_verified":true}}`
+	req3 := httptest.NewRequest("POST", "/v1/admin/policies/test", bytes.NewReader([]byte(body3)))
+	rec3 := httptest.NewRecorder()
+	h.HandleTestPolicy(rec3, req3)
+	assert.Equal(t, http.StatusOK, rec3.Code)
+	var resp3 TestPolicyResponse
+	require.NoError(t, json.Unmarshal(rec3.Body.Bytes(), &resp3))
+	assert.True(t, resp3.Valid)
+	assert.True(t, resp3.Allowed)
+	assert.Empty(t, resp3.Error)
+
+	// 4. Valid expression evaluating to false
+	body4 := `{"expression":"claims.plan == 'enterprise'", "claims":{"plan":"pro"}}`
+	req4 := httptest.NewRequest("POST", "/v1/admin/policies/test", bytes.NewReader([]byte(body4)))
+	rec4 := httptest.NewRecorder()
+	h.HandleTestPolicy(rec4, req4)
+	assert.Equal(t, http.StatusOK, rec4.Code)
+	var resp4 TestPolicyResponse
+	require.NoError(t, json.Unmarshal(rec4.Body.Bytes(), &resp4))
+	assert.True(t, resp4.Valid)
+	assert.False(t, resp4.Allowed)
+	assert.Empty(t, resp4.Error)
+}
+
+func TestParseModelList(t *testing.T) {
+	// 1. OpenAI / LiteLLM v1/models format
+	openAIResp := []byte(`{"object":"list","data":[{"id":"gpt-4o","object":"model"},{"id":"gpt-4o-mini","object":"model"}]}`)
+	models1 := parseModelList(openAIResp)
+	assert.Equal(t, []string{"gpt-4o", "gpt-4o-mini"}, models1)
+
+	// 2. LiteLLM /models string array format
+	liteLLMResp := []byte(`{"data":["claude-3-5-sonnet","gpt-4o"]}`)
+	models2 := parseModelList(liteLLMResp)
+	assert.Equal(t, []string{"claude-3-5-sonnet", "gpt-4o"}, models2)
+
+	// 3. Ollama /api/tags format
+	ollamaResp := []byte(`{"models":[{"name":"llama3:latest"},{"model":"qwen2.5:latest"}]}`)
+	models3 := parseModelList(ollamaResp)
+	assert.Equal(t, []string{"llama3:latest", "qwen2.5:latest"}, models3)
+
+	// 4. Direct JSON list
+	listResp := []byte(`[{"id":"deepseek-r1"},{"id":"deepseek-v3"}]`)
+	models4 := parseModelList(listResp)
+	assert.Equal(t, []string{"deepseek-r1", "deepseek-v3"}, models4)
+}
+
+func TestHandler_AppAuthValidation(t *testing.T) {
+	auditor := audit.NewInMemoryAuditor()
+	svc := NewService(nil, nil, auditor, []byte("test-key-32-chars-long-security!"))
+	handler := NewHandler(svc)
+
+	t.Run("invalid auth provider returns 400", func(t *testing.T) {
+		reqBody := map[string]any{
+			"id":   "app_test_bad_auth",
+			"name": "Bad Auth App",
+			"auth": map[string]any{
+				"provider": "unsupported_provider",
+			},
+		}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest("POST", "/v1/admin/apps", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+
+		handler.HandleCreateAIApp(rec, req)
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		assert.Contains(t, rec.Body.String(), "unsupported auth provider")
+	})
+
+	t.Run("valid auth passes validation and checks db", func(t *testing.T) {
+		reqBody := map[string]any{
+			"id":   "app_test_valid",
+			"name": "Valid App",
+			"auth": map[string]any{
+				"provider": "anonymous",
+			},
+		}
+		body, _ := json.Marshal(reqBody)
+		req := httptest.NewRequest("POST", "/v1/admin/apps", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+
+		handler.HandleCreateAIApp(rec, req)
+		// Validation passes, then encounters nil queries
+		assert.Equal(t, http.StatusInternalServerError, rec.Code)
+		assert.Contains(t, rec.Body.String(), "database_unavailable")
+	})
+}
+
+func TestToAIAppResponse_JSONSerialization(t *testing.T) {
+	app := db.AiApps{
+		ID:          "app_test_supabase",
+		ProjectID:   "proj_default",
+		Environment: "development",
+		Name:        "Test Supabase App",
+		AuthConfig:  []byte(`{"provider":"supabase","issuer":"https://xyz.supabase.co/auth/v1","audience":["authenticated"]}`),
+		ModelRoutes: []byte(`{"default":"gpt-4o"}`),
+	}
+
+	resp := toAIAppResponse(app)
+	marshaled, err := json.Marshal(resp)
+	assert.NoError(t, err)
+
+	// Verify that the output JSON contains nested objects and NOT base64 strings
+	var decoded map[string]any
+	err = json.Unmarshal(marshaled, &decoded)
+	assert.NoError(t, err)
+
+	assert.Equal(t, "app_test_supabase", decoded["id"])
+	authMap, ok := decoded["auth_config"].(map[string]any)
+	assert.True(t, ok, "auth_config must serialize to a JSON object, not base64 string")
+	assert.Equal(t, "supabase", authMap["provider"])
+	assert.Equal(t, "https://xyz.supabase.co/auth/v1", authMap["issuer"])
+
+	routesMap, ok := decoded["model_routes"].(map[string]any)
+	assert.True(t, ok, "model_routes must serialize to a JSON object, not base64 string")
+	assert.Equal(t, "gpt-4o", routesMap["default"])
+}
+
+
+

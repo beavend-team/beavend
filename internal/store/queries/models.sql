@@ -29,14 +29,19 @@ WHERE project_id = $1 AND environment = $2 AND provider_name = $3;
 -- name: UpsertModelRouting :one
 INSERT INTO model_routings (
     id, project_id, environment, logical_model, deployment,
-    adapter, fallback_deployments, created_at, updated_at
+    adapter, fallback_deployments, input_cost_per_1m, output_cost_per_1m,
+    input_modalities, output_modalities, created_at, updated_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
 ON CONFLICT (project_id, environment, logical_model)
 DO UPDATE SET
     deployment = EXCLUDED.deployment,
     adapter = EXCLUDED.adapter,
     fallback_deployments = EXCLUDED.fallback_deployments,
+    input_cost_per_1m = EXCLUDED.input_cost_per_1m,
+    output_cost_per_1m = EXCLUDED.output_cost_per_1m,
+    input_modalities = EXCLUDED.input_modalities,
+    output_modalities = EXCLUDED.output_modalities,
     updated_at = NOW()
 RETURNING *;
 

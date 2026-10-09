@@ -1,4 +1,4 @@
-# ADR-014 — Model Context Protocol (MCP) and Parameterized SQL Template Tool Executors
+# ADR-014: Model Context Protocol (MCP) and Parameterized SQL Template Tool Executors
 
 ## Status
 Accepted
@@ -37,7 +37,7 @@ According to PRD §17.2, §17.4, and the roadmap:
    - **Dialect Parameter Binding**:
      - Templates use named placeholders (`:param`, e.g. `:user_id`, `:limit`).
      - Dialect transformation converts `:param` to positional parameters (`$1, $2` for PostgreSQL; `?` for SQLite/MySQL).
-     - Values are bound as typed parameters using standard `database/sql` driver queries—never string interpolation.
+     - Values are bound as typed parameters using standard `database/sql` driver queries, never string interpolation.
    - **Confused-Deputy Defense**: Identity parameters such as `:user_id` and `:subject` are automatically populated from the verified token `Identity.Subject` when not explicitly overridden by bindings.
    - **Connection Pooling**: Managed via `SQLConnectionPool` with max open connections, idle connection reuse, and connection lifetime management.
 

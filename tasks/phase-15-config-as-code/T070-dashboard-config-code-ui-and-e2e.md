@@ -1,4 +1,4 @@
-# T070 — Dashboard Config-as-Code UI, ADR-013 & Roadmap Verification
+# T070 - Dashboard Config-as-Code UI, ADR-013 & Roadmap Verification
 
 ## Status
 Completed

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/beavend/beavend/internal/core"
+	"github.com/beavend/beavend/internal/pricing"
 )
 
 // Tracker extracts operational metrics and usage records from core.ReqState
@@ -173,8 +174,35 @@ func (t *Tracker) extractEvents(state *core.ReqState) (*LogEvent, *Event) {
 	}
 
 	var costUSD float64
-	if state.Usage.CostUSD != nil {
+	if state.Usage.CostUSD != nil && *state.Usage.CostUSD > 0 {
 		costUSD = *state.Usage.CostUSD
+	} else if hit, _ := state.Metadata["cache_hit"].(bool); hit {
+		costUSD = 0.0
+	} else if inputTokens > 0 || outputTokens > 0 {
+		// Calculate accurate cost based on model used
+		var override *core.ModelPrice
+		if state.ResolvedModel != nil && (state.ResolvedModel.InputCostPer1M != nil || state.ResolvedModel.OutputCostPer1M != nil) {
+			override = &core.ModelPrice{}
+			if state.ResolvedModel.InputCostPer1M != nil {
+				override.InputCostPer1M = *state.ResolvedModel.InputCostPer1M
+			}
+			if state.ResolvedModel.OutputCostPer1M != nil {
+				override.OutputCostPer1M = *state.ResolvedModel.OutputCostPer1M
+			}
+		}
+
+		targetModel := modelDeployment
+		if targetModel == "" && state.ChatRequest != nil {
+			targetModel = state.ChatRequest.Model
+		}
+		if targetModel == "" {
+			targetModel = logicalModel
+		}
+
+		costUSD = pricing.CalculateCost(inputTokens, outputTokens, targetModel, override)
+		if state.Usage.CostUSD == nil {
+			state.Usage.CostUSD = &costUSD
+		}
 	}
 
 	// Extract tool call summaries from chat request messages and response
@@ -233,6 +261,9 @@ func (t *Tracker) extractEvents(state *core.ReqState) (*LogEvent, *Event) {
 		InputTokens:     inputTokens,
 		OutputTokens:    outputTokens,
 		TotalTokens:     totalTokens,
+		Images:          state.Usage.Images,
+		AudioSeconds:    state.Usage.AudioSeconds,
+		VideoSeconds:    state.Usage.VideoSeconds,
 		CostUSD:         costUSD,
 		IsStreaming:     state.IsStreaming,
 		ToolCalls:       toolCalls,
@@ -255,6 +286,9 @@ func (t *Tracker) extractEvents(state *core.ReqState) (*LogEvent, *Event) {
 		InputTokens:  inputTokens,
 		OutputTokens: outputTokens,
 		TotalTokens:  totalTokens,
+		Images:       state.Usage.Images,
+		AudioSeconds: state.Usage.AudioSeconds,
+		VideoSeconds: state.Usage.VideoSeconds,
 		CostUSD:      costUSD,
 		CreatedAt:    createdAt,
 	}

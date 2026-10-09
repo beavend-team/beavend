@@ -76,6 +76,27 @@ func (a *Adapter) embedURL() string {
 	return a.baseURL + "/v1/embeddings"
 }
 
+func (a *Adapter) imagesURL() string {
+	if strings.HasSuffix(a.baseURL, "/v1") {
+		return a.baseURL + "/images/generations"
+	}
+	return a.baseURL + "/v1/images/generations"
+}
+
+func (a *Adapter) speechURL() string {
+	if strings.HasSuffix(a.baseURL, "/v1") {
+		return a.baseURL + "/audio/speech"
+	}
+	return a.baseURL + "/v1/audio/speech"
+}
+
+func (a *Adapter) videoURL() string {
+	if strings.HasSuffix(a.baseURL, "/v1") {
+		return a.baseURL + "/video/generations"
+	}
+	return a.baseURL + "/v1/video/generations"
+}
+
 func (a *Adapter) healthURL() string {
 	return a.baseURL + "/health"
 }
@@ -271,3 +292,291 @@ func (a *Adapter) Health(ctx context.Context) error {
 
 	return nil
 }
+
+// Generate implements core.Generator for media generation via LiteLLM.
+func (a *Adapter) Generate(ctx context.Context, req core.GenerateRequest) (*core.GenerateResponse, error) {
+	modality := strings.ToLower(strings.TrimSpace(req.Modality))
+	switch modality {
+	case "image":
+		return a.generateImage(ctx, req)
+	case "audio", "speech":
+		return a.generateSpeech(ctx, req)
+	case "video":
+		return a.generateVideo(ctx, req)
+	default:
+		return nil, fmt.Errorf("unsupported generation modality: %q", req.Modality)
+	}
+}
+
+func (a *Adapter) generateImage(ctx context.Context, req core.GenerateRequest) (*core.GenerateResponse, error) {
+	count := req.Count
+	if count <= 0 {
+		count = 1
+	}
+	size := req.Size
+	if size == "" {
+		size = "1024x1024"
+	}
+	quality := req.Quality
+	if quality == "" {
+		quality = "standard"
+	}
+
+	wireReq := providers.OpenAIImageRequest{
+		Model:          req.Model,
+		Prompt:         req.Prompt,
+		N:              count,
+		Size:           size,
+		Quality:        quality,
+		ResponseFormat: "url",
+	}
+
+	bodyBytes, err := json.Marshal(wireReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal image request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.imagesURL(), bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("create image request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if a.masterKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+a.masterKey)
+	}
+
+	resp, err := a.httpClient.Do(httpReq)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, &core.ErrorResponse{
+			Code:    "unavailable",
+			Message: fmt.Sprintf("failed to reach litellm image endpoint: %v", err),
+		}
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read image response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, providers.NormalizeHTTPError(resp.StatusCode, respBody, resp.Header, "")
+	}
+
+	var wireResp providers.OpenAIImageResponse
+	if err := json.Unmarshal(respBody, &wireResp); err != nil {
+		return nil, &core.ErrorResponse{
+			Code:    "provider_error",
+			Message: fmt.Sprintf("malformed image json response: %v", err),
+		}
+	}
+
+	items := make([]core.GeneratedItem, len(wireResp.Data))
+	for i, d := range wireResp.Data {
+		mimeType := "image/png"
+		if req.Format == "jpeg" || req.Format == "jpg" {
+			mimeType = "image/jpeg"
+		} else if req.Format == "webp" {
+			mimeType = "image/webp"
+		}
+		items[i] = core.GeneratedItem{
+			Index:         i,
+			URL:           d.URL,
+			MimeType:      mimeType,
+			RevisedPrompt: d.RevisedPrompt,
+		}
+	}
+
+	return &core.GenerateResponse{
+		ID:        fmt.Sprintf("img_%d", time.Now().UnixNano()),
+		Model:     req.Model,
+		Modality:  "image",
+		Items:     items,
+		Usage:     core.UsageStats{Images: len(items)},
+		CreatedAt: wireResp.Created,
+	}, nil
+}
+
+func (a *Adapter) generateSpeech(ctx context.Context, req core.GenerateRequest) (*core.GenerateResponse, error) {
+	voice := req.Voice
+	if voice == "" {
+		voice = "alloy"
+	}
+	format := req.Format
+	if format == "" {
+		format = "mp3"
+	}
+
+	wireReq := providers.OpenAISpeechRequest{
+		Model:          req.Model,
+		Input:          req.Prompt,
+		Voice:          voice,
+		ResponseFormat: format,
+	}
+
+	bodyBytes, err := json.Marshal(wireReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal speech request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.speechURL(), bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("create speech request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if a.masterKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+a.masterKey)
+	}
+
+	resp, err := a.httpClient.Do(httpReq)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, &core.ErrorResponse{
+			Code:    "unavailable",
+			Message: fmt.Sprintf("failed to reach litellm audio endpoint: %v", err),
+		}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		return nil, providers.NormalizeHTTPError(resp.StatusCode, respBody, resp.Header, "")
+	}
+
+	audioBytes, err := io.ReadAll(io.LimitReader(resp.Body, 128<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read audio response: %w", err)
+	}
+
+	mimeType := "audio/mpeg"
+	switch format {
+	case "opus":
+		mimeType = "audio/opus"
+	case "aac":
+		mimeType = "audio/aac"
+	case "flac":
+		mimeType = "audio/flac"
+	case "wav":
+		mimeType = "audio/wav"
+	}
+
+	estDuration := req.Duration
+	if estDuration <= 0 {
+		estDuration = float64(len(req.Prompt)) / 15.0
+		if estDuration < 1 {
+			estDuration = 1
+		}
+	}
+
+	item := core.GeneratedItem{
+		Index:    0,
+		Data:     audioBytes,
+		MimeType: mimeType,
+	}
+
+	return &core.GenerateResponse{
+		ID:        fmt.Sprintf("aud_%d", time.Now().UnixNano()),
+		Model:     req.Model,
+		Modality:  "audio",
+		Items:     []core.GeneratedItem{item},
+		Usage:     core.UsageStats{AudioSeconds: estDuration},
+		CreatedAt: time.Now().Unix(),
+	}, nil
+}
+
+func (a *Adapter) generateVideo(ctx context.Context, req core.GenerateRequest) (*core.GenerateResponse, error) {
+	payload := map[string]any{
+		"model":  req.Model,
+		"prompt": req.Prompt,
+	}
+	if req.Duration > 0 {
+		payload["duration"] = req.Duration
+	}
+	if req.Size != "" {
+		payload["size"] = req.Size
+	}
+
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal video request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, a.videoURL(), bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("create video request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	if a.masterKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+a.masterKey)
+	}
+
+	resp, err := a.httpClient.Do(httpReq)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, &core.ErrorResponse{
+			Code:    "unavailable",
+			Message: fmt.Sprintf("failed to reach litellm video endpoint: %v", err),
+		}
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read video response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		return nil, providers.NormalizeHTTPError(resp.StatusCode, respBody, resp.Header, "")
+	}
+
+	var raw struct {
+		ID   string `json:"id"`
+		URL  string `json:"url"`
+		Data []struct {
+			URL string `json:"url"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(respBody, &raw)
+
+	videoURL := raw.URL
+	if videoURL == "" && len(raw.Data) > 0 {
+		videoURL = raw.Data[0].URL
+	}
+
+	estDuration := req.Duration
+	if estDuration <= 0 {
+		estDuration = 5.0
+	}
+
+	item := core.GeneratedItem{
+		Index:    0,
+		URL:      videoURL,
+		MimeType: "video/mp4",
+	}
+
+	resID := raw.ID
+	if resID == "" {
+		resID = fmt.Sprintf("vid_%d", time.Now().UnixNano())
+	}
+
+	return &core.GenerateResponse{
+		ID:        resID,
+		Model:     req.Model,
+		Modality:  "video",
+		Items:     []core.GeneratedItem{item},
+		Usage:     core.UsageStats{VideoSeconds: estDuration},
+		CreatedAt: time.Now().Unix(),
+	}, nil
+}
+
+var (
+	_ core.ProviderAdapter = (*Adapter)(nil)
+	_ core.Generator       = (*Adapter)(nil)
+)

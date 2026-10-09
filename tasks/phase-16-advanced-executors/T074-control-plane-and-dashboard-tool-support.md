@@ -1,4 +1,4 @@
-# T074 — Control Plane & Dashboard Advanced Tool Support
+# T074 - Control Plane & Dashboard Advanced Tool Support
 
 ## Status
 Completed

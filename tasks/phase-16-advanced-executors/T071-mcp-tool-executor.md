@@ -1,4 +1,4 @@
-# T071 — MCP (Model Context Protocol) Tool Executor
+# T071 - MCP (Model Context Protocol) Tool Executor
 
 ## Status
 Completed

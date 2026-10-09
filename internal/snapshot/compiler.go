@@ -10,10 +10,12 @@ import (
 	"time"
 
 	pgx "github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v5"
 
 	"github.com/beavend/beavend/internal/core"
 	"github.com/beavend/beavend/internal/policy"
+	"github.com/beavend/beavend/internal/secrets"
 	"github.com/beavend/beavend/internal/store/db"
 )
 
@@ -27,13 +29,20 @@ type QuerySource interface {
 	GetSnapshotPolicies(ctx context.Context, arg db.GetSnapshotPoliciesParams) ([]db.GetSnapshotPoliciesRow, error)
 	GetSnapshotTools(ctx context.Context, arg db.GetSnapshotToolsParams) ([]db.GetSnapshotToolsRow, error)
 	GetSnapshotModelRoutings(ctx context.Context, arg db.GetSnapshotModelRoutingsParams) ([]db.ModelRoutings, error)
+	GetSnapshotAppAPIKeys(ctx context.Context, arg db.GetSnapshotAppAPIKeysParams) ([]db.AppApiKeys, error)
 	ListAllProjectEnvironments(ctx context.Context) ([]db.ListAllProjectEnvironmentsRow, error)
+}
+
+// ProviderQuerySource provides upstream model provider configs from store.
+type ProviderQuerySource interface {
+	ListProviderConfigs(ctx context.Context, arg db.ListProviderConfigsParams) ([]db.ProviderConfigs, error)
 }
 
 // Compiler compiles raw store records into an in-memory immutable Snapshot.
 type Compiler struct {
 	queries        QuerySource
 	policyCompiler *policy.Compiler
+	masterKey      []byte
 }
 
 // NewCompiler creates a new Snapshot Compiler.
@@ -47,6 +56,11 @@ func NewCompiler(queries QuerySource) (*Compiler, error) {
 		queries:        queries,
 		policyCompiler: pc,
 	}, nil
+}
+
+// SetMasterKey configures the envelope encryption master key used to decrypt provider credentials.
+func (c *Compiler) SetMasterKey(key []byte) {
+	c.masterKey = key
 }
 
 // Compile loads all configuration for a (projectID, env) from the store,
@@ -251,7 +265,26 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 	for _, m := range models {
 		var fallbacks []string
 		if len(m.FallbackDeployments) > 0 {
-			_ = json.Unmarshal(m.FallbackDeployments, &fallbacks)
+			if err := json.Unmarshal(m.FallbackDeployments, &fallbacks); err != nil {
+				var rawObjects []map[string]any
+				if objErr := json.Unmarshal(m.FallbackDeployments, &rawObjects); objErr == nil {
+					for _, obj := range rawObjects {
+						prov, _ := obj["provider"].(string)
+						if prov == "" {
+							prov, _ = obj["adapter"].(string)
+						}
+						dep, _ := obj["deployment"].(string)
+						if dep == "" {
+							dep, _ = obj["model"].(string)
+						}
+						if prov != "" && dep != "" {
+							fallbacks = append(fallbacks, prov+"/"+dep)
+						} else if dep != "" {
+							fallbacks = append(fallbacks, dep)
+						}
+					}
+				}
+			}
 		}
 
 		mRouting := &core.ModelRouting{
@@ -262,10 +295,73 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 			Deployment:          m.Deployment,
 			Adapter:             m.Adapter,
 			FallbackDeployments: fallbacks,
+			InputCostPer1M:      numericToFloatPtr(m.InputCostPer1m),
+			OutputCostPer1M:     numericToFloatPtr(m.OutputCostPer1m),
+			InputModalities:     m.InputModalities,
+			OutputModalities:    m.OutputModalities,
 		}
 		snap.Models[m.LogicalModel] = mRouting
 		if m.ID != "" && m.ID != m.LogicalModel {
 			snap.Models[m.ID] = mRouting
+		}
+	}
+
+	// Validate fallback capability compatibility (ADR-017 §3)
+	for _, mRouting := range snap.Models {
+		for _, fb := range mRouting.FallbackDeployments {
+			if fbModel, ok := snap.Models[fb]; ok {
+				if len(mRouting.InputModalities) > 0 && len(fbModel.InputModalities) > 0 {
+					for _, inMod := range mRouting.InputModalities {
+						if !containsString(fbModel.InputModalities, inMod) {
+							return nil, fmt.Errorf("model routing %s fallback %s does not support required input modality %q", mRouting.LogicalModel, fb, inMod)
+						}
+					}
+				}
+				if len(mRouting.OutputModalities) > 0 && len(fbModel.OutputModalities) > 0 {
+					for _, outMod := range mRouting.OutputModalities {
+						if !containsString(fbModel.OutputModalities, outMod) {
+							return nil, fmt.Errorf("model routing %s fallback %s does not support required output modality %q", mRouting.LogicalModel, fb, outMod)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 5b. Provider Configurations
+	if pqs, ok := c.queries.(ProviderQuerySource); ok {
+		provConfigs, err := pqs.ListProviderConfigs(ctx, db.ListProviderConfigsParams{
+			ProjectID:   projectID,
+			Environment: env,
+		})
+		if err == nil {
+			var derivedKey []byte
+			if len(c.masterKey) > 0 {
+				derivedKey = secrets.DeriveKey(string(c.masterKey))
+			} else {
+				derivedKey = secrets.DeriveKey("default-master-key-32-chars-long")
+			}
+			for _, pc := range provConfigs {
+				var apiKey string
+				if len(pc.EncryptedApiKey) > 0 && len(pc.Nonce) > 0 {
+					if pt, decErr := secrets.Decrypt(derivedKey, pc.EncryptedApiKey, pc.Nonce); decErr == nil {
+						apiKey = string(pt)
+					}
+				}
+				pName := strings.ToLower(strings.TrimSpace(pc.ProviderName))
+				pCfg := &core.ProviderConfig{
+					ID:           pc.ID,
+					ProjectID:    pc.ProjectID,
+					Environment:  pc.Environment,
+					ProviderName: pc.ProviderName,
+					BaseURL:      pc.BaseUrl,
+					APIKey:       apiKey,
+				}
+				snap.Providers[pName] = pCfg
+				if pName != pc.ProviderName {
+					snap.Providers[pc.ProviderName] = pCfg
+				}
+			}
 		}
 	}
 
@@ -288,6 +384,11 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 
 		// Referential integrity: verify tools exist
 		for _, toolID := range toolIDs {
+			// Built-in tools provided by Beavend runtime are always valid
+			switch toolID {
+			case "web_search", "generate_image", "generate_speech", "generate_video":
+				continue
+			}
 			if _, exists := snap.Tools[toolID]; !exists {
 				return nil, fmt.Errorf("app %s references non-existent tool %q", a.AppID, toolID)
 			}
@@ -304,6 +405,76 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 		if a.ModelRoutingID != "" {
 			if _, exists := snap.Models[a.ModelRoutingID]; !exists {
 				return nil, fmt.Errorf("app %s references non-existent model routing %q", a.AppID, a.ModelRoutingID)
+			}
+		}
+
+		var modelRoutes *core.ModelRoutes
+		if len(a.ModelRoutes) > 0 && string(a.ModelRoutes) != "{}" && string(a.ModelRoutes) != "null" {
+			var mr core.ModelRoutes
+			if err := json.Unmarshal(a.ModelRoutes, &mr); err != nil {
+				return nil, fmt.Errorf("unmarshal model_routes for app %s: %w", a.AppID, err)
+			}
+			modelRoutes = &mr
+		}
+
+		// Legacy compatibility: apps without model_routes use ModelRoutingID as default
+		if modelRoutes == nil || strings.TrimSpace(modelRoutes.Default) == "" {
+			if a.ModelRoutingID != "" {
+				if modelRoutes == nil {
+					modelRoutes = &core.ModelRoutes{Default: a.ModelRoutingID}
+				} else {
+					modelRoutes.Default = a.ModelRoutingID
+				}
+			}
+		}
+
+		// Referential integrity: default model route must be present
+		if modelRoutes == nil || strings.TrimSpace(modelRoutes.Default) == "" {
+			return nil, fmt.Errorf("app %s missing default model route", a.AppID)
+		}
+
+		// Referential integrity: verify default model exists
+		if _, exists := snap.Models[modelRoutes.Default]; !exists {
+			return nil, fmt.Errorf("app %s references non-existent default model %q", a.AppID, modelRoutes.Default)
+		}
+
+		// Validate routing rules
+		for _, rule := range modelRoutes.Rules {
+			if strings.TrimSpace(rule.Use) == "" {
+				return nil, fmt.Errorf("app %s route rule has empty model target 'use'", a.AppID)
+			}
+			targetModel, exists := snap.Models[rule.Use]
+			if !exists {
+				return nil, fmt.Errorf("app %s route rule references non-existent model %q", a.AppID, rule.Use)
+			}
+
+			// Validate input modalities if capability metadata is declared
+			if len(targetModel.InputModalities) > 0 && len(rule.When.InputHas) > 0 {
+				for _, reqIn := range rule.When.InputHas {
+					if !containsString(targetModel.InputModalities, reqIn) {
+						return nil, fmt.Errorf("app %s route rule model %q does not support requested input modality %q", a.AppID, rule.Use, reqIn)
+					}
+				}
+			}
+
+			// Validate output modalities if capability metadata is declared
+			if len(targetModel.OutputModalities) > 0 && len(rule.When.Output) > 0 {
+				for _, reqOut := range rule.When.Output {
+					if !containsString(targetModel.OutputModalities, reqOut) {
+						return nil, fmt.Errorf("app %s route rule model %q does not support requested output modality %q", a.AppID, rule.Use, reqOut)
+					}
+				}
+			}
+
+			// Pre-compile optional CEL expr
+			if rule.When.Expr != "" {
+				if _, exists := snap.CompiledPolicies[rule.When.Expr]; !exists {
+					prg, err := c.policyCompiler.Compile(rule.When.Expr)
+					if err != nil {
+						return nil, fmt.Errorf("app %s invalid route rule cel expression %q: %w", a.AppID, rule.When.Expr, err)
+					}
+					snap.CompiledPolicies[rule.When.Expr] = prg
+				}
 			}
 		}
 
@@ -354,6 +525,24 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 			_ = json.Unmarshal(a.MemoryConfig, &memConfig)
 		}
 
+		var searchConfig core.SearchConfig
+		if len(a.SearchConfig) > 0 {
+			_ = json.Unmarshal(a.SearchConfig, &searchConfig)
+		}
+
+		var appAuthConfig *core.AuthConfig
+		if len(a.AuthConfig) > 0 && string(a.AuthConfig) != "{}" && string(a.AuthConfig) != "null" {
+			var ac core.AuthConfig
+			if err := json.Unmarshal(a.AuthConfig, &ac); err == nil && (ac.Provider != "" || ac.Issuer != "" || ac.JWKSURL != "" || ac.AllowAnonymous) {
+				appAuthConfig = &ac
+			}
+		}
+
+		modelRoutingID := a.ModelRoutingID
+		if modelRoutingID == "" && modelRoutes != nil {
+			modelRoutingID = modelRoutes.Default
+		}
+
 		appObj := &core.AIApp{
 			ID:             a.AppID,
 			ProjectID:      a.ProjectID,
@@ -363,13 +552,16 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 			AccessPolicy:   a.AccessPolicy,
 			PromptID:       a.PromptID,
 			PromptVersion:  int(a.PromptVersion),
-			ModelRoutingID: a.ModelRoutingID,
+			ModelRoutingID: modelRoutingID,
+			ModelRoutes:    modelRoutes,
 			ToolIDs:        toolIDs,
 			Limits:         limits,
 			Cache:          cacheConfig,
 			Guardrails:     guardrails,
 			Memory:         memConfig,
+			Search:         searchConfig,
 			ResponseSchema: a.ResponseSchema,
+			AuthConfig:     appAuthConfig,
 			CreatedAt:      a.CreatedAt.Time,
 			UpdatedAt:      time.Now().UTC(),
 		}
@@ -395,5 +587,57 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 		}
 	}
 
+	// 7. App API Keys
+	apiKeys, err := c.queries.GetSnapshotAppAPIKeys(ctx, db.GetSnapshotAppAPIKeysParams{
+		ProjectID:   projectID,
+		Environment: env,
+	})
+	if err == nil {
+		for _, k := range apiKeys {
+			var lastUsed, expires *time.Time
+			if k.LastUsedAt.Valid {
+				t := k.LastUsedAt.Time
+				lastUsed = &t
+			}
+			if k.ExpiresAt.Valid {
+				t := k.ExpiresAt.Time
+				expires = &t
+			}
+			snap.AppAPIKeys[k.KeyHash] = &core.AppAPIKey{
+				ID:          k.ID,
+				AppID:       k.AppID,
+				ProjectID:   k.ProjectID,
+				Environment: k.Environment,
+				Name:        k.Name,
+				KeyPrefix:   k.KeyPrefix,
+				KeyHash:     k.KeyHash,
+				CreatedAt:   k.CreatedAt.Time,
+				LastUsedAt:  lastUsed,
+				ExpiresAt:   expires,
+			}
+		}
+	}
+
 	return snap, nil
+}
+
+func numericToFloatPtr(num pgtype.Numeric) *float64 {
+	if !num.Valid {
+		return nil
+	}
+	f, err := num.Float64Value()
+	if err != nil || !f.Valid {
+		return nil
+	}
+	val := f.Float64
+	return &val
+}
+
+func containsString(slice []string, val string) bool {
+	for _, item := range slice {
+		if strings.EqualFold(item, val) {
+			return true
+		}
+	}
+	return false
 }

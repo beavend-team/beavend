@@ -1,4 +1,4 @@
-# ADR-010 — Guardrails, Content Safety, and Structured Output
+# ADR-010: Guardrails, Content Safety, and Structured Output
 
 ## Status
 Accepted

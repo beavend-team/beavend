@@ -245,3 +245,95 @@ func TestCacheStage_ScopeIsolation(t *testing.T) {
 	assert.Nil(t, stateBob.ChatResponse, "Bob must NOT see Alice's cached response")
 	assert.Equal(t, false, stateBob.Metadata["cache_hit"])
 }
+
+func TestCacheStage_CrossRouteIsolation(t *testing.T) {
+	ctx := context.Background()
+	store := cache.NewMemoryCacheStore()
+	stage := NewCacheStage(store)
+
+	snap := core.NewSnapshot("proj1", "prod", 1)
+	app := &core.AIApp{
+		ID:    "app1",
+		Cache: core.CacheConfig{Enabled: true, Scope: "shared", TTL: 300},
+	}
+	snap.Apps["app1"] = app
+
+	req := &core.ChatRequest{
+		Messages: []core.ChatMessage{{Role: "user", Content: "Calculate distance"}},
+	}
+
+	// Response cached under route "fast-model"
+	hashFast, err := cache.ComputeRequestHash(req, app, "fast-model")
+	require.NoError(t, err)
+	keyFast := cache.ResponseCacheKey("proj1", "prod", "shared", "", hashFast)
+	_ = store.Set(ctx, keyFast, []byte(`{"message":{"role":"assistant","content":"Fast route answer"}}`), time.Minute)
+
+	// Incoming request is routed to "reasoning-model"
+	stateReasoning := &core.ReqState{
+		RequestID:     "req_reasoning",
+		ProjectID:     "proj1",
+		Environment:   "prod",
+		AIAppID:       "app1",
+		Snapshot:      snap,
+		SelectedModel: "reasoning-model",
+		ChatRequest:   req,
+		Metadata:      make(map[string]any),
+	}
+
+	err = stage.Handle(ctx, stateReasoning)
+	require.NoError(t, err)
+	assert.Nil(t, stateReasoning.ChatResponse, "Cross-route cache hit must NOT occur")
+	assert.Equal(t, false, stateReasoning.Metadata["cache_hit"])
+
+	// Incoming request routed to "fast-model" gets a cache hit
+	stateFast := &core.ReqState{
+		RequestID:     "req_fast",
+		ProjectID:     "proj1",
+		Environment:   "prod",
+		AIAppID:       "app1",
+		Snapshot:      snap,
+		SelectedModel: "fast-model",
+		ChatRequest:   req,
+		Metadata:      make(map[string]any),
+	}
+
+	err = stage.Handle(ctx, stateFast)
+	require.NoError(t, err)
+	require.NotNil(t, stateFast.ChatResponse)
+	assert.Equal(t, true, stateFast.Metadata["cache_hit"])
+	assert.Equal(t, "Fast route answer", stateFast.ChatResponse.Message.Content)
+}
+
+func TestCacheStage_ModalityBypass(t *testing.T) {
+	ctx := context.Background()
+	store := cache.NewMemoryCacheStore()
+	stage := NewCacheStage(store)
+
+	snap := core.NewSnapshot("proj1", "prod", 1)
+	// App does not enable image modality caching
+	app := &core.AIApp{
+		ID:    "app1",
+		Cache: core.CacheConfig{Enabled: true, Scope: "shared", TTL: 300}, // Modalities empty
+	}
+	snap.Apps["app1"] = app
+
+	reqImage := &core.ChatRequest{
+		Messages:         []core.ChatMessage{{Role: "user", Content: "Draw a cat"}},
+		OutputModalities: []string{"image"},
+	}
+
+	state := &core.ReqState{
+		RequestID:   "req_img",
+		ProjectID:   "proj1",
+		Environment: "prod",
+		AIAppID:     "app1",
+		Snapshot:    snap,
+		ChatRequest: reqImage,
+		Metadata:    make(map[string]any),
+	}
+
+	err := stage.Handle(ctx, state)
+	require.NoError(t, err)
+	assert.Nil(t, state.ChatResponse)
+	assert.Equal(t, false, state.Metadata["cache_hit"])
+}

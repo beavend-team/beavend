@@ -1,4 +1,4 @@
-# T038 — Runtime Usage Recording & Token Reconciliation
+# T038 - Runtime Usage Recording & Token Reconciliation
 
 * **Status:** Completed
 

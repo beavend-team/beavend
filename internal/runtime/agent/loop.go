@@ -14,6 +14,7 @@ import (
 
 	"github.com/beavend/beavend/internal/cache"
 	"github.com/beavend/beavend/internal/core"
+	"github.com/beavend/beavend/internal/media"
 	"github.com/beavend/beavend/internal/policy"
 	"github.com/beavend/beavend/internal/tools"
 )
@@ -38,11 +39,15 @@ type ExecutorRegistry interface {
 	GetExecutor(def core.ToolDefinition) (core.Executor, error)
 }
 
-// DefaultExecutorRegistry creates standard tool executors (HTTP, Webhook, MCP, SQL template, etc.).
+// DefaultExecutorRegistry creates standard tool executors (HTTP, Webhook, MCP, SQL template, media generation, etc.).
 type DefaultExecutorRegistry struct {
 	authenticator core.Authenticator
 	allowPrivate  bool
 	sqlPool       *tools.SQLConnectionPool
+	searxngClient *tools.SearXNGClient
+	mediaStore    core.MediaStore
+	jobStore      media.JobStore
+	resolver      tools.ModelAdapterResolver
 }
 
 // NewDefaultExecutorRegistry creates a new DefaultExecutorRegistry.
@@ -66,6 +71,18 @@ func NewDefaultExecutorRegistryWithPool(authenticator core.Authenticator, allowP
 	}
 }
 
+// SetSearXNGClient configures the SearXNG search client for web search tools.
+func (r *DefaultExecutorRegistry) SetSearXNGClient(client *tools.SearXNGClient) {
+	r.searxngClient = client
+}
+
+// SetMediaServices configures media storage, job storage, and resolver for media generation tools.
+func (r *DefaultExecutorRegistry) SetMediaServices(mediaStore core.MediaStore, jobStore media.JobStore, resolver tools.ModelAdapterResolver) {
+	r.mediaStore = mediaStore
+	r.jobStore = jobStore
+	r.resolver = resolver
+}
+
 // GetExecutor instantiates or returns an executor for the specified tool definition.
 func (r *DefaultExecutorRegistry) GetExecutor(def core.ToolDefinition) (core.Executor, error) {
 	switch def.Executor.Type {
@@ -81,6 +98,21 @@ func (r *DefaultExecutorRegistry) GetExecutor(def core.ToolDefinition) (core.Exe
 			pool = tools.DefaultSQLConnectionPool()
 		}
 		return tools.NewSQLTemplateExecutor(def, pool), nil
+	case "searxng":
+		var cfg core.SearchConfig
+		if def.Executor.Template != "" {
+			_ = json.Unmarshal([]byte(def.Executor.Template), &cfg)
+		}
+		return tools.NewSearXNGExecutor(r.searxngClient, cfg), nil
+	case "media_generate":
+		client := tools.NewSafeHTTPClient(tools.SafeDialerConfig{AllowPrivate: r.allowPrivate}, 30*time.Second)
+		return tools.NewMediaToolExecutor(tools.MediaToolExecutorConfig{
+			MediaStore:   r.mediaStore,
+			JobStore:     r.jobStore,
+			Resolver:     r.resolver,
+			SSRFClient:   client,
+			LogicalModel: def.Executor.Template,
+		}), nil
 	default:
 		return nil, fmt.Errorf("unsupported executor type: %s", def.Executor.Type)
 	}
@@ -137,11 +169,22 @@ func (l *Loop) Run(ctx context.Context, state *core.ReqState, adapter core.Provi
 		return errors.New("nil chat request in state")
 	}
 
+	if state.Snapshot != nil {
+		if _, ok := core.SnapshotFromContext(ctx); !ok {
+			ctx = core.ContextWithSnapshot(ctx, state.Snapshot)
+		}
+	}
+
 	// 1. Resolve available tools from Snapshot for this AI App
 	availableTools := l.resolveTools(state)
 	state.ChatRequest.Tools = availableTools
 
-	for depth := 0; depth < l.cfg.MaxDepth; depth++ {
+	maxDepth := l.cfg.MaxDepth
+	if state.AIApp != nil && state.AIApp.Guardrails.MaxDepth > 0 {
+		maxDepth = state.AIApp.Guardrails.MaxDepth
+	}
+
+	for depth := 0; depth < maxDepth; depth++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -165,11 +208,72 @@ func (l *Loop) Run(ctx context.Context, state *core.ReqState, adapter core.Provi
 		}
 	}
 
-	return ErrMaxDepthExceeded
+	// Depth bound reached: rather than failing, force one last turn with tools
+	// disabled so the model summarizes what it gathered so far.
+	l.cfg.Logger.WarnContext(ctx, "agent loop max depth reached; requesting final summary",
+		"request_id", state.RequestID,
+		"project_id", state.ProjectID,
+		"env", state.Environment,
+		"max_depth", maxDepth,
+	)
+	state.ChatRequest.Tools = nil
+	state.ChatRequest.Messages = append(state.ChatRequest.Messages, core.ChatMessage{
+		Role: "user",
+		Content: "[System notice] The tool-call limit for this request has been reached. " +
+			"Do not call any more tools. Using the information gathered so far, give the best possible " +
+			"final answer, summarize your findings, and clearly mention anything you could not complete.",
+	})
+
+	if state.IsStreaming {
+		_, hasToolCalls, err := l.runStreamingTurn(ctx, maxDepth, state, adapter)
+		if err != nil {
+			return err
+		}
+		if hasToolCalls {
+			return ErrMaxDepthExceeded
+		}
+		return nil
+	}
+	_, hasToolCalls, err := l.runUnaryTurn(ctx, maxDepth, state, adapter)
+	if err != nil {
+		return err
+	}
+	if hasToolCalls {
+		return ErrMaxDepthExceeded
+	}
+	return nil
+}
+
+func (l *Loop) findToolDef(state *core.ReqState, toolName string) (*core.ToolDefinition, bool) {
+	if state.Snapshot != nil {
+		if def, ok := state.Snapshot.Tool(toolName); ok && def != nil {
+			return def, true
+		}
+	}
+	// Check if this is the built-in web search tool enabled on the app
+	if state.AIApp != nil && state.AIApp.Search.Enabled {
+		if toolName == "web_search" {
+			searchDef := tools.BuiltinSearchToolDefinition(state.AIApp.Search)
+			return &searchDef, true
+		}
+	}
+	// Check if this is one of the built-in media generation tools
+	switch toolName {
+	case "generate_image":
+		t := tools.BuiltinImageToolDefinition("image")
+		return &t, true
+	case "generate_speech":
+		t := tools.BuiltinSpeechToolDefinition("speech")
+		return &t, true
+	case "generate_video":
+		t := tools.BuiltinVideoToolDefinition("video")
+		return &t, true
+	}
+	return nil, false
 }
 
 func (l *Loop) resolveTools(state *core.ReqState) []core.ToolDefinition {
-	if state.Snapshot == nil || state.AIApp == nil || len(state.AIApp.ToolIDs) == 0 {
+	if state.Snapshot == nil || state.AIApp == nil {
 		return nil
 	}
 
@@ -177,8 +281,32 @@ func (l *Loop) resolveTools(state *core.ReqState) []core.ToolDefinition {
 	for _, toolID := range state.AIApp.ToolIDs {
 		if def, ok := state.Snapshot.Tool(toolID); ok && def != nil {
 			res = append(res, *def)
+		} else {
+			// Check built-in media tools referenced in ToolIDs
+			switch toolID {
+			case "generate_image":
+				res = append(res, tools.BuiltinImageToolDefinition("image"))
+			case "generate_speech":
+				res = append(res, tools.BuiltinSpeechToolDefinition("speech"))
+			case "generate_video":
+				res = append(res, tools.BuiltinVideoToolDefinition("video"))
+			}
 		}
 	}
+
+	if state.AIApp.Search.Enabled {
+		hasSearch := false
+		for _, t := range res {
+			if t.ID == "web_search" || t.Name == "web_search" {
+				hasSearch = true
+				break
+			}
+		}
+		if !hasSearch {
+			res = append(res, tools.BuiltinSearchToolDefinition(state.AIApp.Search))
+		}
+	}
+
 	return res
 }
 
@@ -199,10 +327,10 @@ func (l *Loop) runUnaryTurn(ctx context.Context, _ int, state *core.ReqState, ad
 
 	// Execute requested tools
 	for _, toolCall := range resp.Message.ToolCalls {
-		toolDef, ok := state.Snapshot.Tool(toolCall.Name)
+		toolDef, ok := l.findToolDef(state, toolCall.Name)
 		if !ok {
 			// Also check by ID
-			toolDef, ok = state.Snapshot.Tool(toolCall.ID)
+			toolDef, ok = l.findToolDef(state, toolCall.ID)
 		}
 
 		if !ok || toolDef == nil {
@@ -212,10 +340,11 @@ func (l *Loop) runUnaryTurn(ctx context.Context, _ int, state *core.ReqState, ad
 
 		// Tool Authorization check
 		if toolDef.Authorization != "" && l.cfg.PolicyEvaluator != nil {
-			allowed, err := l.cfg.PolicyEvaluator.Evaluate(ctx, toolDef.Authorization, state.Identity, map[string]any{
+			evalMeta := map[string]any{
 				"tool": toolDef.Name,
 				"app":  state.AIAppID,
-			})
+			}
+			allowed, err := l.cfg.PolicyEvaluator.Evaluate(ctx, toolDef.Authorization, state.Identity, evalMeta)
 			if err != nil || !allowed {
 				l.appendToolError(state, toolCall.ID, fmt.Sprintf("tool %q authorization denied by policy %q", toolCall.Name, toolDef.Authorization))
 				continue
@@ -349,14 +478,19 @@ func (l *Loop) runStreamingTurn(ctx context.Context, _ int, state *core.ReqState
 			continue
 		}
 
-		if event.Type == "done" && len(accumulatedToolCalls) == 0 {
-			// Model finished completion without requesting tools
-			select {
-			case <-ctx.Done():
-				return false, false, ctx.Err()
-			case state.StreamChan <- event:
+		if event.Type == "done" {
+			if len(accumulatedToolCalls) == 0 {
+				// Model finished completion without requesting tools
+				select {
+				case <-ctx.Done():
+					return false, false, ctx.Err()
+				case state.StreamChan <- event:
+				}
+				return false, false, nil
 			}
-			return false, false, nil
+			// When tool calls are accumulated, do not forward "done" to the client yet,
+			// as the agent loop will execute the tools and stream the model's follow-up turn.
+			continue
 		}
 
 		// Forward any other events (such as "usage")
@@ -368,6 +502,11 @@ func (l *Loop) runStreamingTurn(ctx context.Context, _ int, state *core.ReqState
 	}
 
 	if len(accumulatedToolCalls) == 0 {
+		select {
+		case <-ctx.Done():
+			return false, false, ctx.Err()
+		case state.StreamChan <- core.StreamEvent{Type: "done", RequestID: state.RequestID}:
+		}
 		return false, false, nil
 	}
 
@@ -379,9 +518,9 @@ func (l *Loop) runStreamingTurn(ctx context.Context, _ int, state *core.ReqState
 	})
 
 	for _, toolCall := range accumulatedToolCalls {
-		toolDef, ok := state.Snapshot.Tool(toolCall.Name)
+		toolDef, ok := l.findToolDef(state, toolCall.Name)
 		if !ok {
-			toolDef, ok = state.Snapshot.Tool(toolCall.ID)
+			toolDef, ok = l.findToolDef(state, toolCall.ID)
 		}
 
 		if !ok || toolDef == nil {
@@ -391,12 +530,13 @@ func (l *Loop) runStreamingTurn(ctx context.Context, _ int, state *core.ReqState
 
 		// Tool Authorization check
 		if toolDef.Authorization != "" && l.cfg.PolicyEvaluator != nil {
-			allowed, err := l.cfg.PolicyEvaluator.Evaluate(ctx, toolDef.Authorization, state.Identity, map[string]any{
+			evalMeta := map[string]any{
 				"tool": toolDef.Name,
 				"app":  state.AIAppID,
-			})
+			}
+			allowed, err := l.cfg.PolicyEvaluator.Evaluate(ctx, toolDef.Authorization, state.Identity, evalMeta)
 			if err != nil || !allowed {
-				l.appendToolError(state, toolCall.ID, fmt.Sprintf("tool %q authorization denied by policy", toolCall.Name))
+				l.appendToolError(state, toolCall.ID, fmt.Sprintf("tool %q authorization denied by policy %q", toolCall.Name, toolDef.Authorization))
 				continue
 			}
 		}

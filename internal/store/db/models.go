@@ -36,6 +36,7 @@ type AiAppVersions struct {
 	IsActive       bool               `json:"is_active"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	MemoryConfig   []byte             `json:"memory_config"`
+	SearchConfig   []byte             `json:"search_config"`
 }
 
 type AiApps struct {
@@ -47,6 +48,21 @@ type AiApps struct {
 	ActiveVersion int32              `json:"active_version"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	AuthConfig    []byte             `json:"auth_config"`
+	ModelRoutes   []byte             `json:"model_routes"`
+}
+
+type AppApiKeys struct {
+	ID          string             `json:"id"`
+	AppID       string             `json:"app_id"`
+	ProjectID   string             `json:"project_id"`
+	Environment string             `json:"environment"`
+	Name        string             `json:"name"`
+	KeyPrefix   string             `json:"key_prefix"`
+	KeyHash     string             `json:"key_hash"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
 }
 
 type AuditLog struct {
@@ -122,6 +138,10 @@ type ModelRoutings struct {
 	FallbackDeployments []byte             `json:"fallback_deployments"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	InputCostPer1m      pgtype.Numeric     `json:"input_cost_per_1m"`
+	OutputCostPer1m     pgtype.Numeric     `json:"output_cost_per_1m"`
+	InputModalities     []string           `json:"input_modalities"`
+	OutputModalities    []string           `json:"output_modalities"`
 }
 
 type Policies struct {

@@ -1,4 +1,4 @@
-# T062 — PostgreSQL + pgvector Schema Migration, sqlc Queries & PGVectorMemoryProvider
+# T062 - PostgreSQL + pgvector Schema Migration, sqlc Queries & PGVectorMemoryProvider
 
 ## Status
 Completed

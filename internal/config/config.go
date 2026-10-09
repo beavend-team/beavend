@@ -37,6 +37,22 @@ type Config struct {
 	Admin    AdminConfig    `json:"admin" yaml:"admin"`
 	Log      LogConfig      `json:"log" yaml:"log"`
 	Usage    UsageConfig    `json:"usage" yaml:"usage"`
+	Search   SearchConfig   `json:"search" yaml:"search"`
+	Pricing  PricingConfig  `json:"pricing" yaml:"pricing"`
+}
+
+// PricingConfig holds model pricing and background catalog synchronization settings.
+type PricingConfig struct {
+	AutoSync     bool          `json:"auto_sync" yaml:"auto_sync"`
+	CatalogURL   string        `json:"catalog_url" yaml:"catalog_url"`
+	SyncInterval time.Duration `json:"sync_interval" yaml:"sync_interval"`
+}
+
+// SearchConfig holds SearXNG search engine integration settings.
+type SearchConfig struct {
+	SearxngURL string        `json:"searxng_url" yaml:"searxng_url"`
+	Enabled    bool          `json:"enabled" yaml:"enabled"`
+	Timeout    time.Duration `json:"timeout" yaml:"timeout"`
 }
 
 // HTTPConfig holds web server settings.
@@ -135,6 +151,16 @@ func DefaultConfig() *Config {
 			BatchSize:      100,
 			FlushInterval:  500 * time.Millisecond,
 			RollupInterval: 1 * time.Minute,
+		},
+		Search: SearchConfig{
+			SearxngURL: "http://localhost:8081",
+			Enabled:    true,
+			Timeout:    8 * time.Second,
+		},
+		Pricing: PricingConfig{
+			AutoSync:     false,
+			CatalogURL:   "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
+			SyncInterval: 24 * time.Hour,
 		},
 	}
 }
@@ -263,6 +289,30 @@ func LoadFileWithLookup(filePath string, lookup func(string) string) (*Config, e
 			return nil, fmt.Errorf("invalid BEAVEND_USAGE_ROLLUP_INTERVAL: %w", err)
 		}
 		cfg.Usage.RollupInterval = d
+	}
+
+	if val := lookup("BEAVEND_SEARXNG_URL"); val != "" {
+		cfg.Search.SearxngURL = strings.TrimSpace(val)
+	}
+	if val := lookup("BEAVEND_SEARXNG_ENABLED"); val != "" {
+		cfg.Search.Enabled = strings.EqualFold(strings.TrimSpace(val), "true") || strings.TrimSpace(val) == "1"
+	}
+	if val := lookup("BEAVEND_SEARXNG_TIMEOUT"); val != "" {
+		if d, err := time.ParseDuration(strings.TrimSpace(val)); err == nil {
+			cfg.Search.Timeout = d
+		}
+	}
+
+	if val := lookup("BEAVEND_PRICING_AUTO_SYNC"); val != "" {
+		cfg.Pricing.AutoSync = strings.EqualFold(strings.TrimSpace(val), "true") || strings.TrimSpace(val) == "1"
+	}
+	if val := lookup("BEAVEND_PRICING_CATALOG_URL"); val != "" {
+		cfg.Pricing.CatalogURL = strings.TrimSpace(val)
+	}
+	if val := lookup("BEAVEND_PRICING_SYNC_INTERVAL"); val != "" {
+		if d, err := time.ParseDuration(strings.TrimSpace(val)); err == nil {
+			cfg.Pricing.SyncInterval = d
+		}
 	}
 
 	if err := cfg.Validate(); err != nil {

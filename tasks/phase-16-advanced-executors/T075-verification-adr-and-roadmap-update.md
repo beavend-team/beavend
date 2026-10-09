@@ -1,4 +1,4 @@
-# T075 — Verification, ADR-014 & Roadmap Update
+# T075 - Verification, ADR-014 & Roadmap Update
 
 ## Status
 Completed

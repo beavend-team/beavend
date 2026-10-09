@@ -476,3 +476,44 @@ func (h *Handler) HandleTestTool(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, res)
 }
 
+func (h *Handler) HandleSetActiveToolVersion(w http.ResponseWriter, r *http.Request) {
+	if h.svc.queries == nil {
+		writeError(w, http.StatusInternalServerError, "database_unavailable", "database not configured")
+		return
+	}
+	toolID := chi.URLParam(r, "id")
+	projectID, env := getProjectAndEnv(r)
+
+	var req SetActiveVersionRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.Version <= 0 {
+		writeError(w, http.StatusBadRequest, "bad_request", "valid version is required")
+		return
+	}
+
+	_, err := h.svc.queries.GetToolVersion(r.Context(), db.GetToolVersionParams{
+		ToolID:  toolID,
+		Version: req.Version,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", "tool version not found")
+		return
+	}
+
+	updated, err := h.svc.queries.UpdateToolActiveVersion(r.Context(), db.UpdateToolActiveVersionParams{
+		ID:            toolID,
+		ActiveVersion: req.Version,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "database_error", err.Error())
+		return
+	}
+
+	_, _ = h.svc.InvalidateSnapshot(r.Context(), projectID, env)
+	h.svc.RecordAudit(r.Context(), projectID, env, "set_active_tool_version", "tool", toolID, req)
+
+	writeJSON(w, http.StatusOK, updated)
+}
+

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/beavend/beavend/internal/core"
 	"github.com/beavend/beavend/internal/identity"
+	"github.com/beavend/beavend/internal/media"
 	"github.com/beavend/beavend/internal/prompts"
 	"github.com/beavend/beavend/internal/routing"
 	"github.com/beavend/beavend/internal/runtime/stages"
@@ -467,3 +469,169 @@ func TestHandler_UsageRecording(t *testing.T) {
 		assert.Equal(t, 15, recorded[1].Usage.TotalTokens)
 	})
 }
+
+func TestHandler_HandleCancel(t *testing.T) {
+	_, _, handler := setupTestEnvironment(t)
+
+	// Save a suspended state
+	susp := &tools.SuspendedState{
+		ProjectID:        "proj_1",
+		Environment:      "development",
+		RequestID:        "req_to_cancel",
+		AIAppID:          "assistant",
+		Subject:          "usr_bob",
+		SnapshotRevision: 1,
+	}
+	ctx := context.Background()
+	err := handler.ContinuationManager().Store().Save(ctx, susp, 5*time.Minute)
+	require.NoError(t, err)
+
+	token, err := handler.ContinuationManager().IssueConfirmationToken(susp, core.ToolCall{ID: "t1"}, 5*time.Minute)
+	require.NoError(t, err)
+
+	r := chi.NewRouter()
+	r.Post("/v1/apps/{ai_app_id}/cancel", handler.HandleCancel)
+
+	// 1. Cancel via continuation_token
+	body := `{"continuation_token":"` + token + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/cancel", bytes.NewBufferString(body))
+	req.Header.Set("X-Project-ID", "proj_1")
+	req = req.WithContext(identity.ContextWithIdentity(req.Context(), &core.Identity{Subject: "usr_bob", Project: "proj_1"}))
+	rec := httptest.NewRecorder()
+
+	r.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "cancelled", resp["status"])
+	assert.Equal(t, "req_to_cancel", resp["request_id"])
+
+	// State should now be deleted from store
+	_, err = handler.ContinuationManager().Store().Get(ctx, "proj_1", "req_to_cancel")
+	assert.ErrorIs(t, err, tools.ErrStateNotFound)
+}
+
+func TestHandler_HandleGetApp(t *testing.T) {
+	_, _, handler := setupTestEnvironment(t)
+
+	r := chi.NewRouter()
+	r.Get("/v1/apps/{ai_app_id}", handler.HandleGetApp)
+
+	// Valid app
+	req := httptest.NewRequest(http.MethodGet, "/v1/apps/assistant", nil)
+	req.Header.Set("X-Project-ID", "proj_1")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "assistant", resp["id"])
+	assert.Equal(t, "Test Assistant", resp["name"])
+	assert.Equal(t, "active", resp["status"])
+
+	// Non-existent app
+	reqBad := httptest.NewRequest(http.MethodGet, "/v1/apps/non_existent", nil)
+	reqBad.Header.Set("X-Project-ID", "proj_1")
+	recBad := httptest.NewRecorder()
+	r.ServeHTTP(recBad, reqBad)
+	assert.Equal(t, http.StatusNotFound, recBad.Code)
+}
+
+func TestHandler_HandleGetJob(t *testing.T) {
+	resolver := &mockSnapshotResolver{snapshots: make(map[string]*core.Snapshot)}
+	jobStore := media.NewInMemoryJobStore()
+
+	handler := NewHandler(resolver, nil, HandlerOptions{
+		JobStore: jobStore,
+	})
+
+	r := chi.NewRouter()
+	r.Get("/v1/apps/{ai_app_id}/jobs/{job_id}", handler.HandleGetJob)
+
+	ctx := context.Background()
+	_ = jobStore.CreateJob(ctx, &media.MediaJob{
+		ID:        "job_123",
+		ProjectID: "proj_1",
+		AIAppID:   "assistant",
+		Status:    "completed",
+		Result: &core.GenerateResponse{
+			Items: []core.GeneratedItem{
+				{Index: 0, URL: "http://localhost:8080/v1/media/med_123.mp4"},
+			},
+		},
+	}, time.Hour)
+
+	// Valid job query
+	req := httptest.NewRequest(http.MethodGet, "/v1/apps/assistant/jobs/job_123", nil)
+	req.Header.Set("X-Project-ID", "proj_1")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var job media.MediaJob
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &job))
+	assert.Equal(t, "job_123", job.ID)
+	assert.Equal(t, "completed", job.Status)
+	assert.Len(t, job.Result.Items, 1)
+
+	// Non-existent job
+	reqBad := httptest.NewRequest(http.MethodGet, "/v1/apps/assistant/jobs/job_nonexistent", nil)
+	reqBad.Header.Set("X-Project-ID", "proj_1")
+	recBad := httptest.NewRecorder()
+	r.ServeHTTP(recBad, reqBad)
+	assert.Equal(t, http.StatusNotFound, recBad.Code)
+
+	// Wrong app
+	reqWrongApp := httptest.NewRequest(http.MethodGet, "/v1/apps/other_app/jobs/job_123", nil)
+	reqWrongApp.Header.Set("X-Project-ID", "proj_1")
+	recWrongApp := httptest.NewRecorder()
+	r.ServeHTTP(recWrongApp, reqWrongApp)
+	assert.Equal(t, http.StatusNotFound, recWrongApp.Code)
+}
+
+func TestHandler_HandleGetMedia(t *testing.T) {
+	tempDir := t.TempDir()
+	signingKey := "test-secret-key-1234567890123456"
+	mediaStore, err := media.NewLocalMediaStore(media.LocalMediaStoreConfig{
+		BaseDir:    tempDir,
+		SigningKey: signingKey,
+		BaseURL:    "/v1/media",
+	})
+	require.NoError(t, err)
+
+	handler := NewHandler(nil, nil, HandlerOptions{
+		MediaStore: mediaStore,
+	})
+
+	r := chi.NewRouter()
+	r.Get("/v1/media/{project_id}/{media_id}", handler.HandleGetMedia)
+
+	ctx := context.Background()
+	ref, err := mediaStore.Put(ctx, "proj_test", strings.NewReader("sample image content"), "image/png", "sample.png")
+	require.NoError(t, err)
+
+	// Valid signed URL request
+	req := httptest.NewRequest(http.MethodGet, ref.URL, nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "image/png", rec.Header().Get("Content-Type"))
+	assert.Equal(t, "sample image content", rec.Body.String())
+
+	// Invalid signature
+	reqBadSig := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v1/media/proj_test/%s?exp=%d&sig=invalid", ref.MediaID, time.Now().Add(time.Hour).Unix()), nil)
+	recBadSig := httptest.NewRecorder()
+	r.ServeHTTP(recBadSig, reqBadSig)
+	assert.Equal(t, http.StatusUnauthorized, recBadSig.Code)
+
+	// Missing media
+	sigURL, _ := mediaStore.SignedURL(ctx, "proj_test", "nonexistent_media", time.Hour)
+	reqNotFound := httptest.NewRequest(http.MethodGet, sigURL, nil)
+	recNotFound := httptest.NewRecorder()
+	r.ServeHTTP(recNotFound, reqNotFound)
+	assert.Equal(t, http.StatusNotFound, recNotFound.Code)
+}
+
+

@@ -18,14 +18,78 @@ type AIApp struct {
 	PromptID       string          `json:"prompt_id" yaml:"prompt_id"`
 	PromptVersion  int             `json:"prompt_version" yaml:"prompt_version"`
 	ModelRoutingID string          `json:"model_routing_id" yaml:"model_routing_id"`
+	ModelRoutes    *ModelRoutes    `json:"model_routes,omitempty" yaml:"model_routes,omitempty"`
 	ToolIDs        []string        `json:"tool_ids" yaml:"tool_ids"`
 	Limits         []LimitRule     `json:"limits" yaml:"limits"`
 	Cache          CacheConfig     `json:"cache" yaml:"cache"`
 	Guardrails     GuardrailConfig `json:"guardrails" yaml:"guardrails"`
 	Memory         MemoryConfig    `json:"memory" yaml:"memory"`
+	Search         SearchConfig    `json:"search,omitempty" yaml:"search,omitempty"`
 	ResponseSchema string          `json:"response_schema,omitempty" yaml:"response_schema,omitempty"`
+	AuthConfig     *AuthConfig     `json:"auth,omitempty" yaml:"auth,omitempty"`
 	CreatedAt      time.Time       `json:"created_at" yaml:"created_at"`
 	UpdatedAt      time.Time       `json:"updated_at" yaml:"updated_at"`
+}
+
+// ModelRoutes defines the routing rules and default logical model for an AI App.
+type ModelRoutes struct {
+	Default string           `json:"default" yaml:"default"`
+	Rules   []ModelRouteRule `json:"rules,omitempty" yaml:"rules,omitempty"`
+}
+
+// ModelRouteRule specifies a condition and the logical model to use when matched.
+type ModelRouteRule struct {
+	When RouteCondition `json:"when" yaml:"when"`
+	Use  string         `json:"use" yaml:"use"`
+}
+
+// RouteCondition defines the matching criteria for a model route rule.
+type RouteCondition struct {
+	InputHas []string          `json:"input_has,omitempty" yaml:"input_has,omitempty"`
+	Output   []string          `json:"output,omitempty" yaml:"output,omitempty"`
+	Metadata map[string]string `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+	Expr     string            `json:"expr,omitempty" yaml:"expr,omitempty"`
+}
+
+// UnmarshalJSON handles both auth and auth_config JSON keys.
+func (a *AIApp) UnmarshalJSON(data []byte) error {
+	type rawApp AIApp
+	var raw struct {
+		rawApp
+		AuthAlt *AuthConfig `json:"auth_config,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*a = AIApp(raw.rawApp)
+	if a.AuthConfig == nil && raw.AuthAlt != nil {
+		a.AuthConfig = raw.AuthAlt
+	}
+	return nil
+}
+
+// SearchConfig defines web search capabilities for an AI App via SearXNG.
+type SearchConfig struct {
+	Enabled    bool     `json:"enabled" yaml:"enabled"`
+	MaxResults int      `json:"max_results,omitempty" yaml:"max_results,omitempty"`
+	Categories []string `json:"categories,omitempty" yaml:"categories,omitempty"`
+	Engines    []string `json:"engines,omitempty" yaml:"engines,omitempty"`
+	TimeRange  string   `json:"time_range,omitempty" yaml:"time_range,omitempty"`
+	SafeSearch int      `json:"safe_search,omitempty" yaml:"safe_search,omitempty"`
+}
+
+// AppAPIKey represents an authorized API key for direct server-to-server AI App access.
+type AppAPIKey struct {
+	ID          string     `json:"id" yaml:"id"`
+	AppID       string     `json:"app_id" yaml:"app_id"`
+	ProjectID   string     `json:"project_id" yaml:"project_id"`
+	Environment string     `json:"environment" yaml:"environment"`
+	Name        string     `json:"name" yaml:"name"`
+	KeyPrefix   string     `json:"key_prefix" yaml:"key_prefix"`
+	KeyHash     string     `json:"-" yaml:"-"`
+	CreatedAt   time.Time  `json:"created_at" yaml:"created_at"`
+	LastUsedAt  *time.Time `json:"last_used_at,omitempty" yaml:"last_used_at,omitempty"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
 }
 
 // LimitRule defines a rate or quota limit for a resource over a time window.
@@ -34,6 +98,7 @@ type LimitRule struct {
 	Window        time.Duration `json:"window" yaml:"window"`
 	Max           int64         `json:"max" yaml:"max"`
 	TierCondition string        `json:"tier_condition,omitempty" yaml:"tier_condition,omitempty"` // CEL expression
+	Scope         string        `json:"scope,omitempty" yaml:"scope,omitempty"`                   // "user" (default) or "project"
 }
 
 // UnmarshalJSON handles both integer nanoseconds/seconds and human duration strings like "1m", "1h", "1d".
@@ -43,6 +108,7 @@ func (r *LimitRule) UnmarshalJSON(data []byte) error {
 		Window        any    `json:"window"`
 		Max           int64  `json:"max"`
 		TierCondition string `json:"tier_condition,omitempty"`
+		Scope         string `json:"scope,omitempty"`
 	}
 
 	var raw rawLimitRule
@@ -53,6 +119,7 @@ func (r *LimitRule) UnmarshalJSON(data []byte) error {
 	r.Resource = raw.Resource
 	r.Max = raw.Max
 	r.TierCondition = raw.TierCondition
+	r.Scope = raw.Scope
 
 	switch v := raw.Window.(type) {
 	case string:
@@ -116,9 +183,10 @@ func ParseWindowDuration(s string) (time.Duration, error) {
 
 // CacheConfig specifies caching behavior for an AI App.
 type CacheConfig struct {
-	Enabled bool   `json:"enabled" yaml:"enabled"`
-	TTL     int    `json:"ttl" yaml:"ttl"`     // in seconds
-	Scope   string `json:"scope" yaml:"scope"` // "user", "shared"
+	Enabled    bool     `json:"enabled" yaml:"enabled"`
+	TTL        int      `json:"ttl" yaml:"ttl"`     // in seconds
+	Scope      string   `json:"scope" yaml:"scope"` // "user", "shared"
+	Modalities []string `json:"modalities,omitempty" yaml:"modalities,omitempty"`
 }
 
 // GuardrailConfig defines safety and guardrail behavior.
@@ -129,6 +197,7 @@ type GuardrailConfig struct {
 	PIIRedaction     bool     `json:"pii_redaction" yaml:"pii_redaction"`
 	InjectionDefense bool     `json:"injection_defense" yaml:"injection_defense"`
 	Rules            []string `json:"rules,omitempty" yaml:"rules,omitempty"`
+	MaxDepth         int      `json:"max_depth,omitempty" yaml:"max_depth,omitempty"` // Max agent loop iterations (default: 5)
 }
 
 // MemoryConfig defines memory and conversation context settings for an AI App.

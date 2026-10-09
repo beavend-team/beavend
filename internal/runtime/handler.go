@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	"github.com/beavend/beavend/internal/core"
 	"github.com/beavend/beavend/internal/guardrails"
 	"github.com/beavend/beavend/internal/identity"
+	"github.com/beavend/beavend/internal/media"
 	"github.com/beavend/beavend/internal/memory"
 	"github.com/beavend/beavend/internal/runtime/agent"
 	"github.com/beavend/beavend/internal/runtime/stream"
@@ -47,6 +49,8 @@ type Handler struct {
 	cacheStore      core.CacheStore
 	threadStore     core.ThreadStore
 	memoryEngine    *memory.Engine
+	jobStore        media.JobStore
+	mediaStore      core.MediaStore
 	defaultEnv      string
 }
 
@@ -60,6 +64,8 @@ type HandlerOptions struct {
 	CacheStore         core.CacheStore
 	ThreadStore        core.ThreadStore
 	MemoryEngine       *memory.Engine
+	JobStore           media.JobStore
+	MediaStore         core.MediaStore
 }
 
 // NewHandler creates a new runtime Handler.
@@ -72,6 +78,8 @@ func NewHandler(resolver SnapshotResolver, pipeline *Pipeline, opts ...HandlerOp
 	var cacheStore core.CacheStore
 	var threadStore core.ThreadStore
 	var memoryEngine *memory.Engine
+	var jobStore media.JobStore
+	var mediaStore core.MediaStore
 
 	if len(opts) > 0 {
 		if opts[0].DefaultEnvironment != "" {
@@ -86,6 +94,8 @@ func NewHandler(resolver SnapshotResolver, pipeline *Pipeline, opts ...HandlerOp
 		cacheStore = opts[0].CacheStore
 		threadStore = opts[0].ThreadStore
 		memoryEngine = opts[0].MemoryEngine
+		jobStore = opts[0].JobStore
+		mediaStore = opts[0].MediaStore
 	}
 
 	if continuationMgr == nil {
@@ -106,6 +116,8 @@ func NewHandler(resolver SnapshotResolver, pipeline *Pipeline, opts ...HandlerOp
 		cacheStore:      cacheStore,
 		threadStore:     threadStore,
 		memoryEngine:    memoryEngine,
+		jobStore:        jobStore,
+		mediaStore:      mediaStore,
 		defaultEnv:      defaultEnv,
 	}
 }
@@ -113,6 +125,18 @@ func NewHandler(resolver SnapshotResolver, pipeline *Pipeline, opts ...HandlerOp
 // ContinuationManager returns the handler's continuation manager.
 func (h *Handler) ContinuationManager() *tools.ContinuationManager {
 	return h.continuationMgr
+}
+
+func writeRateLimitHeaders(w http.ResponseWriter, meta map[string]any) {
+	if meta == nil {
+		return
+	}
+	if lim, ok := meta["ratelimit_limit"].(int64); ok && lim > 0 {
+		w.Header().Set("X-RateLimit-Limit", strconv.FormatInt(lim, 10))
+	}
+	if reset, ok := meta["ratelimit_reset"].(int64); ok && reset > 0 {
+		w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(reset, 10))
+	}
 }
 
 // HandleChat handles synchronous unary chat requests (POST /v1/apps/{ai_app_id}/chat).
@@ -129,6 +153,10 @@ func (h *Handler) HandleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	writeRateLimitHeaders(w, state.Metadata)
+	if state.SelectedModel != "" {
+		w.Header().Set("X-Beavend-Model", state.SelectedModel)
+	}
 	if state.Metadata != nil {
 		if hit, ok := state.Metadata["cache_hit"].(bool); ok && hit {
 			w.Header().Set("X-Cache", "HIT")
@@ -138,6 +166,9 @@ func (h *Handler) HandleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	if state.ChatResponse != nil {
+		if state.SelectedModel != "" && state.ChatResponse.Model == "" {
+			state.ChatResponse.Model = state.SelectedModel
+		}
 		if state.ChatRequest != nil && state.ChatRequest.ThreadID != "" {
 			state.ChatResponse.ThreadID = state.ChatRequest.ThreadID
 			if h.threadStore != nil && state.Error == nil {
@@ -195,6 +226,10 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	writeRateLimitHeaders(w, state.Metadata)
+	if state.SelectedModel != "" {
+		w.Header().Set("X-Beavend-Model", state.SelectedModel)
+	}
 	if state.Metadata != nil {
 		if hit, ok := state.Metadata["cache_hit"].(bool); ok && hit {
 			w.Header().Set("X-Cache", "HIT")
@@ -233,6 +268,9 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		)
 
 		for ev := range origChan {
+			if ev.Model == "" {
+				ev.Model = state.SelectedModel
+			}
 			if ev.Type == "usage" && ev.Usage != nil {
 				usageMu.Lock()
 				capturedUsage = *ev.Usage
@@ -374,7 +412,7 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 
 	select {
 	case <-done:
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(2 * time.Second):
 	}
 
 	usageMu.Lock()
@@ -442,6 +480,9 @@ func (h *Handler) cacheChatResponse(ctx context.Context, state *core.ReqState, r
 	if h.cacheStore == nil || state.AIApp == nil || resp == nil {
 		return
 	}
+	if !cache.ShouldCacheResponse(state.ChatRequest, resp, state.AIApp) {
+		return
+	}
 	var key string
 	if state.Metadata != nil {
 		if k, ok := state.Metadata["cache_key"].(string); ok && k != "" {
@@ -449,7 +490,7 @@ func (h *Handler) cacheChatResponse(ctx context.Context, state *core.ReqState, r
 		}
 	}
 	if key == "" {
-		hash, err := cache.ComputeRequestHash(state.ChatRequest, state.AIApp)
+		hash, err := cache.ComputeRequestHash(state.ChatRequest, state.AIApp, state.SelectedModel)
 		if err != nil {
 			return
 		}
@@ -504,6 +545,213 @@ func (h *Handler) evaluateOutputGuardrails(ctx context.Context, state *core.ReqS
 	}
 
 	return engine.EvaluateOutput(ctx, content)
+}
+
+// CancelRequestBody represents the payload to cancel an active or suspended request.
+type CancelRequestBody struct {
+	RequestID         string `json:"request_id,omitempty"`
+	ContinuationToken string `json:"continuation_token,omitempty"`
+}
+
+// HandleCancel handles cancelling an active or suspended request (POST /v1/apps/{ai_app_id}/cancel).
+func (h *Handler) HandleCancel(w http.ResponseWriter, r *http.Request) {
+	reqID := getOrGenerateRequestID(r)
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req CancelRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeRawError(w, "invalid_argument", "invalid request body", reqID)
+		return
+	}
+
+	targetReqID := strings.TrimSpace(req.RequestID)
+	projectID := strings.TrimSpace(r.Header.Get("X-Project-ID"))
+	id, _ := identity.FromContext(r.Context())
+	if id != nil && id.Project != "" && projectID == "" {
+		projectID = id.Project
+	}
+	if snap, ok := core.SnapshotFromContext(r.Context()); ok && snap != nil && projectID == "" {
+		projectID = snap.ProjectID
+	}
+
+	if req.ContinuationToken != "" {
+		claims, err := h.continuationMgr.ValidateConfirmationToken(req.ContinuationToken)
+		if err != nil {
+			h.writeRawError(w, continuationErrorCode(err), fmt.Sprintf("continuation validation failed: %v", err), reqID)
+			return
+		}
+		if claims.Subject != "" && id != nil && id.Subject != "" && claims.Subject != id.Subject {
+			h.writeRawError(w, "forbidden", fmt.Sprintf("token subject %q != caller subject %q", claims.Subject, id.Subject), reqID)
+			return
+		}
+		if claims.ProjectID != "" {
+			projectID = claims.ProjectID
+		}
+		if targetReqID == "" {
+			targetReqID = claims.RequestID
+		}
+	}
+
+	if targetReqID == "" {
+		h.writeRawError(w, "invalid_argument", "request_id or continuation_token is required", reqID)
+		return
+	}
+
+	if h.continuationMgr != nil && h.continuationMgr.Store() != nil && projectID != "" {
+		_ = h.continuationMgr.Store().Delete(r.Context(), projectID, targetReqID)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":     "cancelled",
+		"request_id": targetReqID,
+	})
+}
+
+// HandleGetApp returns the AI App metadata from snapshot (GET /v1/apps/{ai_app_id}).
+func (h *Handler) HandleGetApp(w http.ResponseWriter, r *http.Request) {
+	reqID := getOrGenerateRequestID(r)
+	appID := chi.URLParam(r, "ai_app_id")
+	if appID == "" {
+		h.writeRawError(w, "invalid_argument", "missing ai_app_id parameter", reqID)
+		return
+	}
+
+	var snap *core.Snapshot
+	if s, ok := core.SnapshotFromContext(r.Context()); ok && s != nil {
+		snap = s
+	} else {
+		projectID := strings.TrimSpace(r.Header.Get("X-Project-ID"))
+		env := strings.TrimSpace(r.Header.Get("X-Environment"))
+		if env == "" {
+			env = h.defaultEnv
+		}
+		if h.resolver != nil && projectID != "" {
+			snap, _ = h.resolver.Get(projectID, env)
+		}
+	}
+
+	if snap == nil {
+		h.writeRawError(w, "unavailable", "configuration snapshot not found", reqID)
+		return
+	}
+
+	app, ok := snap.App(appID)
+	if !ok || app == nil {
+		h.writeRawError(w, "not_found", fmt.Sprintf("ai app %q not found", appID), reqID)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"id":               app.ID,
+		"name":             app.Name,
+		"model_routing_id": app.ModelRoutingID,
+		"status":           "active",
+		"created_at":       app.CreatedAt,
+		"updated_at":       app.UpdatedAt,
+	})
+}
+
+// HandleGetJob returns the status and result of an async media job (GET /v1/apps/{ai_app_id}/jobs/{job_id}).
+func (h *Handler) HandleGetJob(w http.ResponseWriter, r *http.Request) {
+	reqID := getOrGenerateRequestID(r)
+	if h.jobStore == nil {
+		h.writeRawError(w, "unavailable", "job store not configured", reqID)
+		return
+	}
+
+	jobID := chi.URLParam(r, "job_id")
+	if jobID == "" {
+		h.writeRawError(w, "invalid_argument", "missing job_id parameter", reqID)
+		return
+	}
+
+	var projectID string
+	if snap, ok := core.SnapshotFromContext(r.Context()); ok && snap != nil {
+		projectID = snap.ProjectID
+	} else {
+		projectID = strings.TrimSpace(r.Header.Get("X-Project-ID"))
+	}
+
+	job, err := h.jobStore.GetJob(r.Context(), projectID, jobID)
+	if err != nil {
+		if errors.Is(err, media.ErrJobNotFound) {
+			h.writeRawError(w, "not_found", fmt.Sprintf("job %q not found", jobID), reqID)
+			return
+		}
+		h.writeRawError(w, "internal", fmt.Sprintf("failed to get job: %v", err), reqID)
+		return
+	}
+
+	// Verify that the job belongs to the requested app if ai_app_id is present
+	appID := chi.URLParam(r, "ai_app_id")
+	if appID != "" && job.AIAppID != "" && job.AIAppID != appID {
+		h.writeRawError(w, "not_found", fmt.Sprintf("job %q not found for app %q", jobID, appID), reqID)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(job)
+}
+
+// HandleGetMedia serves a media file with signature verification (GET /v1/media/{project_id}/{media_id}).
+func (h *Handler) HandleGetMedia(w http.ResponseWriter, r *http.Request) {
+	reqID := getOrGenerateRequestID(r)
+	if h.mediaStore == nil {
+		h.writeRawError(w, "not_implemented", "media storage not configured", reqID)
+		return
+	}
+	projectID := chi.URLParam(r, "project_id")
+	mediaID := chi.URLParam(r, "media_id")
+	if projectID == "" || mediaID == "" {
+		h.writeRawError(w, "invalid_argument", "project_id and media_id are required", reqID)
+		return
+	}
+
+	expStr := r.URL.Query().Get("exp")
+	sig := r.URL.Query().Get("sig")
+	if expStr == "" || sig == "" {
+		h.writeRawError(w, "unauthenticated", "signature and expiration are required", reqID)
+		return
+	}
+	exp, err := strconv.ParseInt(expStr, 10, 64)
+	if err != nil {
+		h.writeRawError(w, "invalid_argument", "invalid expiration timestamp", reqID)
+		return
+	}
+
+	if localStore, ok := h.mediaStore.(*media.LocalMediaStore); ok {
+		if err := localStore.VerifySignature(projectID, mediaID, exp, sig); err != nil {
+			h.writeRawError(w, "unauthenticated", "invalid or expired media signature", reqID)
+			return
+		}
+	}
+
+	rc, ref, err := h.mediaStore.Get(r.Context(), projectID, mediaID)
+	if err != nil {
+		if errors.Is(err, media.ErrMediaNotFound) {
+			h.writeRawError(w, "not_found", fmt.Sprintf("media %q not found", mediaID), reqID)
+			return
+		}
+		h.writeRawError(w, "internal", fmt.Sprintf("failed to get media: %v", err), reqID)
+		return
+	}
+	defer rc.Close()
+
+	if ref != nil && ref.MimeType != "" {
+		w.Header().Set("Content-Type", ref.MimeType)
+	} else {
+		w.Header().Set("Content-Type", "application/octet-stream")
+	}
+	if ref != nil && ref.Size > 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(ref.Size, 10))
+	}
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = io.Copy(w, rc)
 }
 
 // ConfirmRequestBody represents the payload to confirm or deny tool execution.
@@ -749,7 +997,7 @@ func (h *Handler) executeResumption(w http.ResponseWriter, r *http.Request, stat
 
 		select {
 		case <-done:
-		case <-time.After(500 * time.Millisecond):
+		case <-time.After(2 * time.Second):
 		}
 
 		usageMu.Lock()
@@ -799,21 +1047,42 @@ func (h *Handler) buildRequestState(w http.ResponseWriter, r *http.Request, isSt
 		return nil, false
 	}
 
-	projectID := strings.TrimSpace(r.Header.Get("X-Project-ID"))
+	var snap *core.Snapshot
+	var projectID string
+	var env string
+
+	if s, ok := core.SnapshotFromContext(r.Context()); ok && s != nil {
+		snap = s
+		projectID = s.ProjectID
+		env = s.Environment
+	}
+
 	if projectID == "" {
-		h.writeRawError(w, "invalid_argument", "missing required X-Project-ID header", reqID)
-		return nil, false
+		projectID = strings.TrimSpace(r.Header.Get("X-Project-ID"))
 	}
-
-	env := strings.TrimSpace(r.Header.Get("X-Environment"))
 	if env == "" {
-		env = h.defaultEnv
+		env = strings.TrimSpace(r.Header.Get("X-Environment"))
+		if env == "" {
+			env = h.defaultEnv
+		}
 	}
 
-	snap, ok := h.resolver.Get(projectID, env)
-	if !ok || snap == nil {
-		h.writeRawError(w, "unavailable", fmt.Sprintf("configuration snapshot for project %q (%s) not found", projectID, env), reqID)
-		return nil, false
+	if snap == nil {
+		if projectID == "" {
+			h.writeRawError(w, "invalid_argument", "missing required X-Project-ID header", reqID)
+			return nil, false
+		}
+		if h.resolver != nil {
+			var ok bool
+			snap, ok = h.resolver.Get(projectID, env)
+			if !ok || snap == nil {
+				h.writeRawError(w, "unavailable", fmt.Sprintf("configuration snapshot for project %q (%s) not found", projectID, env), reqID)
+				return nil, false
+			}
+		} else {
+			h.writeRawError(w, "unavailable", "snapshot resolver not configured", reqID)
+			return nil, false
+		}
 	}
 
 	app, ok := snap.App(appID)
@@ -845,6 +1114,32 @@ func (h *Handler) buildRequestState(w http.ResponseWriter, r *http.Request, isSt
 	chatReq.Stream = isStreaming
 
 	id, _ := identity.FromContext(r.Context())
+	rawToken, _ := identity.RawTokenFromContext(r.Context())
+	if rawToken == "" {
+		if authHdr := r.Header.Get("Authorization"); strings.HasPrefix(strings.ToLower(authHdr), "bearer ") {
+			rawToken = strings.TrimSpace(authHdr[7:])
+		}
+	}
+
+	clientIP := r.Header.Get("X-Forwarded-For")
+	if clientIP != "" {
+		if idx := strings.Index(clientIP, ","); idx != -1 {
+			clientIP = strings.TrimSpace(clientIP[:idx])
+		}
+	}
+	if clientIP == "" {
+		clientIP = r.Header.Get("X-Real-IP")
+	}
+	if clientIP == "" {
+		clientIP = r.RemoteAddr
+		if host, _, err := net.SplitHostPort(clientIP); err == nil {
+			clientIP = host
+		}
+	}
+
+	metadata := map[string]any{
+		"client_ip": clientIP,
+	}
 
 	return &core.ReqState{
 		RequestID:   reqID,
@@ -854,8 +1149,10 @@ func (h *Handler) buildRequestState(w http.ResponseWriter, r *http.Request, isSt
 		Snapshot:    snap,
 		AIApp:       app,
 		Identity:    id,
+		RawToken:    rawToken,
 		IsStreaming: isStreaming,
 		ChatRequest: &chatReq,
+		Metadata:    metadata,
 		StartTime:   time.Now(),
 	}, true
 }
@@ -948,9 +1245,7 @@ func (h *Handler) recordUsage(state *core.ReqState) {
 			}
 			stateCopy.Metadata = metaCopy
 		}
-		go func() {
-			_ = h.usageStore.RecordUsage(context.Background(), &stateCopy)
-		}()
+		_ = h.usageStore.RecordUsage(context.Background(), &stateCopy)
 	}
 }
 
