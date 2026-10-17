@@ -37,6 +37,7 @@ type AiAppVersions struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	MemoryConfig   []byte             `json:"memory_config"`
 	SearchConfig   []byte             `json:"search_config"`
+	SkillIds       []byte             `json:"skill_ids"`
 }
 
 type AiApps struct {
@@ -293,6 +294,31 @@ type SemanticMemories struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+}
+
+type SkillVersions struct {
+	ID          string             `json:"id"`
+	SkillID     string             `json:"skill_id"`
+	ProjectID   string             `json:"project_id"`
+	Environment string             `json:"environment"`
+	Version     int32              `json:"version"`
+	Content     string             `json:"content"`
+	Variables   []byte             `json:"variables"`
+	IsActive    bool               `json:"is_active"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type Skills struct {
+	ID            string             `json:"id"`
+	ProjectID     string             `json:"project_id"`
+	Environment   string             `json:"environment"`
+	Name          string             `json:"name"`
+	Description   string             `json:"description"`
+	Source        string             `json:"source"`
+	InjectionMode string             `json:"injection_mode"`
+	ActiveVersion int32              `json:"active_version"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
 type ToolSecrets struct {

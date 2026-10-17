@@ -6,6 +6,7 @@ import {
   Prompt,
   ModelRouting,
   Tool,
+  Skill,
   LimitRule,
   GuardrailConfig,
   CacheConfig,
@@ -291,6 +292,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ appId, onBack, onRef
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [models, setModels] = useState<ModelRouting[]>([]);
   const [availableTools, setAvailableTools] = useState<Tool[]>([]);
+  const [availableSkills, setAvailableSkills] = useState<Skill[]>([]);
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
 
   // Settings form state
@@ -303,6 +305,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ appId, onBack, onRef
   const defaultModel = modelRoutes.default || modelRoutingId;
   const [accessPolicy, setAccessPolicy] = useState('');
   const [selectedTools, setSelectedTools] = useState<string[]>([]);
+  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [rpmLimit, setRpmLimit] = useState(60);
   const [dailyTokenLimit, setDailyTokenLimit] = useState(100000);
   const [proTierRpm, setProTierRpm] = useState(500);
@@ -592,18 +595,20 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ appId, onBack, onRef
     setLoading(true);
     setErrorMsg(null);
     try {
-      const [details, pList, mList, tList, provList, kList] = await Promise.all([
+      const [details, pList, mList, tList, provList, kList, skList] = await Promise.all([
         api.getApp(appId),
         api.listPrompts().catch(() => []),
         api.listModels().catch(() => []),
         api.listTools().catch(() => []),
         api.listProviders().catch(() => []),
         api.listAppAPIKeys(appId).catch(() => []),
+        api.listSkills().catch(() => []),
       ]);
       setAppDetails(details as AIAppDetails);
       setPrompts(Array.isArray(pList) ? pList : []);
       setModels(Array.isArray(mList) ? mList : []);
       setAvailableTools(Array.isArray(tList) ? tList : []);
+      setAvailableSkills(Array.isArray(skList) ? skList : []);
       setProviders(Array.isArray(provList) ? provList : []);
       setAppKeys(Array.isArray(kList) ? kList : []);
       if (details?.app) {
@@ -645,6 +650,14 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ appId, onBack, onRef
           }
         }
         setSelectedTools(Array.isArray(toolIds) ? toolIds : []);
+
+        let skillIds = (activeVer as any).skill_ids;
+        if (typeof skillIds === 'string') {
+          try { skillIds = JSON.parse(skillIds); } catch (_) {
+            try { skillIds = JSON.parse(atob(skillIds)); } catch (_) { skillIds = []; }
+          }
+        }
+        setSelectedSkills(Array.isArray(skillIds) ? skillIds : []);
 
         let guard = activeVer.guardrails;
         if (typeof guard === 'string') {
@@ -735,6 +748,9 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ appId, onBack, onRef
   const handleToolToggle = (tId: string) =>
     setSelectedTools((prev) => prev.includes(tId) ? prev.filter((id) => id !== tId) : [...prev, tId]);
 
+  const handleSkillToggle = (sId: string) =>
+    setSelectedSkills((prev) => prev.includes(sId) ? prev.filter((id) => id !== sId) : [...prev, sId]);
+
   const buildAppPayload = (overrides?: {
     access_policy?: string;
     auth_config?: any;
@@ -769,6 +785,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ appId, onBack, onRef
       model_routes: modelRoutes.default ? modelRoutes : undefined,
       access_policy: overrides?.access_policy !== undefined ? overrides.access_policy : accessPolicy,
       tool_ids: selectedTools,
+      skill_ids: selectedSkills,
       limits: compiledLimits,
       guardrails,
       cache_config: cacheConfig,
@@ -1329,7 +1346,7 @@ console.log(response.content);`;
               icon={<Bot className="w-4 h-4 text-emerald-400" />}
             />
             <p className="text-xs text-neutral-400 mb-4">{description || 'No description configured.'}</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
               <div className="bg-neutral-950 border border-neutral-800/80 p-3 rounded-lg">
                 <p className="text-[10px] uppercase tracking-wider text-neutral-600 font-semibold">Logical Model</p>
                 <p className="text-sm text-neutral-200 mt-1 font-mono font-medium truncate">
@@ -1353,6 +1370,13 @@ console.log(response.content);`;
                   {selectedTools.length === 0
                     ? (searchConfig?.enabled ? 'Web Search only' : 'None attached')
                     : `${selectedTools.length} attached${searchConfig?.enabled ? ' + Web Search' : ''}`}
+                </p>
+              </div>
+
+              <div className="bg-neutral-950 border border-neutral-800/80 p-3 rounded-lg">
+                <p className="text-[10px] uppercase tracking-wider text-neutral-600 font-semibold">Active Skills</p>
+                <p className="text-sm text-neutral-200 mt-1 font-medium truncate">
+                  {selectedSkills.length === 0 ? 'None attached' : `${selectedSkills.length} attached`}
                 </p>
               </div>
 
@@ -1974,6 +1998,65 @@ console.log(response.content);`;
                 hint="Upper bound on consecutive tool turns per request before forcing final summary (default: 5)"
               />
             </div>
+          </Card>
+
+          {/* Agent Skills */}
+          <Card padding="lg">
+            <SectionTitle
+              icon={<Sparkles className="w-4 h-4 text-purple-400" />}
+              title="Attached Agent Skills"
+              description="Equip this application with versioned skills that inject specialized behavior into the system prompt or agent loop"
+            />
+            {availableSkills.length === 0 ? (
+              <div className="rounded-lg border border-neutral-800 bg-neutral-950 p-6 text-center">
+                <Sparkles className="w-6 h-6 text-neutral-600 mx-auto mb-2" />
+                <p className="text-xs text-neutral-400">No skills defined in this project.</p>
+                <p className="text-[11px] text-neutral-600 mt-1">
+                  Create or import reusable skills in the Skills Studio.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {availableSkills.map((skill) => {
+                  const isChecked = selectedSkills.includes(skill.id);
+                  const isAlways = (skill.injection_mode || 'always') === 'always';
+                  return (
+                    <div
+                      key={skill.id}
+                      onClick={() => handleSkillToggle(skill.id)}
+                      className={`
+                        cursor-pointer rounded-lg border p-3.5 flex flex-col justify-between transition-all
+                        ${isChecked
+                          ? 'bg-purple-500/10 border-purple-500/30 text-purple-200'
+                          : 'bg-neutral-950 border-neutral-800 hover:border-neutral-700 text-neutral-400'
+                        }
+                      `}
+                    >
+                      <div className="flex items-start gap-2.5">
+                        <div className={`w-4 h-4 mt-0.5 rounded border flex items-center justify-center flex-shrink-0 ${isChecked ? 'bg-purple-600 border-purple-600' : 'border-neutral-700'}`}>
+                          {isChecked && <Check className="w-2.5 h-2.5 text-white" />}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-1.5 mb-1">
+                            <span className="text-xs font-semibold text-neutral-200 truncate">{skill.name}</span>
+                            <Badge variant={isAlways ? 'purple' : 'info'}>
+                              {isAlways ? 'always' : 'on-demand'}
+                            </Badge>
+                          </div>
+                          <p className="text-[11px] text-neutral-500 line-clamp-2 leading-relaxed">
+                            {skill.description || 'No description provided.'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-3 pt-2 border-t border-neutral-800/60 flex items-center justify-between text-[10px] text-neutral-600 font-mono">
+                        <span className="truncate">{skill.id}</span>
+                        <span>v{skill.active_version || 1}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </Card>
 
           {/* Web Search Engine (SearXNG) */}

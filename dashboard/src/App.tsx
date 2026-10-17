@@ -6,6 +6,7 @@ import { LoginPage } from './pages/LoginPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { AppsPage } from './pages/AppsPage';
 import { PromptsPage } from './pages/PromptsPage';
+import { SkillsPage } from './pages/SkillsPage';
 import { ModelsPage } from './pages/ModelsPage';
 import { ToolsPage } from './pages/ToolsPage';
 import { SearchPage } from './pages/SearchPage';
@@ -199,6 +200,7 @@ export const App: React.FC = () => {
             {currentTab === 'overview' && <OverviewPage />}
             {currentTab === 'apps' && <AppsPage />}
             {currentTab === 'prompts' && <PromptsPage />}
+            {currentTab === 'skills' && <SkillsPage />}
             {currentTab === 'models' && <ModelsPage />}
             {currentTab === 'tools' && <ToolsPage />}
             {currentTab === 'search' && <SearchPage onNavigateApps={() => setCurrentTab('apps')} />}

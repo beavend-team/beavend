@@ -38,6 +38,11 @@ type ProviderQuerySource interface {
 	ListProviderConfigs(ctx context.Context, arg db.ListProviderConfigsParams) ([]db.ProviderConfigs, error)
 }
 
+// SkillQuerySource provides active skill versions from store.
+type SkillQuerySource interface {
+	GetSnapshotSkills(ctx context.Context, arg db.GetSnapshotSkillsParams) ([]db.GetSnapshotSkillsRow, error)
+}
+
 // Compiler compiles raw store records into an in-memory immutable Snapshot.
 type Compiler struct {
 	queries        QuerySource
@@ -122,6 +127,47 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 		snap.Prompts[p.PromptID] = pv
 		if p.PromptName != "" && p.PromptName != p.PromptID {
 			snap.Prompts[p.PromptName] = pv
+		}
+	}
+
+	// 2b. Skills
+	sqs, hasSkillQuerySource := c.queries.(SkillQuerySource)
+	if hasSkillQuerySource {
+		skills, err := sqs.GetSnapshotSkills(ctx, db.GetSnapshotSkillsParams{
+			ProjectID:   projectID,
+			Environment: env,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("fetch skills: %w", err)
+		}
+		for _, sk := range skills {
+			var vars []string
+			if len(sk.Variables) > 0 {
+				if err := json.Unmarshal(sk.Variables, &vars); err != nil {
+					return nil, fmt.Errorf("unmarshal skill variables for %s: %w", sk.SkillID, err)
+				}
+			}
+			mode := strings.ToLower(strings.TrimSpace(sk.InjectionMode))
+			if mode != core.SkillInjectionOnDemand {
+				mode = core.SkillInjectionAlways
+			}
+			sv := &core.SkillVersion{
+				ID:            sk.ID,
+				SkillID:       sk.SkillID,
+				Name:          sk.SkillName,
+				Description:   sk.SkillDescription,
+				Source:        sk.Source,
+				InjectionMode: mode,
+				Version:       int(sk.Version),
+				Content:       sk.Content,
+				Variables:     vars,
+				IsActive:      sk.IsActive,
+				CreatedAt:     sk.CreatedAt.Time,
+			}
+			snap.Skills[sk.SkillID] = sv
+			if sk.SkillName != "" && sk.SkillName != sk.SkillID {
+				snap.Skills[sk.SkillName] = sv
+			}
 		}
 	}
 
@@ -386,11 +432,26 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 		for _, toolID := range toolIDs {
 			// Built-in tools provided by Beavend runtime are always valid
 			switch toolID {
-			case "web_search", "generate_image", "generate_speech", "generate_video":
+			case "web_search", "generate_image", "generate_speech", "generate_video", "load_skill":
 				continue
 			}
 			if _, exists := snap.Tools[toolID]; !exists {
 				return nil, fmt.Errorf("app %s references non-existent tool %q", a.AppID, toolID)
+			}
+		}
+
+		var skillIDs []string
+		if len(a.SkillIds) > 0 {
+			if err := json.Unmarshal(a.SkillIds, &skillIDs); err != nil {
+				return nil, fmt.Errorf("unmarshal skill_ids for app %s: %w", a.AppID, err)
+			}
+		}
+
+		if hasSkillQuerySource {
+			for _, skillID := range skillIDs {
+				if _, exists := snap.Skills[skillID]; !exists {
+					return nil, fmt.Errorf("app %s references non-existent skill %q", a.AppID, skillID)
+				}
 			}
 		}
 
@@ -555,6 +616,7 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 			ModelRoutingID: modelRoutingID,
 			ModelRoutes:    modelRoutes,
 			ToolIDs:        toolIDs,
+			SkillIDs:       skillIDs,
 			Limits:         limits,
 			Cache:          cacheConfig,
 			Guardrails:     guardrails,

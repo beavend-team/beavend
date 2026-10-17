@@ -101,6 +101,7 @@ export interface AIAppVersion {
   prompt_version: number;
   model_routing_id: string;
   tool_ids: string[];
+  skill_ids?: string[];
   limits: LimitRule[];
   cache_config: CacheConfig;
   guardrails: GuardrailConfig;
@@ -254,6 +255,53 @@ export interface MessagePart {
   media?: MediaRef;
   tool_call?: any;
   tool_result?: any;
+}
+
+export interface Skill {
+  id: string;
+  project_id: string;
+  environment: string;
+  name: string;
+  description: string;
+  source: string;
+  injection_mode: 'always' | 'on_demand';
+  active_version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SkillVersion {
+  id: string;
+  skill_id: string;
+  project_id: string;
+  environment: string;
+  version: number;
+  content: string;
+  variables: string[];
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface SkillDetails {
+  skill: Skill;
+  active_version?: SkillVersion;
+  versions: SkillVersion[];
+}
+
+export interface ImportSkillResponse {
+  id: string;
+  name: string;
+  description: string;
+  source: string;
+  resolved_url: string;
+  injection_mode: 'always' | 'on_demand';
+  content: string;
+  raw_markdown: string;
+  metadata?: Record<string, any>;
+  variables: string[];
+  saved: boolean;
+  skill?: Skill;
+  active_version?: SkillVersion;
 }
 
 export interface ProviderConfig {
@@ -877,6 +925,80 @@ class APIClient {
 
   async deletePrompt(id: string): Promise<void> {
     return this.request(`/prompts/${id}`, { method: 'DELETE' });
+  }
+
+  // Skills
+  async listSkills(): Promise<Skill[]> {
+    return this.request<Skill[]>('/skills');
+  }
+
+  async getSkill(id: string): Promise<SkillDetails> {
+    return this.request<SkillDetails>(`/skills/${id}`);
+  }
+
+  async createSkill(payload: {
+    id: string;
+    name: string;
+    description?: string;
+    source?: string;
+    injection_mode?: 'always' | 'on_demand';
+    content?: string;
+    raw_markdown?: string;
+    variables?: string[];
+  }): Promise<Skill> {
+    return this.request<Skill>('/skills', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateSkill(id: string, payload: {
+    name?: string;
+    description?: string;
+    source?: string;
+    injection_mode?: 'always' | 'on_demand';
+    content?: string;
+    raw_markdown?: string;
+    variables?: string[];
+  }): Promise<Skill> {
+    return this.request<Skill>(`/skills/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async createSkillVersion(id: string, payload: {
+    content: string;
+    variables?: string[];
+    set_active?: boolean;
+  }): Promise<SkillVersion> {
+    return this.request<SkillVersion>(`/skills/${id}/versions`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async setActiveSkillVersion(id: string, version: number): Promise<Skill> {
+    return this.request<Skill>(`/skills/${id}/active-version`, {
+      method: 'PUT',
+      body: JSON.stringify({ version }),
+    });
+  }
+
+  async deleteSkill(id: string): Promise<void> {
+    return this.request(`/skills/${id}`, { method: 'DELETE' });
+  }
+
+  async importSkill(payload: {
+    source: string;
+    injection_mode?: 'always' | 'on_demand';
+    id?: string;
+    save?: boolean;
+  }): Promise<ImportSkillResponse> {
+    return this.request<ImportSkillResponse>('/skills/import', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 
   // Models

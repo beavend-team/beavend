@@ -98,6 +98,16 @@ func MountRoutes(
 		admin.With(requireEditor).Put("/prompts/{id}/active-version", ctrlHandler.HandleSetActivePromptVersion)
 		admin.With(requireEditor).Delete("/prompts/{id}", ctrlHandler.HandleDeletePrompt)
 
+		// Skills
+		admin.With(requireViewer).Get("/skills", ctrlHandler.HandleListSkills)
+		admin.With(requireEditor).Post("/skills", ctrlHandler.HandleCreateSkill)
+		admin.With(requireEditor).Post("/skills/import", ctrlHandler.HandleImportSkill)
+		admin.With(requireViewer).Get("/skills/{id}", ctrlHandler.HandleGetSkill)
+		admin.With(requireEditor).Put("/skills/{id}", ctrlHandler.HandleUpdateSkill)
+		admin.With(requireEditor).Post("/skills/{id}/versions", ctrlHandler.HandleCreateSkillVersion)
+		admin.With(requireEditor).Put("/skills/{id}/active-version", ctrlHandler.HandleSetActiveSkillVersion)
+		admin.With(requireEditor).Delete("/skills/{id}", ctrlHandler.HandleDeleteSkill)
+
 		// Model Routings & Providers
 		admin.With(requireViewer).Get("/models", ctrlHandler.HandleListModelRoutings)
 		admin.With(requireEditor).Put("/models/{logical_model}", ctrlHandler.HandleUpsertModelRouting)

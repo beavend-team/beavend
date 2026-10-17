@@ -54,7 +54,7 @@ func (q *Queries) GetSnapshotAppAPIKeys(ctx context.Context, arg GetSnapshotAppA
 }
 
 const getSnapshotApps = `-- name: GetSnapshotApps :many
-SELECT aav.id, aav.app_id, aav.project_id, aav.environment, aav.version, aav.access_policy, aav.prompt_id, aav.prompt_version, aav.model_routing_id, aav.tool_ids, aav.limits, aav.cache_config, aav.guardrails, aav.response_schema, aav.is_active, aav.created_at, aav.memory_config, aav.search_config, a.name, a.description, a.auth_config, a.model_routes
+SELECT aav.id, aav.app_id, aav.project_id, aav.environment, aav.version, aav.access_policy, aav.prompt_id, aav.prompt_version, aav.model_routing_id, aav.tool_ids, aav.limits, aav.cache_config, aav.guardrails, aav.response_schema, aav.is_active, aav.created_at, aav.memory_config, aav.search_config, aav.skill_ids, a.name, a.description, a.auth_config, a.model_routes
 FROM ai_app_versions aav
 JOIN ai_apps a ON a.id = aav.app_id AND a.active_version = aav.version
 WHERE a.project_id = $1 AND a.environment = $2
@@ -84,6 +84,7 @@ type GetSnapshotAppsRow struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	MemoryConfig   []byte             `json:"memory_config"`
 	SearchConfig   []byte             `json:"search_config"`
+	SkillIds       []byte             `json:"skill_ids"`
 	Name           string             `json:"name"`
 	Description    string             `json:"description"`
 	AuthConfig     []byte             `json:"auth_config"`
@@ -118,6 +119,7 @@ func (q *Queries) GetSnapshotApps(ctx context.Context, arg GetSnapshotAppsParams
 			&i.CreatedAt,
 			&i.MemoryConfig,
 			&i.SearchConfig,
+			&i.SkillIds,
 			&i.Name,
 			&i.Description,
 			&i.AuthConfig,
@@ -321,6 +323,68 @@ func (q *Queries) GetSnapshotRevision(ctx context.Context, arg GetSnapshotRevisi
 	var revision int64
 	err := row.Scan(&revision)
 	return revision, err
+}
+
+const getSnapshotSkills = `-- name: GetSnapshotSkills :many
+SELECT sv.id, sv.skill_id, sv.project_id, sv.environment, sv.version, sv.content, sv.variables, sv.is_active, sv.created_at, s.name AS skill_name, s.description AS skill_description, s.source, s.injection_mode
+FROM skill_versions sv
+JOIN skills s ON s.id = sv.skill_id AND s.active_version = sv.version
+WHERE s.project_id = $1 AND s.environment = $2
+`
+
+type GetSnapshotSkillsParams struct {
+	ProjectID   string `json:"project_id"`
+	Environment string `json:"environment"`
+}
+
+type GetSnapshotSkillsRow struct {
+	ID               string             `json:"id"`
+	SkillID          string             `json:"skill_id"`
+	ProjectID        string             `json:"project_id"`
+	Environment      string             `json:"environment"`
+	Version          int32              `json:"version"`
+	Content          string             `json:"content"`
+	Variables        []byte             `json:"variables"`
+	IsActive         bool               `json:"is_active"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	SkillName        string             `json:"skill_name"`
+	SkillDescription string             `json:"skill_description"`
+	Source           string             `json:"source"`
+	InjectionMode    string             `json:"injection_mode"`
+}
+
+func (q *Queries) GetSnapshotSkills(ctx context.Context, arg GetSnapshotSkillsParams) ([]GetSnapshotSkillsRow, error) {
+	rows, err := q.db.Query(ctx, getSnapshotSkills, arg.ProjectID, arg.Environment)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetSnapshotSkillsRow{}
+	for rows.Next() {
+		var i GetSnapshotSkillsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SkillID,
+			&i.ProjectID,
+			&i.Environment,
+			&i.Version,
+			&i.Content,
+			&i.Variables,
+			&i.IsActive,
+			&i.CreatedAt,
+			&i.SkillName,
+			&i.SkillDescription,
+			&i.Source,
+			&i.InjectionMode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getSnapshotTools = `-- name: GetSnapshotTools :many

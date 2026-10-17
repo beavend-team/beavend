@@ -113,6 +113,8 @@ func (r *DefaultExecutorRegistry) GetExecutor(def core.ToolDefinition) (core.Exe
 			SSRFClient:   client,
 			LogicalModel: def.Executor.Template,
 		}), nil
+	case "skill_loader":
+		return tools.NewSkillLoaderExecutor(def), nil
 	default:
 		return nil, fmt.Errorf("unsupported executor type: %s", def.Executor.Type)
 	}
@@ -244,10 +246,51 @@ func (l *Loop) Run(ctx context.Context, state *core.ReqState, adapter core.Provi
 	return nil
 }
 
+func (l *Loop) resolveOnDemandSkills(state *core.ReqState) []*core.SkillVersion {
+	if state == nil || state.Snapshot == nil || state.AIApp == nil || len(state.AIApp.SkillIDs) == 0 {
+		return nil
+	}
+	var onDemand []*core.SkillVersion
+	for _, skillID := range state.AIApp.SkillIDs {
+		if sk, ok := state.Snapshot.Skill(skillID); ok && sk != nil && sk.InjectionMode == core.SkillInjectionOnDemand {
+			onDemand = append(onDemand, sk)
+		}
+	}
+	return onDemand
+}
+
+func (l *Loop) requestStringMetadata(state *core.ReqState) map[string]string {
+	if state == nil {
+		return nil
+	}
+	meta := make(map[string]string)
+	for k, v := range state.Metadata {
+		if str, ok := v.(string); ok {
+			meta[k] = str
+		}
+	}
+	if state.ChatRequest != nil {
+		for k, v := range state.ChatRequest.Metadata {
+			meta[k] = v
+		}
+	}
+	if len(meta) == 0 {
+		return nil
+	}
+	return meta
+}
+
 func (l *Loop) findToolDef(state *core.ReqState, toolName string) (*core.ToolDefinition, bool) {
 	if state.Snapshot != nil {
 		if def, ok := state.Snapshot.Tool(toolName); ok && def != nil {
 			return def, true
+		}
+	}
+	// Check if this is the built-in load_skill tool for on-demand skills
+	if toolName == "load_skill" {
+		if onDemand := l.resolveOnDemandSkills(state); len(onDemand) > 0 {
+			def := tools.BuiltinLoadSkillToolDefinition(state.AIApp.ID, onDemand, l.requestStringMetadata(state))
+			return &def, true
 		}
 	}
 	// Check if this is the built-in web search tool enabled on the app
@@ -304,6 +347,19 @@ func (l *Loop) resolveTools(state *core.ReqState) []core.ToolDefinition {
 		}
 		if !hasSearch {
 			res = append(res, tools.BuiltinSearchToolDefinition(state.AIApp.Search))
+		}
+	}
+
+	if onDemand := l.resolveOnDemandSkills(state); len(onDemand) > 0 {
+		hasLoadSkill := false
+		for _, t := range res {
+			if t.ID == "load_skill" || t.Name == "load_skill" {
+				hasLoadSkill = true
+				break
+			}
+		}
+		if !hasLoadSkill {
+			res = append(res, tools.BuiltinLoadSkillToolDefinition(state.AIApp.ID, onDemand, l.requestStringMetadata(state)))
 		}
 	}
 
@@ -742,6 +798,21 @@ func (l *Loop) executeServerTool(ctx context.Context, state *core.ReqState, tool
 			Content: fmt.Sprintf("execution error: %v", err),
 			IsError: true,
 		}
+	}
+
+	// Built-in skill_loader reads trusted control-plane configuration from Snapshot;
+	// bypass untrusted external tool-injection regexes so instructional markdown is not false-positive blocked.
+	if toolDef.Executor.Type == "skill_loader" {
+		content := result.Content
+		if result.IsError {
+			content = fmt.Sprintf("<tool_result tool_id=%q call_id=%q status=\"error\">\n%s\n</tool_result>",
+				toolDef.ID, toolCall.ID, result.Content)
+		}
+		return core.ChatMessage{
+			Role:       "tool",
+			ToolCallID: toolCall.ID,
+			Content:    content,
+		}, nil
 	}
 
 	// 4. Sanitize untrusted data

@@ -14,12 +14,14 @@ import {
   Coins,
   KeyRound,
   Search,
+  Sparkles,
 } from 'lucide-react';
 
 export type NavTab =
   | 'overview'
   | 'apps'
   | 'prompts'
+  | 'skills'
   | 'models'
   | 'tools'
   | 'search'
@@ -45,6 +47,7 @@ const navGroups = [
     items: [
       { id: 'apps', label: 'AI Apps', icon: Bot },
       { id: 'prompts', label: 'Prompts Studio', icon: MessageSquare },
+      { id: 'skills', label: 'Skills Studio', icon: Sparkles },
       { id: 'models', label: 'Models & Routing', icon: Cpu },
       { id: 'tools', label: 'Tools Registry', icon: Wrench },
       { id: 'search', label: 'Search Engine', icon: Search },

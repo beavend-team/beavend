@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 
+	"net/http"
+	"time"
+
 	"github.com/beavend/beavend/internal/cache"
 	"github.com/beavend/beavend/internal/configcode"
 	"github.com/beavend/beavend/internal/control/audit"
@@ -29,6 +32,7 @@ type Service struct {
 	threadStore    core.ThreadStore
 	configEngine   *configcode.Engine
 	searxngClient  *tools.SearXNGClient
+	skillClient    *http.Client
 }
 
 // NewService constructs a new control plane service.
@@ -71,6 +75,20 @@ func (s *Service) SetSearXNGClient(client *tools.SearXNGClient) {
 // SearXNGClient returns the configured SearXNG client.
 func (s *Service) SearXNGClient() *tools.SearXNGClient {
 	return s.searxngClient
+}
+
+// SetSkillHTTPClient sets an optional HTTP client override for skill imports.
+func (s *Service) SetSkillHTTPClient(client *http.Client) {
+	s.skillClient = client
+}
+
+// SkillHTTPClient returns the configured HTTP client for skill imports,
+// defaulting to an SSRF-safe HTTP client if unset.
+func (s *Service) SkillHTTPClient() *http.Client {
+	if s.skillClient != nil {
+		return s.skillClient
+	}
+	return tools.NewSafeHTTPClient(tools.SafeDialerConfig{}, 15*time.Second)
 }
 
 // SetCacheStore sets the cache store for subject cache purges.

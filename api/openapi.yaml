@@ -1105,6 +1105,172 @@ paths:
         "200":
           description: Active version updated
 
+  /v1/admin/skills:
+    get:
+      summary: List Skills
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: List of skills
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminSkill"
+    post:
+      summary: Create Skill
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - id
+                - name
+              properties:
+                id:
+                  type: string
+                name:
+                  type: string
+                description:
+                  type: string
+                source:
+                  type: string
+                injection_mode:
+                  type: string
+                  enum: [always, on_demand]
+                content:
+                  type: string
+                raw_markdown:
+                  type: string
+                variables:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "201":
+          description: Skill created
+
+  /v1/admin/skills/import:
+    post:
+      summary: Import Skill from skills.sh or GitHub
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportSkillRequest"
+      responses:
+        "200":
+          description: Skill imported preview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportSkillResponse"
+        "201":
+          description: Skill imported and saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImportSkillResponse"
+
+  /v1/admin/skills/{id}:
+    get:
+      summary: Get Skill Details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Skill details
+    put:
+      summary: Update Skill
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Skill updated
+    delete:
+      summary: Delete Skill
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "200":
+          description: Skill deleted
+
+  /v1/admin/skills/{id}/versions:
+    post:
+      summary: Create Skill Version
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      responses:
+        "201":
+          description: Skill version created
+
+  /v1/admin/skills/{id}/active-version:
+    put:
+      summary: Set Active Skill Version
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      security:
+        - AdminSessionAuth: []
+        - AdminBearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - version
+              properties:
+                version:
+                  type: integer
+      responses:
+        "200":
+          description: Active version updated
+
   /v1/admin/models:
     get:
       summary: List Model Routings
@@ -2205,6 +2371,10 @@ components:
           type: array
           items:
             type: string
+        skill_ids:
+          type: array
+          items:
+            type: string
         policies:
           type: array
           items:
@@ -2411,4 +2581,122 @@ components:
       required:
         - expression
         - action
+
+    AdminSkill:
+      type: object
+      properties:
+        id:
+          type: string
+        project_id:
+          type: string
+        environment:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        source:
+          type: string
+        injection_mode:
+          type: string
+          enum: [always, on_demand]
+        active_version:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+
+    SkillVersion:
+      type: object
+      properties:
+        id:
+          type: string
+        skill_id:
+          type: string
+        project_id:
+          type: string
+        environment:
+          type: string
+        version:
+          type: integer
+        content:
+          type: string
+        variables:
+          type: array
+          items:
+            type: string
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - content
+
+    SkillDetails:
+      type: object
+      properties:
+        skill:
+          $ref: "#/components/schemas/AdminSkill"
+        active_version:
+          $ref: "#/components/schemas/SkillVersion"
+        versions:
+          type: array
+          items:
+            $ref: "#/components/schemas/SkillVersion"
+      required:
+        - skill
+
+    ImportSkillRequest:
+      type: object
+      required:
+        - source
+      properties:
+        id:
+          type: string
+        source:
+          type: string
+          description: Skills.sh URL, GitHub tree/blob URL, or npx skills add CLI command
+        injection_mode:
+          type: string
+          enum: [always, on_demand]
+        save:
+          type: boolean
+
+    ImportSkillResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        source:
+          type: string
+        resolved_url:
+          type: string
+        injection_mode:
+          type: string
+          enum: [always, on_demand]
+        content:
+          type: string
+        raw_markdown:
+          type: string
+        variables:
+          type: array
+          items:
+            type: string
+        saved:
+          type: boolean
+        skill:
+          $ref: "#/components/schemas/AdminSkill"
+        active_version:
+          $ref: "#/components/schemas/SkillVersion"
 

@@ -39,9 +39,9 @@ WHERE id = $1;
 INSERT INTO ai_app_versions (
     id, app_id, project_id, environment, version, access_policy,
     prompt_id, prompt_version, model_routing_id, tool_ids,
-    limits, cache_config, guardrails, response_schema, is_active, memory_config, search_config, created_at
+    limits, cache_config, guardrails, response_schema, is_active, memory_config, search_config, skill_ids, created_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())
 RETURNING *;
 
 -- name: GetAIAppVersion :one

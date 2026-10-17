@@ -88,6 +88,17 @@ type QuerySource interface {
 	IncrementProjectRevision(ctx context.Context, arg db.IncrementProjectRevisionParams) (int64, error)
 }
 
+// SkillQuerySource is an optional interface that QuerySource implementations can provide
+// to support exporting and importing skills via configuration as code.
+type SkillQuerySource interface {
+	GetSnapshotSkills(ctx context.Context, arg db.GetSnapshotSkillsParams) ([]db.GetSnapshotSkillsRow, error)
+	GetSkill(ctx context.Context, id string) (db.Skills, error)
+	CreateSkill(ctx context.Context, arg db.CreateSkillParams) (db.Skills, error)
+	CreateSkillVersion(ctx context.Context, arg db.CreateSkillVersionParams) (db.SkillVersions, error)
+	GetActiveSkillVersion(ctx context.Context, id string) (db.SkillVersions, error)
+	UpdateSkillActiveVersion(ctx context.Context, arg db.UpdateSkillActiveVersionParams) (db.Skills, error)
+}
+
 // Engine handles exporting and importing configuration as code documents.
 type Engine struct {
 	queries   QuerySource
@@ -155,6 +166,32 @@ func (e *Engine) Export(ctx context.Context, projectID, env string) (*ProjectDoc
 				Variables: vars,
 				Version:   int(p.Version),
 			})
+		}
+	}
+
+	// 2b. Skills
+	if sq, ok := e.queries.(SkillQuerySource); ok {
+		skills, err := sq.GetSnapshotSkills(ctx, db.GetSnapshotSkillsParams{
+			ProjectID:   projectID,
+			Environment: env,
+		})
+		if err == nil {
+			for _, s := range skills {
+				var vars []string
+				if len(s.Variables) > 0 {
+					_ = json.Unmarshal(s.Variables, &vars)
+				}
+				doc.Skills = append(doc.Skills, SkillSpec{
+					ID:            s.SkillID,
+					Name:          s.SkillName,
+					Description:   s.SkillDescription,
+					Source:        s.Source,
+					InjectionMode: s.InjectionMode,
+					Content:       s.Content,
+					Variables:     vars,
+					Version:       int(s.Version),
+				})
+			}
 		}
 	}
 
@@ -308,6 +345,10 @@ func (e *Engine) Export(ctx context.Context, projectID, env string) (*ProjectDoc
 			if len(a.ToolIds) > 0 {
 				_ = json.Unmarshal(a.ToolIds, &toolIDs)
 			}
+			var skillIDs []string
+			if len(a.SkillIds) > 0 {
+				_ = json.Unmarshal(a.SkillIds, &skillIDs)
+			}
 			var limits []core.LimitRule
 			if len(a.Limits) > 0 {
 				_ = json.Unmarshal(a.Limits, &limits)
@@ -367,6 +408,7 @@ func (e *Engine) Export(ctx context.Context, projectID, env string) (*ProjectDoc
 				ModelRoutingID: a.ModelRoutingID,
 				ModelRoutes:    modelRoutes,
 				ToolIDs:        toolIDs,
+				SkillIDs:       skillIDs,
 				Limits:         limits,
 				Cache:          cacheCfg,
 				Guardrails:     guardrails,
@@ -483,6 +525,46 @@ func (e *Engine) Diff(ctx context.Context, doc *ProjectDocument) (*DiffReport, e
 				ID:     pSpec.ID,
 				Action: ActionCreate,
 			})
+		}
+	}
+
+	// 3b. Skills
+	if sq, ok := e.queries.(SkillQuerySource); ok && len(doc.Skills) > 0 {
+		existingSkills, _ := sq.GetSnapshotSkills(ctx, db.GetSnapshotSkillsParams{
+			ProjectID:   doc.Project.ID,
+			Environment: doc.Environment,
+		})
+		skillMap := make(map[string]db.GetSnapshotSkillsRow)
+		for _, s := range existingSkills {
+			skillMap[s.SkillID] = s
+		}
+
+		for _, sSpec := range doc.Skills {
+			if existing, ok := skillMap[sSpec.ID]; ok {
+				var changes []string
+				if strings.TrimSpace(existing.Content) != strings.TrimSpace(sSpec.Content) {
+					changes = append(changes, "content changed")
+				}
+				if existing.InjectionMode != sSpec.InjectionMode && sSpec.InjectionMode != "" {
+					changes = append(changes, fmt.Sprintf("injection_mode: %s -> %s", existing.InjectionMode, sSpec.InjectionMode))
+				}
+				action := ActionUnchanged
+				if len(changes) > 0 {
+					action = ActionUpdate
+				}
+				report.Resources = append(report.Resources, ResourceDiff{
+					Type:    "skill",
+					ID:      sSpec.ID,
+					Action:  action,
+					Changes: changes,
+				})
+			} else {
+				report.Resources = append(report.Resources, ResourceDiff{
+					Type:   "skill",
+					ID:     sSpec.ID,
+					Action: ActionCreate,
+				})
+			}
 		}
 	}
 
@@ -631,6 +713,13 @@ func (e *Engine) Diff(ctx context.Context, doc *ProjectDocument) (*DiffReport, e
 			if (existingAuth == nil && aSpec.Auth != nil) || (existingAuth != nil && aSpec.Auth == nil) || (existingAuth != nil && aSpec.Auth != nil && existingAuth.Provider != aSpec.Auth.Provider) {
 				changes = append(changes, "auth provider changed")
 			}
+			var existingSkillIDs []string
+			if len(existing.SkillIds) > 0 {
+				_ = json.Unmarshal(existing.SkillIds, &existingSkillIDs)
+			}
+			if !stringSlicesEqualUnordered(existingSkillIDs, aSpec.SkillIDs) {
+				changes = append(changes, "attached skills changed")
+			}
 			action := ActionUnchanged
 			if len(changes) > 0 {
 				action = ActionUpdate
@@ -765,6 +854,76 @@ func (e *Engine) Apply(ctx context.Context, doc *ProjectDocument) (*DiffReport, 
 					ID:            pSpec.ID,
 					ActiveVersion: newV,
 				})
+			}
+		}
+	}
+
+	// 4b. Upsert Skills
+	if sq, ok := e.queries.(SkillQuerySource); ok {
+		for _, sSpec := range doc.Skills {
+			varsBytes, _ := json.Marshal(sSpec.Variables)
+			if len(varsBytes) == 0 {
+				varsBytes = []byte("[]")
+			}
+			injMode := sSpec.InjectionMode
+			if injMode == "" {
+				injMode = core.SkillInjectionAlways
+			}
+			src := sSpec.Source
+			if src == "" {
+				src = "manual"
+			}
+
+			_, err := sq.GetSkill(ctx, sSpec.ID)
+			if err != nil && errors.Is(err, pgx.ErrNoRows) {
+				_, err = sq.CreateSkill(ctx, db.CreateSkillParams{
+					ID:            sSpec.ID,
+					ProjectID:     doc.Project.ID,
+					Environment:   doc.Environment,
+					Name:          sSpec.Name,
+					Description:   sSpec.Description,
+					Source:        src,
+					InjectionMode: injMode,
+					ActiveVersion: 1,
+				})
+				if err != nil {
+					return nil, fmt.Errorf("create skill %s: %w", sSpec.ID, err)
+				}
+				_, err = sq.CreateSkillVersion(ctx, db.CreateSkillVersionParams{
+					ID:          fmt.Sprintf("%s_v1", sSpec.ID),
+					SkillID:     sSpec.ID,
+					ProjectID:   doc.Project.ID,
+					Environment: doc.Environment,
+					Version:     1,
+					Content:     sSpec.Content,
+					Variables:   varsBytes,
+					IsActive:    true,
+				})
+				if err != nil {
+					return nil, fmt.Errorf("create skill version %s_v1: %w", sSpec.ID, err)
+				}
+			} else if err == nil {
+				activeV, err := sq.GetActiveSkillVersion(ctx, sSpec.ID)
+				if err == nil && (activeV.Content != sSpec.Content || string(activeV.Variables) != string(varsBytes)) {
+					newV := activeV.Version + 1
+					_, err = sq.CreateSkillVersion(ctx, db.CreateSkillVersionParams{
+						ID:          fmt.Sprintf("%s_v%d", sSpec.ID, newV),
+						SkillID:     sSpec.ID,
+						ProjectID:   doc.Project.ID,
+						Environment: doc.Environment,
+						Version:     newV,
+						Content:     sSpec.Content,
+						Variables:   varsBytes,
+						IsActive:    true,
+					})
+					if err != nil {
+						return nil, fmt.Errorf("create skill version %s_v%d: %w", sSpec.ID, newV, err)
+					}
+					_, _ = sq.UpdateSkillActiveVersion(ctx, db.UpdateSkillActiveVersionParams{
+						ID:            sSpec.ID,
+						ActiveVersion: newV,
+					})
+				}
 			}
 		}
 	}
@@ -950,6 +1109,10 @@ func (e *Engine) Apply(ctx context.Context, doc *ProjectDocument) (*DiffReport, 
 	// 8. Upsert Apps
 	for _, aSpec := range doc.Apps {
 		toolsBytes, _ := json.Marshal(aSpec.ToolIDs)
+		skillBytes, _ := json.Marshal(aSpec.SkillIDs)
+		if len(skillBytes) == 0 {
+			skillBytes = []byte("[]")
+		}
 		limitsBytes, _ := json.Marshal(aSpec.Limits)
 		cacheBytes, _ := json.Marshal(aSpec.Cache)
 		guardBytes, _ := json.Marshal(aSpec.Guardrails)
@@ -1003,6 +1166,7 @@ func (e *Engine) Apply(ctx context.Context, doc *ProjectDocument) (*DiffReport, 
 				PromptVersion:  int32(aSpec.PromptVersion),
 				ModelRoutingID: aSpec.ModelRoutingID,
 				ToolIds:        toolsBytes,
+				SkillIds:       skillBytes,
 				Limits:         limitsBytes,
 				CacheConfig:    cacheBytes,
 				Guardrails:     guardBytes,
@@ -1036,6 +1200,7 @@ func (e *Engine) Apply(ctx context.Context, doc *ProjectDocument) (*DiffReport, 
 					PromptVersion:  int32(aSpec.PromptVersion),
 					ModelRoutingID: aSpec.ModelRoutingID,
 					ToolIds:        toolsBytes,
+					SkillIds:       skillBytes,
 					Limits:         limitsBytes,
 					CacheConfig:    cacheBytes,
 					Guardrails:     guardBytes,
@@ -1098,4 +1263,21 @@ func numericToFloatPtr(num pgtype.Numeric) *float64 {
 	}
 	val := f.Float64
 	return &val
+}
+
+func stringSlicesEqualUnordered(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	counts := make(map[string]int, len(a))
+	for _, s := range a {
+		counts[s]++
+	}
+	for _, s := range b {
+		counts[s]--
+		if counts[s] < 0 {
+			return false
+		}
+	}
+	return true
 }

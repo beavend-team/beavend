@@ -21,17 +21,18 @@ type CreateAIAppRequest struct {
 	PromptVersion  int32           `json:"prompt_version"`
 	ModelRoutingID string          `json:"model_routing_id"`
 	ToolIDs        json.RawMessage `json:"tool_ids"`
+	SkillIDs       json.RawMessage `json:"skill_ids"`
 	Limits         json.RawMessage `json:"limits"`
 	CacheConfig    json.RawMessage `json:"cache_config"`
 	Guardrails     json.RawMessage `json:"guardrails"`
 	ResponseSchema string          `json:"response_schema"`
-	MemoryConfig       json.RawMessage `json:"memory_config"`
-	Memory             json.RawMessage `json:"memory"`
-	SearchConfig       json.RawMessage `json:"search_config"`
-	Search             json.RawMessage `json:"search"`
-	Auth               json.RawMessage `json:"auth"`
-	AuthConfig         json.RawMessage `json:"auth_config"`
-	ModelRoutes        json.RawMessage `json:"model_routes"`
+	MemoryConfig   json.RawMessage `json:"memory_config"`
+	Memory         json.RawMessage `json:"memory"`
+	SearchConfig   json.RawMessage `json:"search_config"`
+	Search         json.RawMessage `json:"search"`
+	Auth           json.RawMessage `json:"auth"`
+	AuthConfig     json.RawMessage `json:"auth_config"`
+	ModelRoutes    json.RawMessage `json:"model_routes"`
 }
 
 type AIAppResponse struct {
@@ -59,6 +60,7 @@ type AIAppVersionResponse struct {
 	PromptVersion  int32              `json:"prompt_version"`
 	ModelRoutingID string             `json:"model_routing_id"`
 	ToolIds        json.RawMessage    `json:"tool_ids,omitempty"`
+	SkillIds       json.RawMessage    `json:"skill_ids,omitempty"`
 	Limits         json.RawMessage    `json:"limits,omitempty"`
 	CacheConfig    json.RawMessage    `json:"cache_config,omitempty"`
 	Guardrails     json.RawMessage    `json:"guardrails,omitempty"`
@@ -116,6 +118,7 @@ func toAIAppVersionResponse(v db.AiAppVersions) AIAppVersionResponse {
 		PromptVersion:  v.PromptVersion,
 		ModelRoutingID: v.ModelRoutingID,
 		ToolIds:        raw(v.ToolIds),
+		SkillIds:       raw(v.SkillIds),
 		Limits:         raw(v.Limits),
 		CacheConfig:    raw(v.CacheConfig),
 		Guardrails:     raw(v.Guardrails),
@@ -169,6 +172,9 @@ func (h *Handler) HandleCreateAIApp(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.ToolIDs) == 0 {
 		req.ToolIDs = []byte("[]")
+	}
+	if len(req.SkillIDs) == 0 || string(req.SkillIDs) == "null" {
+		req.SkillIDs = []byte("[]")
 	}
 	if len(req.Limits) == 0 {
 		req.Limits = []byte("[]")
@@ -268,6 +274,7 @@ func (h *Handler) HandleCreateAIApp(w http.ResponseWriter, r *http.Request) {
 		PromptVersion:  req.PromptVersion,
 		ModelRoutingID: req.ModelRoutingID,
 		ToolIds:        req.ToolIDs,
+		SkillIds:       req.SkillIDs,
 		Limits:         req.Limits,
 		CacheConfig:    req.CacheConfig,
 		Guardrails:     req.Guardrails,
@@ -344,6 +351,18 @@ func (h *Handler) HandleUpdateAIApp(w http.ResponseWriter, r *http.Request) {
 	if len(req.ToolIDs) == 0 {
 		req.ToolIDs = []byte("[]")
 	}
+	skillBytes := req.SkillIDs
+	if len(skillBytes) == 0 || string(skillBytes) == "null" {
+		prevVer, err := h.svc.queries.GetAIAppVersion(r.Context(), db.GetAIAppVersionParams{
+			AppID:   appID,
+			Version: existing.ActiveVersion,
+		})
+		if err == nil && len(prevVer.SkillIds) > 0 && string(prevVer.SkillIds) != "null" {
+			skillBytes = prevVer.SkillIds
+		} else {
+			skillBytes = []byte("[]")
+		}
+	}
 	if len(req.Limits) == 0 {
 		req.Limits = []byte("[]")
 	}
@@ -405,6 +424,7 @@ func (h *Handler) HandleUpdateAIApp(w http.ResponseWriter, r *http.Request) {
 		PromptVersion:  req.PromptVersion,
 		ModelRoutingID: req.ModelRoutingID,
 		ToolIds:        req.ToolIDs,
+		SkillIds:       skillBytes,
 		Limits:         req.Limits,
 		CacheConfig:    req.CacheConfig,
 		Guardrails:     req.Guardrails,

@@ -20,6 +20,7 @@ type AIApp struct {
 	ModelRoutingID string          `json:"model_routing_id" yaml:"model_routing_id"`
 	ModelRoutes    *ModelRoutes    `json:"model_routes,omitempty" yaml:"model_routes,omitempty"`
 	ToolIDs        []string        `json:"tool_ids" yaml:"tool_ids"`
+	SkillIDs       []string        `json:"skill_ids,omitempty" yaml:"skill_ids,omitempty"`
 	Limits         []LimitRule     `json:"limits" yaml:"limits"`
 	Cache          CacheConfig     `json:"cache" yaml:"cache"`
 	Guardrails     GuardrailConfig `json:"guardrails" yaml:"guardrails"`

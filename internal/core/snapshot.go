@@ -46,6 +46,7 @@ type Snapshot struct {
 	AuthConfig       *AuthConfig                  `json:"auth_config,omitempty"`
 	Apps             map[string]*AIApp            `json:"apps"`
 	Prompts          map[string]*PromptVersion    `json:"prompts"`
+	Skills           map[string]*SkillVersion     `json:"skills,omitempty"`
 	Models           map[string]*ModelRouting     `json:"models"`
 	Tools            map[string]*ToolDefinition   `json:"tools"`
 	Policies         map[string]*PolicyDefinition `json:"policies"`
@@ -64,6 +65,7 @@ func NewSnapshot(projectID, environment string, revision int64) *Snapshot {
 		CompiledAt:       time.Now().UTC(),
 		Apps:             make(map[string]*AIApp),
 		Prompts:          make(map[string]*PromptVersion),
+		Skills:           make(map[string]*SkillVersion),
 		Models:           make(map[string]*ModelRouting),
 		Tools:            make(map[string]*ToolDefinition),
 		Policies:         make(map[string]*PolicyDefinition),
@@ -142,6 +144,15 @@ func (s *Snapshot) Prompt(id string) (*PromptVersion, bool) {
 	}
 	p, ok := s.Prompts[id]
 	return p, ok
+}
+
+// Skill returns the SkillVersion by Skill ID or Name if present.
+func (s *Snapshot) Skill(id string) (*SkillVersion, bool) {
+	if s == nil || s.Skills == nil {
+		return nil, false
+	}
+	sk, ok := s.Skills[id]
+	return sk, ok
 }
 
 // Auth returns the AuthConfig if present.

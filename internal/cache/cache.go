@@ -165,6 +165,7 @@ func ComputeRequestHash(req *core.ChatRequest, app *core.AIApp, selectedModel ..
 		MaxTokens        *int                  `json:"max_tokens,omitempty"`
 		ResponseSchema   string                `json:"response_schema,omitempty"`
 		PromptVersion    int                   `json:"prompt_version,omitempty"`
+		SkillIDs         []string              `json:"skill_ids,omitempty"`
 	}{
 		Messages:         messages,
 		Attachments:      attachments,
@@ -179,6 +180,17 @@ func ComputeRequestHash(req *core.ChatRequest, app *core.AIApp, selectedModel ..
 		canonicalPayload.PromptVersion = app.PromptVersion
 		if canonicalPayload.ResponseSchema == "" {
 			canonicalPayload.ResponseSchema = app.ResponseSchema
+		}
+		if len(app.SkillIDs) > 0 {
+			sortedSkills := make([]string, 0, len(app.SkillIDs))
+			for _, id := range app.SkillIDs {
+				trimmed := strings.TrimSpace(id)
+				if trimmed != "" {
+					sortedSkills = append(sortedSkills, trimmed)
+				}
+			}
+			sort.Strings(sortedSkills)
+			canonicalPayload.SkillIDs = sortedSkills
 		}
 	}
 

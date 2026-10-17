@@ -29,6 +29,7 @@ type ProjectDocument struct {
 	Auth           *core.AuthConfig `json:"auth,omitempty" yaml:"auth,omitempty"`
 	Apps           []AppSpec        `json:"apps,omitempty" yaml:"apps,omitempty"`
 	Prompts        []PromptSpec     `json:"prompts,omitempty" yaml:"prompts,omitempty"`
+	Skills         []SkillSpec      `json:"skills,omitempty" yaml:"skills,omitempty"`
 	Models         []ModelSpec      `json:"models,omitempty" yaml:"models,omitempty"`
 	Tools          []ToolSpec       `json:"tools,omitempty" yaml:"tools,omitempty"`
 	Policies       []PolicySpec     `json:"policies,omitempty" yaml:"policies,omitempty"`
@@ -53,6 +54,7 @@ type AppSpec struct {
 	PromptVersion  int                   `json:"prompt_version,omitempty" yaml:"prompt_version,omitempty"`
 	ModelRoutingID string                `json:"model_routing_id,omitempty" yaml:"model_routing_id,omitempty"`
 	ToolIDs        []string              `json:"tool_ids,omitempty" yaml:"tool_ids,omitempty"`
+	SkillIDs       []string              `json:"skill_ids,omitempty" yaml:"skill_ids,omitempty"`
 	Limits         []core.LimitRule      `json:"limits,omitempty" yaml:"limits,omitempty"`
 	Cache          *core.CacheConfig     `json:"cache,omitempty" yaml:"cache,omitempty"`
 	Guardrails     *core.GuardrailConfig `json:"guardrails,omitempty" yaml:"guardrails,omitempty"`
@@ -71,6 +73,18 @@ type PromptSpec struct {
 	Template    string   `json:"template" yaml:"template"`
 	Variables   []string `json:"variables,omitempty" yaml:"variables,omitempty"`
 	Version     int      `json:"version,omitempty" yaml:"version,omitempty"`
+}
+
+// SkillSpec specifies a versioned agent skill.
+type SkillSpec struct {
+	ID            string   `json:"id" yaml:"id"`
+	Name          string   `json:"name" yaml:"name"`
+	Description   string   `json:"description,omitempty" yaml:"description,omitempty"`
+	Source        string   `json:"source,omitempty" yaml:"source,omitempty"`
+	InjectionMode string   `json:"injection_mode,omitempty" yaml:"injection_mode,omitempty"`
+	Content       string   `json:"content" yaml:"content"`
+	Variables     []string `json:"variables,omitempty" yaml:"variables,omitempty"`
+	Version       int      `json:"version,omitempty" yaml:"version,omitempty"`
 }
 
 // ModelSpec specifies a model routing and its underlying provider configuration.
@@ -132,6 +146,20 @@ func (doc *ProjectDocument) Validate() error {
 	}
 	if strings.TrimSpace(doc.Environment) == "" {
 		return fmt.Errorf("environment is required")
+	}
+	for _, sk := range doc.Skills {
+		if strings.TrimSpace(sk.ID) == "" {
+			return fmt.Errorf("skill.id is required")
+		}
+		if strings.TrimSpace(sk.Name) == "" {
+			return fmt.Errorf("skill %s: name is required", sk.ID)
+		}
+		if strings.TrimSpace(sk.Content) == "" {
+			return fmt.Errorf("skill %s: content is required", sk.ID)
+		}
+		if sk.InjectionMode != "" && sk.InjectionMode != core.SkillInjectionAlways && sk.InjectionMode != core.SkillInjectionOnDemand {
+			return fmt.Errorf("skill %s: invalid injection_mode %q (must be %q or %q)", sk.ID, sk.InjectionMode, core.SkillInjectionAlways, core.SkillInjectionOnDemand)
+		}
 	}
 	return nil
 }

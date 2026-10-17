@@ -45,3 +45,10 @@ SELECT id, app_id, project_id, environment, name, key_prefix, key_hash, created_
 FROM app_api_keys
 WHERE project_id = $1 AND environment = $2 AND (expires_at IS NULL OR expires_at > NOW());
 
+-- name: GetSnapshotSkills :many
+SELECT sv.*, s.name AS skill_name, s.description AS skill_description, s.source, s.injection_mode
+FROM skill_versions sv
+JOIN skills s ON s.id = sv.skill_id AND s.active_version = sv.version
+WHERE s.project_id = $1 AND s.environment = $2;
+
+
