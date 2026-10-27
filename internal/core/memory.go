@@ -55,6 +55,7 @@ type Thread struct {
 	AIAppID     string         `json:"ai_app_id"`
 	Issuer      string         `json:"issuer,omitempty"`
 	Subject     string         `json:"subject,omitempty"`
+	ExternalRef string         `json:"external_ref,omitempty"`
 	Messages    []ChatMessage  `json:"messages"`
 	Metadata    map[string]any `json:"metadata,omitempty"`
 	TTLSeconds  int            `json:"ttl_seconds"`

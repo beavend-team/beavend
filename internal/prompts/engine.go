@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/beavend/beavend/internal/core"
@@ -243,4 +244,46 @@ func formatValue(val any) string {
 	default:
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+// RenderPromptBundle renders a base prompt template alongside ordered prompt bundle fragments.
+func (e *Engine) RenderPromptBundle(baseTemplate string, fragments []core.PromptFragmentRef, vars map[string]any) (string, []string, error) {
+	var baseRendered string
+	if baseTemplate != "" {
+		rendered, err := e.Render(baseTemplate, vars)
+		if err != nil {
+			return "", nil, fmt.Errorf("render base template: %w", err)
+		}
+		baseRendered = rendered
+	}
+
+	if len(fragments) == 0 {
+		return baseRendered, nil, nil
+	}
+
+	frags := append([]core.PromptFragmentRef(nil), fragments...)
+	sort.SliceStable(frags, func(i, j int) bool {
+		return frags[i].Order < frags[j].Order
+	})
+
+	var (
+		parts       []string
+		fragmentIDs []string
+	)
+	if baseRendered != "" {
+		parts = append(parts, baseRendered)
+	}
+
+	for _, f := range frags {
+		rendered, err := e.Render(f.Content, vars)
+		if err != nil {
+			return "", nil, fmt.Errorf("render fragment %q: %w", f.ID, err)
+		}
+		if strings.TrimSpace(rendered) != "" {
+			parts = append(parts, rendered)
+		}
+		fragmentIDs = append(fragmentIDs, f.ID)
+	}
+
+	return strings.Join(parts, "\n\n"), fragmentIDs, nil
 }

@@ -81,16 +81,18 @@ type SearchConfig struct {
 
 // AppAPIKey represents an authorized API key for direct server-to-server AI App access.
 type AppAPIKey struct {
-	ID          string     `json:"id" yaml:"id"`
-	AppID       string     `json:"app_id" yaml:"app_id"`
-	ProjectID   string     `json:"project_id" yaml:"project_id"`
-	Environment string     `json:"environment" yaml:"environment"`
-	Name        string     `json:"name" yaml:"name"`
-	KeyPrefix   string     `json:"key_prefix" yaml:"key_prefix"`
-	KeyHash     string     `json:"-" yaml:"-"`
-	CreatedAt   time.Time  `json:"created_at" yaml:"created_at"`
-	LastUsedAt  *time.Time `json:"last_used_at,omitempty" yaml:"last_used_at,omitempty"`
-	ExpiresAt   *time.Time `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
+	ID               string     `json:"id" yaml:"id"`
+	AppID            string     `json:"app_id" yaml:"app_id"`
+	ProjectID        string     `json:"project_id" yaml:"project_id"`
+	Environment      string     `json:"environment" yaml:"environment"`
+	Name             string     `json:"name" yaml:"name"`
+	KeyPrefix        string     `json:"key_prefix" yaml:"key_prefix"`
+	KeyHash          string     `json:"-" yaml:"-"`
+	MayAssertSubject bool       `json:"may_assert_subject" yaml:"may_assert_subject"`
+	AllowedClaims    []string   `json:"allowed_claims,omitempty" yaml:"allowed_claims,omitempty"`
+	CreatedAt        time.Time  `json:"created_at" yaml:"created_at"`
+	LastUsedAt       *time.Time `json:"last_used_at,omitempty" yaml:"last_used_at,omitempty"`
+	ExpiresAt        *time.Time `json:"expires_at,omitempty" yaml:"expires_at,omitempty"`
 }
 
 // LimitRule defines a rate or quota limit for a resource over a time window.
@@ -205,6 +207,7 @@ type GuardrailConfig struct {
 type MemoryConfig struct {
 	Enabled       bool   `json:"enabled" yaml:"enabled"`
 	MaxHistory    int    `json:"max_history,omitempty" yaml:"max_history,omitempty"`       // Max message turns to retain in context
+	MaxTokens     int    `json:"max_tokens,omitempty" yaml:"max_tokens,omitempty"`         // Context window token budget for compaction
 	VectorRecall  bool   `json:"vector_recall,omitempty" yaml:"vector_recall,omitempty"`   // Auto recall relevant memories
 	RecallLimit   int    `json:"recall_limit,omitempty" yaml:"recall_limit,omitempty"`     // Number of memories to inject
 	ProviderType  string `json:"provider_type,omitempty" yaml:"provider_type,omitempty"` // "postgres", "http", "local"

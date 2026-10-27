@@ -16,6 +16,7 @@ type AdminUsers struct {
 	Role         string             `json:"role"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	IsDisabled   bool               `json:"is_disabled"`
 }
 
 type AiAppVersions struct {

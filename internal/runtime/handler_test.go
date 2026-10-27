@@ -19,6 +19,7 @@ import (
 	"github.com/beavend/beavend/internal/core"
 	"github.com/beavend/beavend/internal/identity"
 	"github.com/beavend/beavend/internal/media"
+	"github.com/beavend/beavend/internal/memory"
 	"github.com/beavend/beavend/internal/prompts"
 	"github.com/beavend/beavend/internal/routing"
 	"github.com/beavend/beavend/internal/runtime/stages"
@@ -98,13 +99,19 @@ func setupTestEnvironment(t *testing.T) (*chi.Mux, *mockAdapter, *Handler) {
 		PromptID:       pv.PromptID,
 		PromptVersion:  1,
 		ModelRoutingID: "fast",
-		ToolIDs:        []string{"cancel_order"},
+		ToolIDs:        []string{"cancel_order", "delete_account"},
 	}
 	snap.Apps[app.ID] = app
 
 	snap.Tools["cancel_order"] = &core.ToolDefinition{
 		ID:           "cancel_order",
 		Name:         "cancel_order",
+		SideEffect:   "write",
+		Confirmation: "required",
+	}
+	snap.Tools["delete_account"] = &core.ToolDefinition{
+		ID:           "delete_account",
+		Name:         "delete_account",
 		SideEffect:   "write",
 		Confirmation: "required",
 	}
@@ -140,6 +147,7 @@ func setupTestEnvironment(t *testing.T) (*chi.Mux, *mockAdapter, *Handler) {
 	r.Post("/v1/apps/{ai_app_id}/stream", handler.HandleStream)
 	r.Post("/v1/apps/{ai_app_id}/confirm", handler.HandleConfirm)
 	r.Post("/v1/apps/{ai_app_id}/tool-results", handler.HandleToolResults)
+	r.Post("/v1/apps/{ai_app_id}/answer", handler.HandleAnswer)
 
 	return r, adapter, handler
 }
@@ -305,6 +313,183 @@ func TestHandler_HandleConfirm(t *testing.T) {
 		var errResp core.ErrorResponse
 		_ = json.Unmarshal(rec.Body.Bytes(), &errResp)
 		assert.Equal(t, "forbidden", errResp.Code)
+	})
+}
+
+func TestHandler_MultiSuspendingToolBatch(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("sequential confirmation re-suspends then resumes", func(t *testing.T) {
+		r, adapter, handler := setupTestEnvironment(t)
+
+		adapterCalls := 0
+		var finalMessages []core.ChatMessage
+		adapter.chatFn = func(_ context.Context, req core.ChatRequest) (*core.ChatResponse, error) {
+			adapterCalls++
+			finalMessages = req.Messages
+			return &core.ChatResponse{
+				ID: "resp_resumed_batch",
+				Message: core.ChatMessage{
+					Role:    "assistant",
+					Content: "All operations confirmed and executed.",
+				},
+			}, nil
+		}
+
+		call1 := core.ToolCall{ID: "call_cancel_1", Name: "cancel_order", Arguments: `{"order_id":10}`}
+		call2 := core.ToolCall{ID: "call_delete_2", Name: "delete_account", Arguments: `{"account_id":99}`}
+
+		susp := &tools.SuspendedState{
+			ProjectID:        "proj_1",
+			Environment:      "development",
+			RequestID:        "req_multi_batch",
+			AIAppID:          "assistant",
+			Subject:          "usr_alice",
+			BoundaryNonce:    "nonce_batch_test",
+			SnapshotRevision: 1,
+			PendingToolCall:  call1,
+			PendingToolCalls: []core.ToolCall{call1, call2},
+			Messages: []core.ChatMessage{
+				{Role: "user", Content: "Cancel order 10 and delete account"},
+				{
+					Role:      "assistant",
+					ToolCalls: []core.ToolCall{call1, call2},
+				},
+			},
+		}
+
+		require.NoError(t, handler.ContinuationManager().Store().Save(ctx, susp, 5*time.Minute))
+		token1, err := handler.ContinuationManager().IssueConfirmationToken(susp, call1, 5*time.Minute)
+		require.NoError(t, err)
+
+		// 1. Confirm call 1: should re-suspend for call 2, adapter NOT called yet
+		body1 := `{"confirmation_token":"` + token1 + `","approved":true}`
+		req1 := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/confirm", bytes.NewBufferString(body1))
+		req1.Header.Set("X-Project-ID", "proj_1")
+		req1.Header.Set("X-Environment", "development")
+		req1 = req1.WithContext(identity.ContextWithIdentity(req1.Context(), &core.Identity{Subject: "usr_alice"}))
+
+		rec1 := httptest.NewRecorder()
+		r.ServeHTTP(rec1, req1)
+
+		require.Equal(t, http.StatusOK, rec1.Code)
+		token2 := rec1.Header().Get("X-Confirmation-Token")
+		require.NotEmpty(t, token2, "re-suspension should issue new confirmation token for remaining tool")
+		assert.Equal(t, 0, adapterCalls, "upstream adapter must NOT be called while pending calls remain")
+
+		var intermediateResp core.ChatResponse
+		require.NoError(t, json.Unmarshal(rec1.Body.Bytes(), &intermediateResp))
+		assert.Equal(t, "confirmation_required", intermediateResp.FinishReason)
+		require.Len(t, intermediateResp.Message.ToolCalls, 1)
+		assert.Equal(t, "call_delete_2", intermediateResp.Message.ToolCalls[0].ID)
+
+		// Verify stored state in ContinuationManager
+		stored, err := handler.ContinuationManager().Store().Get(ctx, "proj_1", "req_multi_batch")
+		require.NoError(t, err)
+		require.Len(t, stored.PendingToolCalls, 1)
+		assert.Equal(t, "call_delete_2", stored.PendingToolCalls[0].ID)
+
+		// 2. Confirm call 2: resolves all pending calls, upstream adapter IS called
+		body2 := `{"confirmation_token":"` + token2 + `","approved":true}`
+		req2 := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/confirm", bytes.NewBufferString(body2))
+		req2.Header.Set("X-Project-ID", "proj_1")
+		req2.Header.Set("X-Environment", "development")
+		req2 = req2.WithContext(identity.ContextWithIdentity(req2.Context(), &core.Identity{Subject: "usr_alice"}))
+
+		rec2 := httptest.NewRecorder()
+		r.ServeHTTP(rec2, req2)
+
+		require.Equal(t, http.StatusOK, rec2.Code)
+		assert.Equal(t, 1, adapterCalls, "upstream adapter must be called once all pending calls are resolved")
+
+		var finalResp core.ChatResponse
+		require.NoError(t, json.Unmarshal(rec2.Body.Bytes(), &finalResp))
+		assert.Equal(t, "All operations confirmed and executed.", finalResp.Message.Content)
+
+		// Verify both tool results are present in messages passed to upstream adapter
+		var foundCall1, foundCall2 bool
+		for _, m := range finalMessages {
+			if m.Role == "tool" && m.ToolCallID == "call_cancel_1" {
+				foundCall1 = true
+			}
+			if m.Role == "tool" && m.ToolCallID == "call_delete_2" {
+				foundCall2 = true
+			}
+		}
+		assert.True(t, foundCall1, "tool result for call 1 should be passed upstream")
+		assert.True(t, foundCall2, "tool result for call 2 should be passed upstream")
+	})
+
+	t.Run("declining one call cancels all pending tool calls in batch", func(t *testing.T) {
+		r, adapter, handler := setupTestEnvironment(t)
+
+		adapterCalls := 0
+		var finalMessages []core.ChatMessage
+		adapter.chatFn = func(_ context.Context, req core.ChatRequest) (*core.ChatResponse, error) {
+			adapterCalls++
+			finalMessages = req.Messages
+			return &core.ChatResponse{
+				ID: "resp_declined",
+				Message: core.ChatMessage{
+					Role:    "assistant",
+					Content: "Understood, cancelled batch operations.",
+				},
+			}, nil
+		}
+
+		call1 := core.ToolCall{ID: "call_cancel_1", Name: "cancel_order", Arguments: `{"order_id":10}`}
+		call2 := core.ToolCall{ID: "call_delete_2", Name: "delete_account", Arguments: `{"account_id":99}`}
+
+		susp := &tools.SuspendedState{
+			ProjectID:        "proj_1",
+			Environment:      "development",
+			RequestID:        "req_declined_batch",
+			AIAppID:          "assistant",
+			Subject:          "usr_alice",
+			BoundaryNonce:    "nonce_decline_test",
+			SnapshotRevision: 1,
+			PendingToolCall:  call1,
+			PendingToolCalls: []core.ToolCall{call1, call2},
+			Messages: []core.ChatMessage{
+				{Role: "user", Content: "Cancel order 10 and delete account"},
+				{
+					Role:      "assistant",
+					ToolCalls: []core.ToolCall{call1, call2},
+				},
+			},
+		}
+
+		require.NoError(t, handler.ContinuationManager().Store().Save(ctx, susp, 5*time.Minute))
+		token, err := handler.ContinuationManager().IssueConfirmationToken(susp, call1, 5*time.Minute)
+		require.NoError(t, err)
+
+		// Decline confirmation
+		body := `{"confirmation_token":"` + token + `","approved":false}`
+		req := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/confirm", bytes.NewBufferString(body))
+		req.Header.Set("X-Project-ID", "proj_1")
+		req.Header.Set("X-Environment", "development")
+		req = req.WithContext(identity.ContextWithIdentity(req.Context(), &core.Identity{Subject: "usr_alice"}))
+
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, 1, adapterCalls, "upstream adapter must be called to handle decline")
+
+		// Verify BOTH call1 and call2 received cancellation tool messages
+		var call1Cancelled, call2Cancelled bool
+		for _, m := range finalMessages {
+			if m.Role == "tool" && m.ToolCallID == "call_cancel_1" {
+				assert.Contains(t, m.Content, "User declined to confirm tool execution")
+				call1Cancelled = true
+			}
+			if m.Role == "tool" && m.ToolCallID == "call_delete_2" {
+				assert.Contains(t, m.Content, "User declined to confirm tool execution")
+				call2Cancelled = true
+			}
+		}
+		assert.True(t, call1Cancelled, "call 1 should receive cancelled tool message")
+		assert.True(t, call2Cancelled, "call 2 should also receive cancelled tool message to prevent orphan calls")
 	})
 }
 
@@ -633,5 +818,183 @@ func TestHandler_HandleGetMedia(t *testing.T) {
 	r.ServeHTTP(recNotFound, reqNotFound)
 	assert.Equal(t, http.StatusNotFound, recNotFound.Code)
 }
+
+func TestHandler_Answer(t *testing.T) {
+	r, adapter, handler := setupTestEnvironment(t)
+	r.Post("/v1/apps/{ai_app_id}/answer", handler.HandleAnswer)
+
+	adapter.chatFn = func(_ context.Context, req core.ChatRequest) (*core.ChatResponse, error) {
+		lastMsg := req.Messages[len(req.Messages)-1]
+		return &core.ChatResponse{
+			ID: "chat_resumed_answer",
+			Message: core.ChatMessage{
+				Role:    "assistant",
+				Content: "Answering with: " + lastMsg.Content,
+			},
+		}, nil
+	}
+
+	contStore := tools.NewInMemorySuspendedStateStore()
+	contMgr := tools.NewContinuationManager(contStore, []byte("01234567890123456789012345678901"))
+	handler.continuationMgr = contMgr
+
+	susp := &tools.SuspendedState{
+		ProjectID:   "proj_1",
+		Environment: "development",
+		RequestID:   "req_answer_1",
+		AIAppID:     "assistant",
+		ThreadID:    "th_answer",
+		Subject:     "usr_alice",
+		Issuer:      "https://auth.test",
+		Messages: []core.ChatMessage{
+			{Role: "user", Content: "Need help"},
+			{Role: "assistant", Content: "Window or aisle?"},
+		},
+		PendingToolCall: core.ToolCall{
+			ID:        "call_ask",
+			Name:      "ask_user",
+			Arguments: `{"question":"Window or aisle?"}`,
+		},
+		BoundaryNonce: "bnonce123",
+		CreatedAt:     time.Now().UTC(),
+	}
+
+	require.NoError(t, contStore.Save(context.Background(), susp, time.Minute))
+
+	token, err := contMgr.IssueConfirmationToken(susp, susp.PendingToolCall, time.Minute)
+	require.NoError(t, err)
+
+	// 1. Successful answer resumption
+	body := `{"confirmation_token":"` + token + `","answer":"I prefer window"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/answer", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Project-ID", "proj_1")
+	req.Header.Set("X-Environment", "development")
+	req = req.WithContext(identity.ContextWithIdentity(req.Context(), &core.Identity{
+		Project: "proj_1",
+		Subject: "usr_alice",
+		Issuer:  "https://auth.test",
+	}))
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp core.ChatResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "chat_resumed_answer", resp.ID)
+	assert.Contains(t, resp.Message.Content, "I prefer window")
+	assert.Contains(t, resp.Message.Content, "bnonce123")
+
+	// 2. Immediate replay of already-consumed token fails
+	reqReplay := httptest.NewRequest(http.MethodPost, "/v1/apps/assistant/answer", bytes.NewBufferString(body))
+	reqReplay.Header.Set("Content-Type", "application/json")
+	reqReplay.Header.Set("X-Project-ID", "proj_1")
+	reqReplay.Header.Set("X-Environment", "development")
+	reqReplay = reqReplay.WithContext(identity.ContextWithIdentity(reqReplay.Context(), &core.Identity{
+		Project: "proj_1",
+		Subject: "usr_alice",
+		Issuer:  "https://auth.test",
+	}))
+	recReplay := httptest.NewRecorder()
+	r.ServeHTTP(recReplay, reqReplay)
+	assert.Equal(t, http.StatusNotFound, recReplay.Code)
+}
+
+func TestHandler_ResumptionHygiene(t *testing.T) {
+	ctx := context.Background()
+
+	promptEng := prompts.NewEngine()
+	promptStage, err := stages.NewPromptStage(promptEng)
+	require.NoError(t, err)
+
+	threadStore := memory.NewMemoryThreadStore()
+	contextStage := stages.NewContextStage(nil, threadStore)
+
+	// Create thread with existing historical messages
+	thread := &core.Thread{
+		ID:          "th_hygiene",
+		ProjectID:   "p1",
+		Environment: "prod",
+		Messages: []core.ChatMessage{
+			{Role: "user", Content: "Initial message"},
+			{Role: "assistant", Content: "Initial reply"},
+		},
+	}
+	require.NoError(t, threadStore.CreateThread(ctx, thread))
+
+	snap := core.NewSnapshot("p1", "prod", 1)
+	snap.Prompts["prompt_sys"] = &core.PromptVersion{
+		ID:       "prompt_sys",
+		Template: "You are Beavend Assistant.",
+	}
+	snap.Apps["app_hygiene"] = &core.AIApp{
+		ID:       "app_hygiene",
+		PromptID: "prompt_sys",
+	}
+
+	t.Run("when is_resumed_turn is true context and prompt stages do NOT duplicate", func(t *testing.T) {
+		resumedState := &core.ReqState{
+			RequestID:   "req_resumed",
+			ProjectID:   "p1",
+			Environment: "prod",
+			AIAppID:     "app_hygiene",
+			Snapshot:    snap,
+			AIApp:       snap.Apps["app_hygiene"],
+			ChatRequest: &core.ChatRequest{
+				ThreadID: "th_hygiene",
+				Messages: []core.ChatMessage{
+					{Role: "system", Content: "You are Beavend Assistant."},
+					{Role: "user", Content: "Initial message"},
+					{Role: "assistant", Content: "Initial reply"},
+					{Role: "user", Content: "Followup turn"},
+				},
+			},
+			Metadata: map[string]any{
+				"is_resumed_turn": true,
+			},
+		}
+
+		origMsgCount := len(resumedState.ChatRequest.Messages)
+
+		// Run ContextStage
+		require.NoError(t, contextStage.Handle(ctx, resumedState))
+		assert.Equal(t, origMsgCount, len(resumedState.ChatRequest.Messages), "ContextStage should not duplicate thread history")
+
+		// Run PromptStage
+		require.NoError(t, promptStage.Handle(ctx, resumedState))
+		assert.Equal(t, origMsgCount, len(resumedState.ChatRequest.Messages), "PromptStage should not duplicate system prompt")
+	})
+
+	t.Run("when is_resumed_turn is false context and prompt stages load history and system prompt", func(t *testing.T) {
+		freshState := &core.ReqState{
+			RequestID:   "req_fresh",
+			ProjectID:   "p1",
+			Environment: "prod",
+			AIAppID:     "app_hygiene",
+			Snapshot:    snap,
+			AIApp:       snap.Apps["app_hygiene"],
+			ChatRequest: &core.ChatRequest{
+				ThreadID: "th_hygiene",
+				Messages: []core.ChatMessage{
+					{Role: "user", Content: "Followup turn"},
+				},
+			},
+			Metadata: map[string]any{},
+		}
+
+		// Run ContextStage
+		require.NoError(t, contextStage.Handle(ctx, freshState))
+		// Thread history was prepended (2 historical messages + 1 fresh = 3)
+		assert.Equal(t, 3, len(freshState.ChatRequest.Messages))
+
+		// Run PromptStage
+		require.NoError(t, promptStage.Handle(ctx, freshState))
+		// System prompt was prepended (1 system + 3 messages = 4)
+		assert.Equal(t, 4, len(freshState.ChatRequest.Messages))
+		assert.Equal(t, "system", freshState.ChatRequest.Messages[0].Role)
+	})
+}
+
 
 

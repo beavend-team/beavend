@@ -110,6 +110,22 @@ func (s *OutputGuardrailStage) Handle(ctx context.Context, state *core.ReqState)
 	}
 
 	state.ChatResponse.Message.Content = sanitized
+
+	// Also sanitize text in Parts if present
+	for j := range state.ChatResponse.Message.Parts {
+		if state.ChatResponse.Message.Parts[j].Type == core.PartTypeText && state.ChatResponse.Message.Parts[j].Text != "" {
+			sanitizedPart, pErr := engine.EvaluateOutput(ctx, state.ChatResponse.Message.Parts[j].Text)
+			if pErr != nil {
+				var v *guardrails.Violation
+				if errors.As(pErr, &v) {
+					return s.fail(ctx, state, v)
+				}
+				return pErr
+			}
+			state.ChatResponse.Message.Parts[j].Text = sanitizedPart
+		}
+	}
+
 	return nil
 }
 

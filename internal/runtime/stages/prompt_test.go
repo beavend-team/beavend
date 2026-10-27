@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -148,5 +149,72 @@ func TestPromptStage_Handle(t *testing.T) {
 
 		err := stage.Handle(cancCtx, &core.ReqState{})
 		require.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("renders layered prompt bundles in strict order and tracks metadata", func(t *testing.T) {
+		snap := core.NewSnapshot("proj_bundle", "production", 1)
+
+		pv := &core.PromptVersion{
+			ID:        "pv_bundle",
+			PromptID:  "p_layered",
+			Version:   1,
+			Template:  "Core instructions for {{ app.name }}.",
+			Fragments: []core.PromptFragmentRef{
+				{
+					ID:      "frag_2_safety",
+					Name:    "Safety Guidelines",
+					Content: "Do not disclose private internal secrets.",
+					Order:   2,
+				},
+				{
+					ID:      "frag_1_style",
+					Name:    "Style Guidelines",
+					Content: "Tone must be concise and factual.",
+					Order:   1,
+				},
+			},
+			IsActive:  true,
+			CreatedAt: time.Now(),
+		}
+		snap.Prompts[pv.PromptID] = pv
+
+		app := &core.AIApp{
+			ID:            "app_layered",
+			Name:          "Legal Assistant",
+			PromptID:      pv.PromptID,
+			PromptVersion: pv.Version,
+		}
+		snap.Apps[app.ID] = app
+
+		state := &core.ReqState{
+			ProjectID:   snap.ProjectID,
+			Environment: snap.Environment,
+			Snapshot:    snap,
+			AIAppID:     app.ID,
+			ChatRequest: &core.ChatRequest{
+				Messages: []core.ChatMessage{
+					{Role: "user", Content: "Review this document"},
+				},
+			},
+		}
+
+		err := stage.Handle(ctx, state)
+		require.NoError(t, err)
+
+		require.Len(t, state.ChatRequest.Messages, 2)
+		sysContent := state.ChatRequest.Messages[0].Content
+
+		// Must contain base template
+		assert.Contains(t, sysContent, "Core instructions for Legal Assistant.")
+		// Must order frag_1 before frag_2
+		idx1 := strings.Index(sysContent, "Tone must be concise and factual.")
+		idx2 := strings.Index(sysContent, "Do not disclose private internal secrets.")
+		assert.True(t, idx1 != -1 && idx2 != -1 && idx1 < idx2, "fragments must be concatenated in ascending Order")
+
+		// Verify metadata tracking
+		require.NotNil(t, state.Metadata)
+		bundleVersions, ok := state.Metadata["prompt_bundle_versions"].([]string)
+		require.True(t, ok)
+		assert.Equal(t, []string{"frag_1_style", "frag_2_safety"}, bundleVersions)
 	})
 }

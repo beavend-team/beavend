@@ -131,7 +131,9 @@ func mountRuntimeRoutes(r chi.Router, handler *runtime.Handler, authMiddleware f
 			if authMiddleware != nil {
 				apps.With(authMiddleware).Post("/{ai_app_id}/chat", handler.HandleChat)
 				apps.With(authMiddleware).Post("/{ai_app_id}/stream", handler.HandleStream)
+				apps.With(authMiddleware).Post("/{ai_app_id}/invoke", handler.HandleInvoke)
 				apps.With(authMiddleware).Post("/{ai_app_id}/confirm", handler.HandleConfirm)
+				apps.With(authMiddleware).Post("/{ai_app_id}/answer", handler.HandleAnswer)
 				apps.With(authMiddleware).Post("/{ai_app_id}/tool-results", handler.HandleToolResults)
 				apps.With(authMiddleware).Post("/{ai_app_id}/cancel", handler.HandleCancel)
 				apps.With(authMiddleware).Get("/{ai_app_id}/threads/{thread_id}", handler.HandleGetThread)
@@ -141,7 +143,9 @@ func mountRuntimeRoutes(r chi.Router, handler *runtime.Handler, authMiddleware f
 			} else {
 				apps.Post("/{ai_app_id}/chat", handler.HandleChat)
 				apps.Post("/{ai_app_id}/stream", handler.HandleStream)
+				apps.Post("/{ai_app_id}/invoke", handler.HandleInvoke)
 				apps.Post("/{ai_app_id}/confirm", handler.HandleConfirm)
+				apps.Post("/{ai_app_id}/answer", handler.HandleAnswer)
 				apps.Post("/{ai_app_id}/tool-results", handler.HandleToolResults)
 				apps.Post("/{ai_app_id}/cancel", handler.HandleCancel)
 				apps.Get("/{ai_app_id}/threads/{thread_id}", handler.HandleGetThread)
@@ -198,6 +202,17 @@ func mountRuntimeRoutes(r chi.Router, handler *runtime.Handler, authMiddleware f
 					"message": "Cancel handler not configured",
 				})
 			})
+		}
+	})
+
+	r.Route("/v1/runs", func(runs chi.Router) {
+		if authMiddleware != nil {
+			runs.Use(authMiddleware)
+		}
+		if handler != nil {
+			runs.Get("/{run_id}", handler.HandleGetRun)
+			runs.Get("/{run_id}/stream", handler.HandleStreamRun)
+			runs.Post("/{run_id}/cancel", handler.HandleCancelRun)
 		}
 	})
 

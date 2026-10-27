@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 
 	"go.opentelemetry.io/otel"
@@ -55,6 +56,11 @@ func (s *PromptStage) Handle(ctx context.Context, state *core.ReqState) error {
 	}
 
 	if state.ChatResponse != nil {
+		return nil
+	}
+
+	if isResumed, _ := state.Metadata["is_resumed_turn"].(bool); isResumed {
+		// On resumed turns, system prompt and skill instructions are already in ChatRequest.Messages
 		return nil
 	}
 
@@ -147,17 +153,61 @@ func (s *PromptStage) Handle(ctx context.Context, state *core.ReqState) error {
 		promptVersion = promptVer.Version
 		span.SetAttributes(attribute.Int("prompt.version", promptVersion))
 
-		rendered, err := s.engine.Render(promptVer.Template, varCtx)
-		if err != nil {
-			span.RecordError(err)
-			state.Error = &core.ErrorResponse{
-				Code:      "invalid_argument",
-				Message:   fmt.Sprintf("prompt render failed: %v", err),
-				RequestID: state.RequestID,
+		if promptVer.Template != "" {
+			rendered, err := s.engine.Render(promptVer.Template, varCtx)
+			if err != nil {
+				span.RecordError(err)
+				state.Error = &core.ErrorResponse{
+					Code:      "invalid_argument",
+					Message:   fmt.Sprintf("prompt render failed: %v", err),
+					RequestID: state.RequestID,
+				}
+				return fmt.Errorf("render prompt template: %w", err)
 			}
-			return fmt.Errorf("render prompt template: %w", err)
+			basePrompt = rendered
 		}
-		basePrompt = rendered
+
+		var fragmentIDs []string
+		if len(promptVer.Fragments) > 0 {
+			frags := append([]core.PromptFragmentRef(nil), promptVer.Fragments...)
+			sort.SliceStable(frags, func(i, j int) bool {
+				return frags[i].Order < frags[j].Order
+			})
+
+			var fragRenderedParts []string
+			for _, frag := range frags {
+				renderedFrag, err := s.engine.Render(frag.Content, varCtx)
+				if err != nil {
+					span.RecordError(err)
+					state.Error = &core.ErrorResponse{
+						Code:      "invalid_argument",
+						Message:   fmt.Sprintf("prompt fragment %q render failed: %v", frag.ID, err),
+						RequestID: state.RequestID,
+					}
+					return fmt.Errorf("render prompt fragment %q: %w", frag.ID, err)
+				}
+				if strings.TrimSpace(renderedFrag) != "" {
+					fragRenderedParts = append(fragRenderedParts, renderedFrag)
+				}
+				fragmentIDs = append(fragmentIDs, frag.ID)
+			}
+
+			if len(fragRenderedParts) > 0 {
+				bundleText := strings.Join(fragRenderedParts, "\n\n")
+				if basePrompt != "" {
+					basePrompt = basePrompt + "\n\n" + bundleText
+				} else {
+					basePrompt = bundleText
+				}
+			}
+		}
+
+		if len(fragmentIDs) > 0 {
+			if state.Metadata == nil {
+				state.Metadata = make(map[string]any)
+			}
+			state.Metadata["prompt_bundle_versions"] = fragmentIDs
+		}
 
 		if promptRendersCounter != nil {
 			promptRendersCounter.Add(ctx, 1, metric.WithAttributes(

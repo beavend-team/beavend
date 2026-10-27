@@ -181,13 +181,16 @@ func (t *Tracker) extractEvents(state *core.ReqState) (*LogEvent, *Event) {
 	} else if inputTokens > 0 || outputTokens > 0 {
 		// Calculate accurate cost based on model used
 		var override *core.ModelPrice
-		if state.ResolvedModel != nil && (state.ResolvedModel.InputCostPer1M != nil || state.ResolvedModel.OutputCostPer1M != nil) {
+		if state.ResolvedModel != nil && (state.ResolvedModel.InputCostPer1M != nil || state.ResolvedModel.OutputCostPer1M != nil || state.ResolvedModel.CachedInputCostPer1M != nil) {
 			override = &core.ModelPrice{}
 			if state.ResolvedModel.InputCostPer1M != nil {
 				override.InputCostPer1M = *state.ResolvedModel.InputCostPer1M
 			}
 			if state.ResolvedModel.OutputCostPer1M != nil {
 				override.OutputCostPer1M = *state.ResolvedModel.OutputCostPer1M
+			}
+			if state.ResolvedModel.CachedInputCostPer1M != nil {
+				override.CachedInputCostPer1M = state.ResolvedModel.CachedInputCostPer1M
 			}
 		}
 
@@ -199,9 +202,13 @@ func (t *Tracker) extractEvents(state *core.ReqState) (*LogEvent, *Event) {
 			targetModel = logicalModel
 		}
 
-		costUSD = pricing.CalculateCost(inputTokens, outputTokens, targetModel, override)
+		calculatedCost, costSource := pricing.CalculateCostWithSource(inputTokens, outputTokens, state.Usage.CachedInputTokens, targetModel, override)
+		costUSD = calculatedCost
 		if state.Usage.CostUSD == nil {
 			state.Usage.CostUSD = &costUSD
+		}
+		if state.Usage.CostSource == "" {
+			state.Usage.CostSource = costSource
 		}
 	}
 

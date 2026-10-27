@@ -19,11 +19,12 @@ const (
 
 // AdminUser represents an authenticated administrative user.
 type AdminUser struct {
-	ID        string    `json:"id"`
-	Email     string    `json:"email"`
-	Role      Role      `json:"role"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID         string    `json:"id"`
+	Email      string    `json:"email"`
+	Role       Role      `json:"role"`
+	IsDisabled bool      `json:"is_disabled"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // TokenClaims represents the claims contained inside a signed admin session token.

@@ -7,6 +7,7 @@ import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { Input, Textarea } from '../components/ui/Form';
 import { Alert, EmptyState, Loading } from '../components/ui/Feedback';
+import { VariableHelper } from '../components/VariablePicker';
 import { formatRelativeTime } from '../lib/utils';
 
 export const PromptsPage: React.FC = () => {
@@ -220,35 +221,15 @@ export const PromptsPage: React.FC = () => {
             <Input label="Display Name" required placeholder="e.g. Support Persona" value={promptName} onChange={(e) => setPromptName(e.target.value)} />
           </div>
           <Input label="Description" placeholder="Purpose of this prompt template..." value={promptDesc} onChange={(e) => setPromptDesc(e.target.value)} />
-          <div className="space-y-1">
+          <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="text-xs font-medium text-neutral-400">Template Text</label>
-              <span className="text-[10px] text-neutral-600 font-mono">{'{{variable_name}}'} for dynamic inputs</span>
             </div>
+            <VariableHelper
+              detectedVars={detectedVars}
+              onInsert={(syntax) => setTemplate((prev) => (prev ? `${prev}\n${syntax}` : syntax))}
+            />
             <Textarea rows={7} required value={template} onChange={(e) => setTemplate(e.target.value)} mono />
-          </div>
-
-          {detectedVars.length > 0 && (
-            <div className="space-y-1">
-              <p className="text-xs font-medium text-neutral-400 flex items-center gap-1.5">
-                <Tag className="w-3.5 h-3.5 text-emerald-400" />
-                Detected Variables ({detectedVars.length})
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {detectedVars.map((v) => (
-                  <Badge key={v} variant="success">{v}</Badge>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="p-3 bg-neutral-950 border border-neutral-800 rounded-xl space-y-1.5 text-[11px]">
-            <p className="font-semibold text-neutral-300">Variable Sources &amp; Runtime Injection:</p>
-            <ul className="text-neutral-500 space-y-1 list-disc pl-4">
-              <li><code className="text-emerald-400 font-mono">{"{{user_id}}"}</code> / <code className="text-emerald-400 font-mono">{"{{user_email}}"}</code>: Auto-injected from validated caller JWT token claims.</li>
-              <li><code className="text-blue-400 font-mono">{"{{current_date}}"}</code> / <code className="text-blue-400 font-mono">{"{{current_time}}"}</code>: Injected by the runtime engine at request time.</li>
-              <li><code className="text-neutral-300 font-mono">{"{{custom_var}}"}</code>: Substituted from client request variables or app config.</li>
-            </ul>
           </div>
 
           <div className="flex justify-end gap-2 pt-1">
@@ -293,11 +274,14 @@ export const PromptsPage: React.FC = () => {
               value={editDesc}
               onChange={(e) => setEditDesc(e.target.value)}
             />
-            <div className="space-y-1">
+            <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-medium text-neutral-400">Template Text</label>
-                <span className="text-[10px] text-neutral-600 font-mono">{'{{variable_name}}'} for dynamic inputs</span>
               </div>
+              <VariableHelper
+                detectedVars={editDetectedVars}
+                onInsert={(syntax) => setEditTemplate((prev) => (prev ? `${prev}\n${syntax}` : syntax))}
+              />
               <Textarea
                 rows={8}
                 required
@@ -305,29 +289,6 @@ export const PromptsPage: React.FC = () => {
                 onChange={(e) => setEditTemplate(e.target.value)}
                 mono
               />
-            </div>
-
-            {editDetectedVars.length > 0 && (
-              <div className="space-y-1">
-                <p className="text-xs font-medium text-neutral-400 flex items-center gap-1.5">
-                  <Tag className="w-3.5 h-3.5 text-emerald-400" />
-                  Detected Variables ({editDetectedVars.length})
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {editDetectedVars.map((v) => (
-                    <Badge key={v} variant="success">{v}</Badge>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="p-3 bg-neutral-950 border border-neutral-800 rounded-xl space-y-1.5 text-[11px]">
-              <p className="font-semibold text-neutral-300">Variable Sources &amp; Runtime Injection:</p>
-              <ul className="text-neutral-500 space-y-1 list-disc pl-4">
-                <li><code className="text-emerald-400 font-mono">{"{{user_id}}"}</code> / <code className="text-emerald-400 font-mono">{"{{user_email}}"}</code>: Auto-injected from validated caller JWT token claims.</li>
-                <li><code className="text-blue-400 font-mono">{"{{current_date}}"}</code> / <code className="text-blue-400 font-mono">{"{{current_time}}"}</code>: Injected by the runtime engine at request time.</li>
-                <li><code className="text-neutral-300 font-mono">{"{{custom_var}}"}</code>: Substituted from client request variables or app config.</li>
-              </ul>
             </div>
 
             <div className="flex justify-end gap-2 pt-1">

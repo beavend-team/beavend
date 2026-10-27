@@ -23,16 +23,18 @@ var envVarPattern = regexp.MustCompile(`^\$\{[A-Za-z0-9_]+\}$|^env:[A-Za-z0-9_]+
 // ProjectDocument represents the complete declarative configuration of a Beavend project
 // within a specific environment.
 type ProjectDocument struct {
-	BeavendVersion string           `json:"beavend_version" yaml:"beavend_version"`
-	Project        ProjectMeta      `json:"project" yaml:"project"`
-	Environment    string           `json:"environment" yaml:"environment"`
-	Auth           *core.AuthConfig `json:"auth,omitempty" yaml:"auth,omitempty"`
-	Apps           []AppSpec        `json:"apps,omitempty" yaml:"apps,omitempty"`
-	Prompts        []PromptSpec     `json:"prompts,omitempty" yaml:"prompts,omitempty"`
-	Skills         []SkillSpec      `json:"skills,omitempty" yaml:"skills,omitempty"`
-	Models         []ModelSpec      `json:"models,omitempty" yaml:"models,omitempty"`
-	Tools          []ToolSpec       `json:"tools,omitempty" yaml:"tools,omitempty"`
-	Policies       []PolicySpec     `json:"policies,omitempty" yaml:"policies,omitempty"`
+	BeavendVersion string             `json:"beavend_version" yaml:"beavend_version"`
+	Project        ProjectMeta        `json:"project" yaml:"project"`
+	Environment    string             `json:"environment" yaml:"environment"`
+	Auth           *core.AuthConfig   `json:"auth,omitempty" yaml:"auth,omitempty"`
+	Apps           []AppSpec          `json:"apps,omitempty" yaml:"apps,omitempty"`
+	Prompts        []PromptSpec       `json:"prompts,omitempty" yaml:"prompts,omitempty"`
+	Skills         []SkillSpec        `json:"skills,omitempty" yaml:"skills,omitempty"`
+	Models         []ModelSpec        `json:"models,omitempty" yaml:"models,omitempty"`
+	Tools          []ToolSpec         `json:"tools,omitempty" yaml:"tools,omitempty"`
+	Policies       []PolicySpec       `json:"policies,omitempty" yaml:"policies,omitempty"`
+	APIKeys        []AppAPIKeySpec    `json:"api_keys,omitempty" yaml:"api_keys,omitempty"`
+	Knowledge      []KnowledgeDocSpec `json:"knowledge,omitempty" yaml:"knowledge,omitempty"`
 }
 
 // ProjectMeta holds top-level project metadata.
@@ -63,16 +65,42 @@ type AppSpec struct {
 	ResponseSchema     string                         `json:"response_schema,omitempty" yaml:"response_schema,omitempty"`
 	Auth               *core.AuthConfig               `json:"auth,omitempty" yaml:"auth,omitempty"`
 	ModelRoutes        *core.ModelRoutes              `json:"model_routes,omitempty" yaml:"model_routes,omitempty"`
+	APIKeys            []AppAPIKeySpec                `json:"api_keys,omitempty" yaml:"api_keys,omitempty"`
+}
+
+// AppAPIKeySpec specifies an API key for app access with claims delegation rules.
+type AppAPIKeySpec struct {
+	ID               string   `json:"id" yaml:"id"`
+	AppID            string   `json:"app_id,omitempty" yaml:"app_id,omitempty"`
+	Name             string   `json:"name" yaml:"name"`
+	KeyPrefix        string   `json:"key_prefix,omitempty" yaml:"key_prefix,omitempty"`
+	MayAssertSubject bool     `json:"may_assert_subject,omitempty" yaml:"may_assert_subject,omitempty"`
+	AllowedClaims    []string `json:"allowed_claims,omitempty" yaml:"allowed_claims,omitempty"`
+}
+
+// KnowledgeDocSpec specifies knowledge base document metadata.
+type KnowledgeDocSpec struct {
+	ID            string         `json:"id" yaml:"id"`
+	AppID         string         `json:"app_id" yaml:"app_id"`
+	Title         string         `json:"title" yaml:"title"`
+	Description   string         `json:"description,omitempty" yaml:"description,omitempty"`
+	SourceURL     string         `json:"source_url,omitempty" yaml:"source_url,omitempty"`
+	Tags          []string       `json:"tags,omitempty" yaml:"tags,omitempty"`
+	Revision      int            `json:"revision,omitempty" yaml:"revision,omitempty"`
+	Source        string         `json:"source,omitempty" yaml:"source,omitempty"`
+	TotalPassages int            `json:"total_passages,omitempty" yaml:"total_passages,omitempty"`
+	Metadata      map[string]any `json:"metadata,omitempty" yaml:"metadata,omitempty"`
 }
 
 // PromptSpec specifies a versioned prompt.
 type PromptSpec struct {
-	ID          string   `json:"id" yaml:"id"`
-	Name        string   `json:"name" yaml:"name"`
-	Description string   `json:"description,omitempty" yaml:"description,omitempty"`
-	Template    string   `json:"template" yaml:"template"`
-	Variables   []string `json:"variables,omitempty" yaml:"variables,omitempty"`
-	Version     int      `json:"version,omitempty" yaml:"version,omitempty"`
+	ID          string                   `json:"id" yaml:"id"`
+	Name        string                   `json:"name" yaml:"name"`
+	Description string                   `json:"description,omitempty" yaml:"description,omitempty"`
+	Template    string                   `json:"template" yaml:"template"`
+	Variables   []string                 `json:"variables,omitempty" yaml:"variables,omitempty"`
+	Fragments   []core.PromptFragmentRef `json:"fragments,omitempty" yaml:"fragments,omitempty"`
+	Version     int                      `json:"version,omitempty" yaml:"version,omitempty"`
 }
 
 // SkillSpec specifies a versioned agent skill.
@@ -85,6 +113,8 @@ type SkillSpec struct {
 	Content       string   `json:"content" yaml:"content"`
 	Variables     []string `json:"variables,omitempty" yaml:"variables,omitempty"`
 	Version       int      `json:"version,omitempty" yaml:"version,omitempty"`
+	Status        string   `json:"status,omitempty" yaml:"status,omitempty"`
+	ChangeNote    string   `json:"change_note,omitempty" yaml:"change_note,omitempty"`
 }
 
 // ModelSpec specifies a model routing and its underlying provider configuration.
@@ -95,9 +125,11 @@ type ModelSpec struct {
 	Adapter             string        `json:"adapter" yaml:"adapter"`
 	FallbackDeployments []string      `json:"fallback_deployments,omitempty" yaml:"fallback_deployments,omitempty"`
 	InputCostPer1M      *float64      `json:"input_cost_per_1m,omitempty" yaml:"input_cost_per_1m,omitempty"`
+	CachedInputCostPer1M *float64     `json:"cached_input_cost_per_1m,omitempty" yaml:"cached_input_cost_per_1m,omitempty"`
 	OutputCostPer1M     *float64      `json:"output_cost_per_1m,omitempty" yaml:"output_cost_per_1m,omitempty"`
 	InputModalities     []string      `json:"input_modalities,omitempty" yaml:"input_modalities,omitempty"`
 	OutputModalities    []string      `json:"output_modalities,omitempty" yaml:"output_modalities,omitempty"`
+	Capabilities        []string      `json:"capabilities,omitempty" yaml:"capabilities,omitempty"`
 	ProviderConfig      *ProviderSpec `json:"provider,omitempty" yaml:"provider,omitempty"`
 }
 
@@ -115,6 +147,7 @@ type ToolSpec struct {
 	Description      string                     `json:"description,omitempty" yaml:"description,omitempty"`
 	Version          int                        `json:"version,omitempty" yaml:"version,omitempty"`
 	SideEffect       string                     `json:"side_effect,omitempty" yaml:"side_effect,omitempty"`
+	ParallelSafe     bool                       `json:"parallel_safe,omitempty" yaml:"parallel_safe,omitempty"`
 	InputSchema      map[string]any             `json:"input_schema,omitempty" yaml:"input_schema,omitempty"`
 	IdentityBindings map[string]string          `json:"identity_bindings,omitempty" yaml:"identity_bindings,omitempty"`
 	Executor         core.ExecutorConfig        `json:"executor" yaml:"executor"`

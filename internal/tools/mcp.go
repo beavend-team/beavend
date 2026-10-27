@@ -9,6 +9,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,6 +23,10 @@ import (
 var (
 	// ErrMCPProtocol indicates an issue with the MCP JSON-RPC protocol.
 	ErrMCPProtocol = errors.New("mcp protocol error")
+	// ErrMCPStdioDisabled indicates stdio transport is disabled by configuration.
+	ErrMCPStdioDisabled = errors.New("mcp stdio transport is disabled")
+	// ErrMCPStdioNotAllowed indicates the command is not in the operator allowlist.
+	ErrMCPStdioNotAllowed = errors.New("mcp stdio command not allowed")
 )
 
 type mcpRPCRequest struct {
@@ -59,15 +67,28 @@ type mcpRPCError struct {
 	Data    any    `json:"data,omitempty"`
 }
 
-// MCPExecutor executes tools provided by Model Context Protocol (MCP) servers via HTTP / SSE.
+// MCPExecutor executes tools provided by Model Context Protocol (MCP) servers via HTTP / SSE or stdio.
 type MCPExecutor struct {
-	def           core.ToolDefinition
-	client        *http.Client
-	authenticator core.Authenticator
+	def            core.ToolDefinition
+	client         *http.Client
+	authenticator  core.Authenticator
+	allowStdio     bool
+	stdioAllowlist []string
+}
+
+// MCPOption configures an MCPExecutor.
+type MCPOption func(*MCPExecutor)
+
+// WithMCPStdio configures stdio transport permissions and allowed binaries.
+func WithMCPStdio(allow bool, allowlist []string) MCPOption {
+	return func(e *MCPExecutor) {
+		e.allowStdio = allow
+		e.stdioAllowlist = allowlist
+	}
 }
 
 // NewMCPExecutor creates a new MCPExecutor for the given tool definition.
-func NewMCPExecutor(def core.ToolDefinition, client *http.Client, authenticator core.Authenticator) *MCPExecutor {
+func NewMCPExecutor(def core.ToolDefinition, client *http.Client, authenticator core.Authenticator, opts ...MCPOption) *MCPExecutor {
 	if client == nil {
 		client = NewSafeHTTPClient(SafeDialerConfig{}, 15*time.Second)
 	}
@@ -75,11 +96,29 @@ func NewMCPExecutor(def core.ToolDefinition, client *http.Client, authenticator 
 		authenticator = NewDownstreamAuthenticator(nil)
 	}
 
-	return &MCPExecutor{
+	exec := &MCPExecutor{
 		def:           def,
 		client:        client,
 		authenticator: authenticator,
 	}
+
+	// Environment variable fallback if not explicitly configured via options
+	if envVal := os.Getenv("BEAVEND_MCP_ALLOW_STDIO"); envVal != "" {
+		exec.allowStdio = strings.EqualFold(envVal, "true") || envVal == "1"
+	}
+	if envList := os.Getenv("BEAVEND_MCP_STDIO_ALLOWLIST"); envList != "" {
+		for _, item := range strings.Split(envList, ",") {
+			if trimmed := strings.TrimSpace(item); trimmed != "" {
+				exec.stdioAllowlist = append(exec.stdioAllowlist, trimmed)
+			}
+		}
+	}
+
+	for _, opt := range opts {
+		opt(exec)
+	}
+
+	return exec
 }
 
 // Execute performs the MCP JSON-RPC 2.0 tools/call request and extracts the result content.
@@ -140,6 +179,10 @@ func (e *MCPExecutor) Execute(ctx context.Context, call core.ToolCall, id core.I
 			Content: fmt.Sprintf("marshal rpc request: %v", err),
 			IsError: true,
 		}, err
+	}
+
+	if strings.EqualFold(e.def.Executor.Transport, "stdio") {
+		return e.executeStdio(execCtx, call, rpcReq)
 	}
 
 	rawURL := e.def.Executor.URL
@@ -379,4 +422,229 @@ func formatMCPResponse(rpcResp *mcpRPCResponse) (string, bool, error) {
 	}
 
 	return content, isError, nil
+}
+
+func (e *MCPExecutor) executeStdio(ctx context.Context, call core.ToolCall, rpcReq mcpRPCRequest) (core.ToolResult, error) {
+	if !e.allowStdio {
+		return core.ToolResult{
+			CallID:  call.ID,
+			ToolID:  e.def.ID,
+			Content: "mcp stdio transport is disabled by configuration",
+			IsError: true,
+		}, ErrMCPStdioDisabled
+	}
+
+	cmdName := strings.TrimSpace(e.def.Executor.Command)
+	if cmdName == "" {
+		return core.ToolResult{
+			CallID:  call.ID,
+			ToolID:  e.def.ID,
+			Content: "mcp stdio command is empty",
+			IsError: true,
+		}, fmt.Errorf("%w: empty stdio command", ErrToolExecution)
+	}
+
+	// Validate command against operator-configured allowlist:
+	// - If allowlist entry contains path separators, require exact clean path match.
+	// - If allowlist entry is a bare command name (e.g. "node"), only permit invocation if cmdName
+	//   is also a bare command name without path separators (preventing /tmp/evil/node path hijacking).
+	allowed := false
+	cleanCmd := filepath.Clean(cmdName)
+	for _, a := range e.stdioAllowlist {
+		cleanA := strings.TrimSpace(a)
+		if cleanA == "" {
+			continue
+		}
+		if strings.Contains(cleanA, "/") || strings.Contains(cleanA, "\\") || filepath.IsAbs(cleanA) {
+			if cleanCmd == filepath.Clean(cleanA) {
+				allowed = true
+				break
+			}
+		} else {
+			if cmdName == cleanA && !strings.Contains(cmdName, "/") && !strings.Contains(cmdName, "\\") {
+				allowed = true
+				break
+			}
+		}
+	}
+	if !allowed {
+		return core.ToolResult{
+			CallID:  call.ID,
+			ToolID:  e.def.ID,
+			Content: fmt.Sprintf("command %q is not in the operator allowlist", cmdName),
+			IsError: true,
+		}, ErrMCPStdioNotAllowed
+	}
+
+	bodyBytes, err := json.Marshal(rpcReq)
+	if err != nil {
+		return core.ToolResult{
+			CallID:  call.ID,
+			ToolID:  e.def.ID,
+			Content: fmt.Sprintf("marshal rpc request: %v", err),
+			IsError: true,
+		}, err
+	}
+
+	cmd := exec.CommandContext(ctx, cmdName, e.def.Executor.Args...)
+	cmd.Stdin = bytes.NewReader(bodyBytes)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		errOutput := strings.TrimSpace(stderr.String())
+		if errOutput == "" {
+			errOutput = err.Error()
+		}
+		return core.ToolResult{
+			CallID:  call.ID,
+			ToolID:  e.def.ID,
+			Content: fmt.Sprintf("stdio process error: %s", errOutput),
+			IsError: true,
+		}, err
+	}
+
+	const maxMCPResponseBytes = 5 << 20 // 5MB max
+	stdoutBytes := stdout.Bytes()
+	if len(stdoutBytes) > maxMCPResponseBytes {
+		stdoutBytes = stdoutBytes[:maxMCPResponseBytes]
+	}
+
+	extractedContent, isError, parseErr := parseMCPPayload(stdoutBytes, "application/json")
+	if parseErr != nil {
+		return core.ToolResult{
+			CallID:  call.ID,
+			ToolID:  e.def.ID,
+			Content: string(stdoutBytes),
+			IsError: true,
+		}, parseErr
+	}
+
+	return core.ToolResult{
+		CallID:  call.ID,
+		ToolID:  e.def.ID,
+		Content: extractedContent,
+		IsError: isError,
+		Metadata: map[string]any{
+			"transport": "stdio",
+			"command":   cmdName,
+		},
+	}, nil
+}
+
+// DiscoverMCPTools performs a tools/list JSON-RPC request to discover remote MCP tools.
+func DiscoverMCPTools(ctx context.Context, client *http.Client, endpointURL string, headers map[string]string) ([]core.ToolDefinition, error) {
+	if client == nil {
+		client = NewSafeHTTPClient(SafeDialerConfig{}, 15*time.Second)
+	}
+
+	rpcReq := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "discovery_tools_list",
+		"method":  "tools/list",
+		"params":  map[string]any{},
+	}
+	bodyBytes, err := json.Marshal(rpcReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal tools/list request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("create tools/list request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("execute tools/list request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBytes, err := io.ReadAll(io.LimitReader(resp.Body, 5<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read tools/list response: %w", err)
+	}
+
+	var listResp struct {
+		JSONRPC string `json:"jsonrpc"`
+		Result  struct {
+			Tools []struct {
+				Name        string         `json:"name"`
+				Description string         `json:"description"`
+				InputSchema map[string]any `json:"inputSchema"`
+			} `json:"tools"`
+		} `json:"result"`
+		Error *mcpRPCError `json:"error"`
+	}
+
+	if err := json.Unmarshal(respBytes, &listResp); err != nil {
+		return nil, fmt.Errorf("unmarshal tools/list response: %w", err)
+	}
+	if listResp.Error != nil {
+		return nil, fmt.Errorf("tools/list error (%d): %s", listResp.Error.Code, listResp.Error.Message)
+	}
+
+	defs := make([]core.ToolDefinition, len(listResp.Result.Tools))
+	for i, t := range listResp.Result.Tools {
+		defs[i] = core.ToolDefinition{
+			ID:          t.Name,
+			Name:        t.Name,
+			Description: t.Description,
+			InputSchema: t.InputSchema,
+			Executor: core.ExecutorConfig{
+				Type:      "mcp",
+				URL:       endpointURL,
+				Headers:   headers,
+				Transport: "http",
+			},
+		}
+	}
+	return defs, nil
+}
+
+// FilterOnDemandTools ranks tools by keyword match against user query and returns top matching tools (<=5).
+func FilterOnDemandTools(allTools []core.ToolDefinition, query string, topK int) []core.ToolDefinition {
+	if topK <= 0 || topK > 5 {
+		topK = 5
+	}
+	if len(allTools) <= topK {
+		return allTools
+	}
+
+	tokens := strings.Fields(strings.ToLower(query))
+	type scored struct {
+		tool  core.ToolDefinition
+		score int
+	}
+	scoredList := make([]scored, len(allTools))
+	for i, t := range allTools {
+		s := 0
+		nLower := strings.ToLower(t.Name)
+		dLower := strings.ToLower(t.Description)
+		for _, tok := range tokens {
+			if strings.Contains(nLower, tok) {
+				s += 10
+			}
+			if strings.Contains(dLower, tok) {
+				s += 2
+			}
+		}
+		scoredList[i] = scored{tool: t, score: s}
+	}
+
+	sort.SliceStable(scoredList, func(i, j int) bool {
+		return scoredList[i].score > scoredList[j].score
+	})
+
+	res := make([]core.ToolDefinition, 0, topK)
+	for i := 0; i < topK && i < len(scoredList); i++ {
+		res = append(res, scoredList[i].tool)
+	}
+	return res
 }

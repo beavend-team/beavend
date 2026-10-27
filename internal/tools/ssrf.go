@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -34,9 +35,10 @@ var defaultDeniedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("192.168.0.0/16"),  // RFC 1918 Private
 	netip.MustParsePrefix("169.254.0.0/16"),  // RFC 3927 Link-Local / Cloud Metadata
 	netip.MustParsePrefix("0.0.0.0/8"),       // Current network
-	netip.MustParsePrefix("100.64.0.0/10"),   // Shared address space (CGNAT)
+	netip.MustParsePrefix("100.64.0.0/10"),   // Shared address space (Carrier-Grade NAT)
 	netip.MustParsePrefix("192.0.0.0/24"),    // IETF Protocol Assignments
 	netip.MustParsePrefix("192.0.2.0/24"),    // TEST-NET-1
+	netip.MustParsePrefix("198.18.0.0/15"),   // Benchmarking (RFC 2544)
 	netip.MustParsePrefix("198.51.100.0/24"), // TEST-NET-2
 	netip.MustParsePrefix("203.0.113.0/24"),  // TEST-NET-3
 	netip.MustParsePrefix("224.0.0.0/4"),     // Multicast
@@ -44,6 +46,11 @@ var defaultDeniedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("::1/128"),         // IPv6 Loopback
 	netip.MustParsePrefix("fc00::/7"),        // IPv6 Unique Local Address
 	netip.MustParsePrefix("fe80::/10"),       // IPv6 Link-Local
+	netip.MustParsePrefix("64:ff9b::/96"),    // NAT64 well-known prefix
+	netip.MustParsePrefix("64:ff9b:1::/48"),  // NAT64 local prefix
+	netip.MustParsePrefix("2002::/16"),       // 6to4
+	netip.MustParsePrefix("2001::/32"),       // Teredo
+	netip.MustParsePrefix("2001:db8::/32"),   // IPv6 Documentation
 }
 
 // SafeDialerConfig configures the SSRF-safe dialer.
@@ -51,6 +58,7 @@ type SafeDialerConfig struct {
 	DialTimeout     time.Duration
 	KeepAlive       time.Duration
 	AllowPrivate    bool           // If true, allows private/loopback IPs (e.g. for testing)
+	AllowedPorts    []uint16       // If non-empty, dialer will reject any port not in this list
 	DeniedPrefixes  []netip.Prefix // Overrides or adds to default denied prefixes
 	AllowedPrefixes []netip.Prefix // If specified, only IPs matching these prefixes are allowed
 	Resolver        *net.Resolver
@@ -122,6 +130,23 @@ func (d *SafeDialer) DialContext(ctx context.Context, network, addr string) (net
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, fmt.Errorf("ssrf: invalid target address %q: %w", addr, err)
+	}
+
+	if len(d.cfg.AllowedPorts) > 0 {
+		portNum, err := strconv.ParseUint(port, 10, 16)
+		if err != nil {
+			return nil, fmt.Errorf("ssrf: invalid target port %q: %w", port, err)
+		}
+		allowed := false
+		for _, p := range d.cfg.AllowedPorts {
+			if uint16(portNum) == p {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return nil, fmt.Errorf("ssrf: port %d is not in allowed ports %v", portNum, d.cfg.AllowedPorts)
+		}
 	}
 
 	hostLower := strings.ToLower(host)

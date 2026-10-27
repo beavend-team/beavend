@@ -355,12 +355,10 @@ func AuthMiddleware(resolver SnapshotResolver, verifier *Verifier, opts ...Middl
 					return
 				}
 
-				// Construct normalized Identity for the App
+				// Construct normalized Identity for the App API Key
 				id := &core.Identity{
 					Project:     projectID,
 					Environment: env,
-					Issuer:      "beavend:app_key",
-					Subject:     appKey.AppID,
 					Audience:    appKey.AppID,
 					Claims: map[string]any{
 						"app_id":   appKey.AppID,
@@ -370,8 +368,58 @@ func AuthMiddleware(resolver SnapshotResolver, verifier *Verifier, opts ...Middl
 					},
 				}
 
+				assertedSubject := strings.TrimSpace(r.Header.Get("X-Beavend-Subject"))
+				if assertedSubject != "" {
+					if !appKey.MayAssertSubject {
+						writeError(w, http.StatusForbidden, "forbidden", "app API key is not permitted to assert subject", reqID)
+						return
+					}
+
+					id.Subject = assertedSubject
+
+					// Issuer: app.AuthConfig.Issuer or "beavend:bridge:" + appKey.AppID
+					app, _ := snap.App(appKey.AppID)
+					if app != nil && app.AuthConfig != nil && strings.TrimSpace(app.AuthConfig.Issuer) != "" {
+						id.Issuer = app.AuthConfig.Issuer
+					} else {
+						id.Issuer = "beavend:bridge:" + appKey.AppID
+					}
+
+					// Filter X-Beavend-Claims against appKey.AllowedClaims, stripping reserved claims
+					claimsHeader := strings.TrimSpace(r.Header.Get("X-Beavend-Claims"))
+					if claimsHeader != "" {
+						var parsedClaims map[string]any
+						if err := json.Unmarshal([]byte(claimsHeader), &parsedClaims); err != nil {
+							writeError(w, http.StatusBadRequest, "invalid_request", "malformed X-Beavend-Claims JSON header", reqID)
+							return
+						}
+						allowedSet := make(map[string]bool, len(appKey.AllowedClaims))
+						for _, c := range appKey.AllowedClaims {
+							allowedSet[c] = true
+						}
+						reservedClaims := map[string]bool{
+							"admin":      true,
+							"playground": true,
+							"sub":        true,
+							"iss":        true,
+							"aud":        true,
+							"scope":      true,
+						}
+						for k, v := range parsedClaims {
+							if !reservedClaims[k] && allowedSet[k] {
+								id.Claims[k] = v
+							}
+						}
+					}
+				} else {
+					id.Subject = appKey.AppID
+					id.Issuer = "beavend:app_key"
+					id.Claims["machine"] = true
+				}
+
 				ctx := ContextWithIdentity(r.Context(), id)
-				ctx = ContextWithRawToken(ctx, tokenStr)
+				// Invariant: NEVER populate RawToken from an AppAPIKey
+				ctx = ContextWithRawToken(ctx, "")
 				ctx = core.ContextWithSnapshot(ctx, snap)
 				ctx = telemetry.WithRequestID(ctx, reqID)
 				ctx = telemetry.WithProjectID(ctx, projectID)

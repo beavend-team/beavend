@@ -27,10 +27,67 @@ var (
 		regexp.MustCompile(`(?i)<\|im_start\|>\s*(system|assistant)`),
 		regexp.MustCompile(`(?i)(---|===|\[\[?|<|\{\{?)\s*(system|instruction|admin|root|developer)\s*(---|===|\]\]?|>|\}\}?)`),
 	}
+
+	closingToolResultRegex = regexp.MustCompile(`(?i)</\s*tool_result\b`)
 )
 
+// SanitizeOpt configures result sanitization options.
+type SanitizeOpt func(*SanitizeOptions)
+
+// SanitizeOptions holds options for sanitizing tool results or content.
+type SanitizeOptions struct {
+	Nonce    string
+	ToolID   string
+	CallID   string
+	Status   string
+	MaxBytes int
+	Redact   []string
+}
+
+// WithNonce sets a boundary nonce on the tool result delimiter.
+func WithNonce(nonce string) SanitizeOpt {
+	return func(o *SanitizeOptions) {
+		o.Nonce = nonce
+	}
+}
+
+// WithToolID sets the tool identifier on the delimiter.
+func WithToolID(toolID string) SanitizeOpt {
+	return func(o *SanitizeOptions) {
+		o.ToolID = toolID
+	}
+}
+
+// WithCallID sets the invocation call identifier on the delimiter.
+func WithCallID(callID string) SanitizeOpt {
+	return func(o *SanitizeOptions) {
+		o.CallID = callID
+	}
+}
+
+// WithStatus sets the status string ("success" or "error") on the delimiter.
+func WithStatus(status string) SanitizeOpt {
+	return func(o *SanitizeOptions) {
+		o.Status = status
+	}
+}
+
+// WithMaxBytes sets the maximum content byte size cap.
+func WithMaxBytes(maxBytes int) SanitizeOpt {
+	return func(o *SanitizeOptions) {
+		o.MaxBytes = maxBytes
+	}
+}
+
+// WithRedact sets the list of sensitive data patterns to redact.
+func WithRedact(redact []string) SanitizeOpt {
+	return func(o *SanitizeOptions) {
+		o.Redact = redact
+	}
+}
+
 // Sanitizer processes tool execution results to enforce size limits, redact sensitive data,
-// and wrap external data into safe untrusted boundary blocks.
+// escape XML tag breakouts, and wrap external data into safe untrusted boundary blocks.
 type Sanitizer struct{}
 
 // NewSanitizer creates a new result sanitizer.
@@ -38,21 +95,37 @@ func NewSanitizer() *Sanitizer {
 	return &Sanitizer{}
 }
 
-// Sanitize applies truncation, redactions, injection checking, and untrusted delimiter wrapping.
-func (s *Sanitizer) Sanitize(res core.ToolResult, cfg core.ResultConfig) core.ToolResult {
+// Sanitize applies truncation, redactions, injection checking, XML escaping, and untrusted delimiter wrapping.
+func (s *Sanitizer) Sanitize(res core.ToolResult, cfg core.ResultConfig, opts ...SanitizeOpt) core.ToolResult {
+	options := &SanitizeOptions{
+		ToolID:   res.ToolID,
+		CallID:   res.CallID,
+		MaxBytes: cfg.MaxBytes,
+		Redact:   cfg.Redact,
+	}
+	if res.IsError {
+		options.Status = "error"
+	} else {
+		options.Status = "success"
+	}
+	for _, opt := range opts {
+		opt(options)
+	}
+
 	content := res.Content
 
 	// 1. Scan for prompt injection attempts in tool results
 	for _, pat := range toolInjectionPatterns {
 		if pat.MatchString(content) {
 			res.IsError = true
+			options.Status = "error"
 			content = "[BLOCKED: tool result contained potential prompt injection]"
 			break
 		}
 	}
 
 	// 2. Truncate if exceeds max_bytes (bounded by HardMaxBytes)
-	maxBytes := cfg.MaxBytes
+	maxBytes := options.MaxBytes
 	if maxBytes <= 0 {
 		maxBytes = DefaultMaxBytes
 	} else if maxBytes > HardMaxBytes {
@@ -64,19 +137,71 @@ func (s *Sanitizer) Sanitize(res core.ToolResult, cfg core.ResultConfig) core.To
 	}
 
 	// 3. Redaction
-	content = s.applyRedactions(content, cfg.Redact)
+	content = s.applyRedactions(content, options.Redact)
 
-	// 4. Wrap as untrusted external data block
-	status := "success"
-	if res.IsError {
-		status = "error"
+	// 4. Escape XML breakout tags inside content to prevent boundary tampering
+	content = EscapeClosingToolResultTags(content)
+
+	// 5. Wrap as untrusted external data block with optional nonce
+	res.Content = WrapToolResult(content, options.Nonce, options.ToolID, options.CallID, options.Status)
+	return res
+}
+
+// SanitizeContent sanitizes a raw string content with options, applying XML escaping and delimiter wrapping.
+func (s *Sanitizer) SanitizeContent(content string, opts ...SanitizeOpt) string {
+	options := &SanitizeOptions{
+		Status: "success",
+	}
+	for _, opt := range opts {
+		opt(options)
 	}
 
-	wrapped := fmt.Sprintf("<tool_result tool_id=%q call_id=%q status=%q>\n%s\n</tool_result>",
-		res.ToolID, res.CallID, status, content)
+	for _, pat := range toolInjectionPatterns {
+		if pat.MatchString(content) {
+			options.Status = "error"
+			content = "[BLOCKED: tool result contained potential prompt injection]"
+			break
+		}
+	}
 
-	res.Content = wrapped
-	return res
+	maxBytes := options.MaxBytes
+	if maxBytes <= 0 {
+		maxBytes = DefaultMaxBytes
+	} else if maxBytes > HardMaxBytes {
+		maxBytes = HardMaxBytes
+	}
+
+	if len(content) > maxBytes {
+		content = content[:maxBytes] + "\n...[truncated]"
+	}
+
+	content = s.applyRedactions(content, options.Redact)
+	content = EscapeClosingToolResultTags(content)
+
+	return WrapToolResult(content, options.Nonce, options.ToolID, options.CallID, options.Status)
+}
+
+// SanitizeString is an alias for SanitizeContent.
+func (s *Sanitizer) SanitizeString(content string, opts ...SanitizeOpt) string {
+	return s.SanitizeContent(content, opts...)
+}
+
+// EscapeClosingToolResultTags replaces any closing </tool_result tags to prevent XML breakout attacks.
+func EscapeClosingToolResultTags(content string) string {
+	return closingToolResultRegex.ReplaceAllString(content, "&lt;/tool_result")
+}
+
+// WrapToolResult formats content with XML boundaries, optionally including a cryptographic nonce.
+func WrapToolResult(content, nonce, toolID, callID, status string) string {
+	if status == "" {
+		status = "success"
+	}
+	if nonce != "" {
+		return fmt.Sprintf("<tool_result nonce=%q tool_id=%q call_id=%q status=%q>\n%s\n</tool_result>",
+			nonce, toolID, callID, status, content)
+	}
+	return fmt.Sprintf("<tool_result tool_id=%q call_id=%q status=%q>\n%s\n</tool_result>",
+		toolID, callID, status, content)
 }
 
 func (s *Sanitizer) applyRedactions(content string, redactRules []string) string {

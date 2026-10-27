@@ -16,8 +16,8 @@ func DeriveKey(masterKey string) []byte {
 	return hash[:]
 }
 
-// Encrypt encrypts plaintext using AES-256-GCM with a randomly generated 12-byte nonce.
-func Encrypt(key []byte, plaintext []byte) (ciphertext, nonce []byte, err error) {
+// EncryptWithAAD encrypts plaintext using AES-256-GCM with a randomly generated 12-byte nonce and additional authenticated data.
+func EncryptWithAAD(key []byte, plaintext []byte, aad []byte) (ciphertext, nonce []byte, err error) {
 	if len(key) != 32 {
 		return nil, nil, errors.New("key must be exactly 32 bytes for AES-256")
 	}
@@ -37,12 +37,17 @@ func Encrypt(key []byte, plaintext []byte) (ciphertext, nonce []byte, err error)
 		return nil, nil, fmt.Errorf("generate nonce: %w", err)
 	}
 
-	ciphertext = gcm.Seal(nil, nonce, plaintext, nil)
+	ciphertext = gcm.Seal(nil, nonce, plaintext, aad)
 	return ciphertext, nonce, nil
 }
 
-// Decrypt decrypts ciphertext using AES-256-GCM and the supplied nonce.
-func Decrypt(key []byte, ciphertext, nonce []byte) ([]byte, error) {
+// Encrypt encrypts plaintext using AES-256-GCM with a randomly generated 12-byte nonce.
+func Encrypt(key []byte, plaintext []byte) (ciphertext, nonce []byte, err error) {
+	return EncryptWithAAD(key, plaintext, nil)
+}
+
+// DecryptWithAAD decrypts ciphertext using AES-256-GCM, the supplied nonce, and additional authenticated data.
+func DecryptWithAAD(key []byte, ciphertext, nonce []byte, aad []byte) ([]byte, error) {
 	if len(key) != 32 {
 		return nil, errors.New("key must be exactly 32 bytes for AES-256")
 	}
@@ -57,10 +62,15 @@ func Decrypt(key []byte, ciphertext, nonce []byte) ([]byte, error) {
 		return nil, fmt.Errorf("create gcm: %w", err)
 	}
 
-	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, aad)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt ciphertext: %w", err)
 	}
 
 	return plaintext, nil
+}
+
+// Decrypt decrypts ciphertext using AES-256-GCM and the supplied nonce.
+func Decrypt(key []byte, ciphertext, nonce []byte) ([]byte, error) {
+	return DecryptWithAAD(key, ciphertext, nonce, nil)
 }

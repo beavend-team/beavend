@@ -15,13 +15,18 @@ import (
 //go:embed model_prices.json
 var embeddedPricesJSON []byte
 
-// ModelPrice defines rates in USD per 1 Million tokens and per-unit media costs.
+// ModelPrice defines rates in USD per 1 Million tokens, cached token discounts, and capability flags.
 type ModelPrice struct {
-	InputCostPer1M     float64  `json:"input_cost_per_1m"`
-	OutputCostPer1M    float64  `json:"output_cost_per_1m"`
-	PerImageCost       *float64 `json:"per_image_cost,omitempty"`
-	PerAudioSecondCost *float64 `json:"per_audio_second_cost,omitempty"`
-	PerVideoSecondCost *float64 `json:"per_video_second_cost,omitempty"`
+	InputCostPer1M       float64  `json:"input_cost_per_1m"`
+	OutputCostPer1M      float64  `json:"output_cost_per_1m"`
+	CachedInputCostPer1M *float64 `json:"cached_input_cost_per_1m,omitempty"`
+	PerImageCost         *float64 `json:"per_image_cost,omitempty"`
+	PerAudioSecondCost   *float64 `json:"per_audio_second_cost,omitempty"`
+	PerVideoSecondCost   *float64 `json:"per_video_second_cost,omitempty"`
+	ContextWindow        int      `json:"context_window,omitempty"`
+	SupportsTools        bool     `json:"supports_tools,omitempty"`
+	SupportsCache        bool     `json:"supports_cache,omitempty"`
+	SupportsReasoning    bool     `json:"supports_reasoning,omitempty"`
 }
 
 var (
@@ -143,28 +148,65 @@ func (c *Catalog) ResetDynamic() {
 	c.dynamic = make(map[string]ModelPrice)
 }
 
-// CalculateCost computes total estimated USD cost for token consumption.
-// If an explicit override is provided (e.g. from ModelRouting), it is used.
-func (c *Catalog) CalculateCost(inputTokens, outputTokens int, model string, override *core.ModelPrice) float64 {
+// CalculateCostWithSource computes total estimated USD cost and returns the pricing attribution source.
+// It accounts for cached input token rates when cachedInputTokens > 0.
+func (c *Catalog) CalculateCostWithSource(inputTokens, outputTokens, cachedInputTokens int, model string, override *core.ModelPrice) (float64, string) {
 	var (
 		inputRate  float64
 		outputRate float64
+		cachedRate *float64
+		source     string
 	)
 
 	if override != nil && (override.InputCostPer1M > 0 || override.OutputCostPer1M > 0) {
 		inputRate = override.InputCostPer1M
 		outputRate = override.OutputCostPer1M
+		cachedRate = override.CachedInputCostPer1M
+		source = "override"
 	} else if p, found := c.Lookup(model); found {
 		inputRate = p.InputCostPer1M
 		outputRate = p.OutputCostPer1M
+		cachedRate = p.CachedInputCostPer1M
+		c.mu.RLock()
+		norm := normalizeModelKey(model)
+		if _, isDyn := c.dynamic[norm]; isDyn {
+			source = "catalog_dynamic"
+		} else {
+			source = "catalog_embedded"
+		}
+		c.mu.RUnlock()
 	} else {
-		return 0.0
+		return 0.0, "none"
 	}
 
-	cost := (float64(inputTokens)*inputRate + float64(outputTokens)*outputRate) / 1_000_000.0
-	if cost < 0 {
-		return 0.0
+	nonCachedInput := inputTokens
+	effectiveCached := 0
+	if cachedInputTokens > 0 {
+		if cachedInputTokens >= inputTokens {
+			effectiveCached = inputTokens
+			nonCachedInput = 0
+		} else {
+			effectiveCached = cachedInputTokens
+			nonCachedInput = inputTokens - cachedInputTokens
+		}
 	}
+
+	actualCachedRate := inputRate * 0.5 // Default 50% discount if not explicitly set
+	if cachedRate != nil {
+		actualCachedRate = *cachedRate
+	}
+
+	cost := (float64(nonCachedInput)*inputRate + float64(effectiveCached)*actualCachedRate + float64(outputTokens)*outputRate) / 1_000_000.0
+	if cost < 0 {
+		return 0.0, source
+	}
+	return cost, source
+}
+
+// CalculateCost computes total estimated USD cost for token consumption.
+// If an explicit override is provided (e.g. from ModelRouting), it is used.
+func (c *Catalog) CalculateCost(inputTokens, outputTokens int, model string, override *core.ModelPrice) float64 {
+	cost, _ := c.CalculateCostWithSource(inputTokens, outputTokens, 0, model, override)
 	return cost
 }
 
@@ -220,6 +262,11 @@ func (c *Catalog) CalculateMediaCost(images int, audioSec float64, videoSec floa
 // CalculateCost is a package-level helper that delegates to DefaultCatalog.
 func CalculateCost(inputTokens, outputTokens int, model string, override *core.ModelPrice) float64 {
 	return DefaultCatalog().CalculateCost(inputTokens, outputTokens, model, override)
+}
+
+// CalculateCostWithSource is a package-level helper that delegates to DefaultCatalog.
+func CalculateCostWithSource(inputTokens, outputTokens, cachedInputTokens int, model string, override *core.ModelPrice) (float64, string) {
+	return DefaultCatalog().CalculateCostWithSource(inputTokens, outputTokens, cachedInputTokens, model, override)
 }
 
 // CalculateMediaCost is a package-level helper that delegates to DefaultCatalog.

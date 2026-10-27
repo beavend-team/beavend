@@ -3,6 +3,7 @@ package providers
 import (
 	"encoding/base64"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/beavend/beavend/internal/core"
@@ -280,12 +281,14 @@ func formatWireMessageContent(m core.ChatMessage) any {
 				if urlStr == "" && p.Media.Digest != "" {
 					urlStr = p.Media.Digest
 				}
-				blocks = append(blocks, map[string]any{
-					"type": "image_url",
-					"image_url": map[string]any{
-						"url": urlStr,
-					},
-				})
+				if urlStr != "" {
+					blocks = append(blocks, buildMediaContentBlock(
+						"",
+						p.Media.MimeType,
+						urlStr,
+						p.Media.Filename,
+					))
+				}
 			}
 		}
 	}
@@ -313,15 +316,23 @@ func appendAttachmentsToContent(existing any, atts []core.Attachment) any {
 	for _, att := range atts {
 		urlStr := att.URL
 		if urlStr == "" && len(att.Data) > 0 {
-			urlStr = "data:" + att.MimeType + ";base64," + base64Encode(att.Data)
+			mime := att.MimeType
+			if mime == "" {
+				if strings.EqualFold(att.Type, "document") {
+					mime = "application/pdf"
+				} else {
+					mime = "application/octet-stream"
+				}
+			}
+			urlStr = "data:" + mime + ";base64," + base64Encode(att.Data)
 		}
 		if urlStr != "" {
-			blocks = append(blocks, map[string]any{
-				"type": "image_url",
-				"image_url": map[string]any{
-					"url": urlStr,
-				},
-			})
+			blocks = append(blocks, buildMediaContentBlock(
+				att.Type,
+				att.MimeType,
+				urlStr,
+				att.Filename,
+			))
 		}
 	}
 
@@ -329,6 +340,49 @@ func appendAttachmentsToContent(existing any, atts []core.Attachment) any {
 		return existing
 	}
 	return blocks
+}
+
+func buildMediaContentBlock(attType, mimeType, urlStr, filename string) map[string]any {
+	normalizedType := strings.ToLower(strings.TrimSpace(attType))
+	normalizedMime := strings.ToLower(strings.TrimSpace(mimeType))
+
+	// 1. Check if it's an image
+	isImage := normalizedType == "image" ||
+		strings.HasPrefix(normalizedMime, "image/") ||
+		strings.HasPrefix(urlStr, "data:image/")
+
+	if isImage {
+		return map[string]any{
+			"type": "image_url",
+			"image_url": map[string]any{
+				"url": urlStr,
+			},
+		}
+	}
+
+	// 2. Non-image media: documents (PDF, text, docx), audio, video, etc.
+	// In OpenAI and LiteLLM standard chat completions, documents/files are passed via the "file" content block.
+	name := strings.TrimSpace(filename)
+	if name == "" {
+		switch {
+		case normalizedMime == "application/pdf" || strings.Contains(urlStr, "data:application/pdf"):
+			name = "document.pdf"
+		case strings.HasPrefix(normalizedMime, "audio/"):
+			name = "audio"
+		case strings.HasPrefix(normalizedMime, "video/"):
+			name = "video"
+		default:
+			name = "document"
+		}
+	}
+
+	return map[string]any{
+		"type": "file",
+		"file": map[string]any{
+			"filename":  name,
+			"file_data": urlStr,
+		},
+	}
 }
 
 // ToCoreChatResponse maps an OpenAI wire response into core.ChatResponse.
@@ -469,4 +523,3 @@ type OpenAISpeechRequest struct {
 	ResponseFormat string  `json:"response_format,omitempty"` // "mp3", "opus", "aac", "flac", "wav", "pcm"
 	Speed          float64 `json:"speed,omitempty"`
 }
-

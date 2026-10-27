@@ -7,11 +7,15 @@ import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { Input, Textarea } from '../components/ui/Form';
 import { Alert, EmptyState, Loading } from '../components/ui/Feedback';
+import { VariableHelper } from '../components/VariablePicker';
 import { formatRelativeTime } from '../lib/utils';
 
 export const SkillsPage: React.FC = () => {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const DEFAULT_SKILL_TEMPLATE =
+    '# Role & Instructions\nYou have specialized expertise in code analysis and debugging.\nAnalyze provided code, pinpoint potential bugs or vulnerabilities, and propose clean, minimal solutions.';
 
   // Create modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -21,9 +25,7 @@ export const SkillsPage: React.FC = () => {
   const [skillName, setSkillName] = useState('');
   const [skillDesc, setSkillDesc] = useState('');
   const [skillMode, setSkillMode] = useState<'always' | 'on_demand'>('always');
-  const [skillContent, setSkillContent] = useState(
-    '# Role & Instructions\nYou have specialized expertise in code analysis and debugging.\n\nContext: {{context}}'
-  );
+  const [skillContent, setSkillContent] = useState(DEFAULT_SKILL_TEMPLATE);
 
   // Edit modal state
   const [showEditModal, setShowEditModal] = useState(false);
@@ -70,6 +72,24 @@ export const SkillsPage: React.FC = () => {
 
   const detectedVars = extractVariables(skillContent);
   const editDetectedVars = extractVariables(editContent);
+
+  const openCreateModal = () => {
+    setSkillId('');
+    setSkillName('');
+    setSkillDesc('');
+    setSkillMode('always');
+    setSkillContent(DEFAULT_SKILL_TEMPLATE);
+    setCreateError(null);
+    setShowCreateModal(true);
+  };
+
+  const handleInsertVar = (syntax: string) => {
+    setSkillContent((prev) => (prev ? `${prev}\n${syntax}` : syntax));
+  };
+
+  const handleInsertEditVar = (syntax: string) => {
+    setEditContent((prev) => (prev ? `${prev}\n${syntax}` : syntax));
+  };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -198,20 +218,21 @@ export const SkillsPage: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold text-neutral-100 flex items-center gap-2">
+          <h1 className="text-xl font-bold text-neutral-100 tracking-tight flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-emerald-400" />
             Skills Studio
           </h1>
-          <p className="text-xs text-neutral-400 mt-1">
-            Modular agent capability instruction sets. Inject directly into system prompts or expose dynamically on-demand via the <code className="text-neutral-300">load_skill</code> tool.
+          <p className="text-sm text-neutral-500 mt-0.5">
+            Modular agent capability instruction sets. Inject directly into system prompts or expose dynamically on-demand via the <code className="text-neutral-400">load_skill</code> tool.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-shrink-0">
           <Button
             variant="outline"
             size="sm"
+            icon={<Download className="w-3.5 h-3.5" />}
             onClick={() => {
               setImportSource('');
               setImportPreview(null);
@@ -219,22 +240,15 @@ export const SkillsPage: React.FC = () => {
               setShowImportModal(true);
             }}
           >
-            <Download className="w-3.5 h-3.5 mr-1.5" />
-            Import from skills.sh / GitHub
+            Import Skill
           </Button>
           <Button
+            variant="primary"
             size="sm"
-            onClick={() => {
-              setSkillId('');
-              setSkillName('');
-              setSkillDesc('');
-              setSkillMode('always');
-              setCreateError(null);
-              setShowCreateModal(true);
-            }}
+            icon={<Plus className="w-3.5 h-3.5" />}
+            onClick={openCreateModal}
           >
-            <Plus className="w-3.5 h-3.5 mr-1.5" />
-            New Skill
+            Add Skill
           </Button>
         </div>
       </div>
@@ -248,10 +262,29 @@ export const SkillsPage: React.FC = () => {
           title="No skills found"
           description="Create your first agent skill or import one directly from skills.sh or GitHub."
           action={
-            <Button size="sm" onClick={() => setShowCreateModal(true)}>
-              <Plus className="w-3.5 h-3.5 mr-1.5" />
-              New Skill
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                icon={<Download className="w-3.5 h-3.5" />}
+                onClick={() => {
+                  setImportSource('');
+                  setImportPreview(null);
+                  setImportError(null);
+                  setShowImportModal(true);
+                }}
+              >
+                Import Skill
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                icon={<Plus className="w-3.5 h-3.5" />}
+                onClick={openCreateModal}
+              >
+                Add Skill
+              </Button>
+            </div>
           }
         />
       ) : (
@@ -408,24 +441,19 @@ export const SkillsPage: React.FC = () => {
             </div>
           </div>
 
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
               <label className="block text-xs font-medium text-neutral-300">
                 Skill Instructions / Markdown
               </label>
-              {detectedVars.length > 0 && (
-                <div className="flex items-center gap-1 text-[11px] text-neutral-400">
-                  <span>Variables:</span>
-                  {detectedVars.map((v) => (
-                    <span key={v} className="bg-neutral-800 text-emerald-400 px-1 py-0.5 rounded text-[10px]">
-                      {`{{${v}}}`}
-                    </span>
-                  ))}
-                </div>
-              )}
             </div>
+            <VariableHelper
+              detectedVars={detectedVars}
+              onInsert={handleInsertVar}
+            />
             <Textarea
               rows={8}
+              mono
               value={skillContent}
               onChange={(e) => setSkillContent(e.target.value)}
               placeholder="Paste Markdown instructions or full SKILL.md with frontmatter..."
@@ -511,26 +539,22 @@ export const SkillsPage: React.FC = () => {
               </div>
             </div>
 
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
                 <label className="block text-xs font-medium text-neutral-300">
                   Instructions / Markdown
                 </label>
-                {editDetectedVars.length > 0 && (
-                  <div className="flex items-center gap-1 text-[11px] text-neutral-400">
-                    <span>Variables:</span>
-                    {editDetectedVars.map((v) => (
-                      <span key={v} className="bg-neutral-800 text-emerald-400 px-1 py-0.5 rounded text-[10px]">
-                        {`{{${v}}}`}
-                      </span>
-                    ))}
-                  </div>
-                )}
               </div>
+              <VariableHelper
+                detectedVars={editDetectedVars}
+                onInsert={handleInsertEditVar}
+              />
               <Textarea
                 rows={9}
+                mono
                 value={editContent}
                 onChange={(e) => setEditContent(e.target.value)}
+                placeholder="Paste Markdown instructions or full SKILL.md with frontmatter..."
                 required
               />
             </div>

@@ -15,16 +15,28 @@ import (
 	pgx "github.com/jackc/pgx/v5"
 )
 
+// UserStore defines database operations required by the auth Handler.
+type UserStore interface {
+	GetAdminUserByEmail(ctx context.Context, email string) (db.AdminUsers, error)
+	GetAdminUserByID(ctx context.Context, id string) (db.AdminUsers, error)
+	ListAdminUsers(ctx context.Context) ([]db.AdminUsers, error)
+	CreateAdminUser(ctx context.Context, arg db.CreateAdminUserParams) (db.AdminUsers, error)
+	DeleteAdminUser(ctx context.Context, id string) error
+	CountAdminUsers(ctx context.Context) (int64, error)
+	CountOwnerAdminUsers(ctx context.Context) (int64, error)
+	UpdateAdminUserDisabled(ctx context.Context, arg db.UpdateAdminUserDisabledParams) (db.AdminUsers, error)
+}
+
 // Handler handles admin authentication and user management HTTP endpoints.
 type Handler struct {
-	queries      *db.Queries
+	queries      UserStore
 	tokenManager *TokenManager
 	auditor      audit.Auditor
 	secureCookie bool
 }
 
 // NewHandler constructs an auth HTTP handler.
-func NewHandler(queries *db.Queries, tm *TokenManager, auditor audit.Auditor, secureCookie bool) *Handler {
+func NewHandler(queries UserStore, tm *TokenManager, auditor audit.Auditor, secureCookie bool) *Handler {
 	return &Handler{
 		queries:      queries,
 		tokenManager: tm,
@@ -70,26 +82,38 @@ func (h *Handler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dbUser, err := h.queries.GetAdminUserByEmail(r.Context(), req.Email)
+	userExists := true
+	expectedHash := DummyBcryptHash
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			writeError(w, http.StatusUnauthorized, "unauthenticated", "invalid email or password")
+			userExists = false
+		} else {
+			writeError(w, http.StatusInternalServerError, "database_error", "failed to lookup user")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "database_error", "failed to lookup user")
-		return
+	} else {
+		expectedHash = dbUser.PasswordHash
 	}
 
-	if !CheckPassword(req.Password, dbUser.PasswordHash) {
+	// Constant-time execution prevents email enumeration via timing side-channels
+	match := CheckPassword(req.Password, expectedHash)
+	if !userExists || !match {
 		writeError(w, http.StatusUnauthorized, "unauthenticated", "invalid email or password")
 		return
 	}
 
+	if dbUser.IsDisabled {
+		writeError(w, http.StatusForbidden, "forbidden", "admin account is disabled")
+		return
+	}
+
 	adminUser := &AdminUser{
-		ID:        dbUser.ID,
-		Email:     dbUser.Email,
-		Role:      Role(dbUser.Role),
-		CreatedAt: dbUser.CreatedAt.Time,
-		UpdatedAt: dbUser.UpdatedAt.Time,
+		ID:         dbUser.ID,
+		Email:      dbUser.Email,
+		Role:       Role(dbUser.Role),
+		IsDisabled: dbUser.IsDisabled,
+		CreatedAt:  dbUser.CreatedAt.Time,
+		UpdatedAt:  dbUser.UpdatedAt.Time,
 	}
 
 	tokenStr, err := h.tokenManager.GenerateToken(adminUser)
@@ -167,11 +191,12 @@ func (h *Handler) HandleListUsers(w http.ResponseWriter, r *http.Request) {
 	resp := make([]*AdminUser, len(dbUsers))
 	for i, u := range dbUsers {
 		resp[i] = &AdminUser{
-			ID:        u.ID,
-			Email:     u.Email,
-			Role:      Role(u.Role),
-			CreatedAt: u.CreatedAt.Time,
-			UpdatedAt: u.UpdatedAt.Time,
+			ID:         u.ID,
+			Email:      u.Email,
+			Role:       Role(u.Role),
+			IsDisabled: u.IsDisabled,
+			CreatedAt:  u.CreatedAt.Time,
+			UpdatedAt:  u.UpdatedAt.Time,
 		}
 	}
 
@@ -242,11 +267,12 @@ func (h *Handler) HandleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	u := &AdminUser{
-		ID:        created.ID,
-		Email:     created.Email,
-		Role:      Role(created.Role),
-		CreatedAt: created.CreatedAt.Time,
-		UpdatedAt: created.UpdatedAt.Time,
+		ID:         created.ID,
+		Email:      created.Email,
+		Role:       Role(created.Role),
+		IsDisabled: created.IsDisabled,
+		CreatedAt:  created.CreatedAt.Time,
+		UpdatedAt:  created.UpdatedAt.Time,
 	}
 
 	if current, ok := GetAdminUser(r.Context()); ok && h.auditor != nil {
@@ -264,7 +290,7 @@ func (h *Handler) HandleCreateUser(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(u)
 }
 
-// HandleDeleteUser deletes an admin user (owner only, cannot delete self).
+// HandleDeleteUser deletes an admin user (owner only, cannot delete self, cannot delete last owner).
 func (h *Handler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	targetID := chi.URLParam(r, "id")
 	if targetID == "" {
@@ -281,6 +307,25 @@ func (h *Handler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	if h.queries == nil {
 		writeError(w, http.StatusInternalServerError, "database_unavailable", "database store not available")
 		return
+	}
+
+	// Last-admin deletion protection: ensure at least one active owner remains
+	targetUser, err := h.queries.GetAdminUserByID(r.Context(), targetID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "not_found", "admin user not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "database_error", err.Error())
+		return
+	}
+
+	if targetUser.Role == string(RoleOwner) {
+		ownerCount, err := h.queries.CountOwnerAdminUsers(r.Context())
+		if err == nil && ownerCount <= 1 {
+			writeError(w, http.StatusConflict, "conflict", "cannot delete the last admin owner account")
+			return
+		}
 	}
 
 	if err := h.queries.DeleteAdminUser(r.Context(), targetID); err != nil {
@@ -306,7 +351,7 @@ func (h *Handler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) {
 }
 
 // SeedDefaultAdmin creates an initial owner user if no admin users exist.
-func SeedDefaultAdmin(ctx context.Context, queries *db.Queries, email, password string) error {
+func SeedDefaultAdmin(ctx context.Context, queries UserStore, email, password string) error {
 	if queries == nil {
 		return nil
 	}

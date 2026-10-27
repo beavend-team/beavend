@@ -99,6 +99,42 @@ type SkillQuerySource interface {
 	UpdateSkillActiveVersion(ctx context.Context, arg db.UpdateSkillActiveVersionParams) (db.Skills, error)
 }
 
+// PromptFragmentsSource is an optional interface to export and apply prompt fragments.
+type PromptFragmentsSource interface {
+	GetSnapshotPromptFragments(ctx context.Context, projectID, env, promptID string) ([]core.PromptFragmentRef, error)
+	UpsertPromptFragments(ctx context.Context, projectID, env, promptID string, fragments []core.PromptFragmentRef) error
+}
+
+// AppAPIKeySource is an optional interface to export and apply app api keys.
+type AppAPIKeySource interface {
+	GetSnapshotAppAPIKeys(ctx context.Context, arg db.GetSnapshotAppAPIKeysParams) ([]db.AppApiKeys, error)
+	UpsertAppAPIKey(ctx context.Context, key AppAPIKeySpec, projectID, env string) error
+}
+
+// KnowledgeDocSource is an optional interface to export and apply knowledge doc metadata.
+type KnowledgeDocSource interface {
+	GetSnapshotKnowledgeDocs(ctx context.Context, projectID, env string) ([]core.KnowledgeDocMeta, error)
+	UpsertKnowledgeDoc(ctx context.Context, doc KnowledgeDocSpec, projectID, env string) error
+}
+
+// SkillGovernanceSource is an optional interface for skill status and change note.
+type SkillGovernanceSource interface {
+	GetSkillGovernance(ctx context.Context, skillID string) (status string, changeNote string, err error)
+	UpdateSkillGovernance(ctx context.Context, skillID, status, changeNote string) error
+}
+
+// ToolExtendedSource is an optional interface for tool parallel safety.
+type ToolExtendedSource interface {
+	GetToolParallelSafe(ctx context.Context, toolID string) (bool, error)
+	SetToolParallelSafe(ctx context.Context, toolID string, parallelSafe bool) error
+}
+
+// ModelCapabilitiesSource is an optional interface for model capability flags and cached pricing.
+type ModelCapabilitiesSource interface {
+	GetModelCapabilities(ctx context.Context, projectID, env, logicalModel string) (cachedInputCost *float64, capabilities []string, err error)
+	UpdateModelCapabilities(ctx context.Context, projectID, env, logicalModel string, cachedInputCost *float64, capabilities []string) error
+}
+
 // Engine handles exporting and importing configuration as code documents.
 type Engine struct {
 	queries   QuerySource
@@ -159,11 +195,18 @@ func (e *Engine) Export(ctx context.Context, projectID, env string) (*ProjectDoc
 			if len(p.Variables) > 0 {
 				_ = json.Unmarshal(p.Variables, &vars)
 			}
+			var frags []core.PromptFragmentRef
+			if pfs, ok := e.queries.(PromptFragmentsSource); ok {
+				if f, err := pfs.GetSnapshotPromptFragments(ctx, projectID, env, p.PromptID); err == nil {
+					frags = f
+				}
+			}
 			doc.Prompts = append(doc.Prompts, PromptSpec{
 				ID:        p.PromptID,
 				Name:      p.PromptName,
 				Template:  p.Template,
 				Variables: vars,
+				Fragments: frags,
 				Version:   int(p.Version),
 			})
 		}
@@ -181,6 +224,10 @@ func (e *Engine) Export(ctx context.Context, projectID, env string) (*ProjectDoc
 				if len(s.Variables) > 0 {
 					_ = json.Unmarshal(s.Variables, &vars)
 				}
+				var status, changeNote string
+				if sgs, ok := e.queries.(SkillGovernanceSource); ok {
+					status, changeNote, _ = sgs.GetSkillGovernance(ctx, s.SkillID)
+				}
 				doc.Skills = append(doc.Skills, SkillSpec{
 					ID:            s.SkillID,
 					Name:          s.SkillName,
@@ -190,6 +237,8 @@ func (e *Engine) Export(ctx context.Context, projectID, env string) (*ProjectDoc
 					Content:       s.Content,
 					Variables:     vars,
 					Version:       int(s.Version),
+					Status:        status,
+					ChangeNote:    changeNote,
 				})
 			}
 		}
@@ -252,12 +301,18 @@ func (e *Engine) Export(ctx context.Context, projectID, env string) (*ProjectDoc
 				}
 			}
 
+			var parallelSafe bool
+			if tes, ok := e.queries.(ToolExtendedSource); ok {
+				parallelSafe, _ = tes.GetToolParallelSafe(ctx, t.ToolID)
+			}
+
 			doc.Tools = append(doc.Tools, ToolSpec{
 				ID:               t.ToolID,
 				Name:             t.Name,
 				Description:      t.Description,
 				Version:          int(t.Version),
 				SideEffect:       t.SideEffect,
+				ParallelSafe:     parallelSafe,
 				InputSchema:      inputSchema,
 				IdentityBindings: identityBindings,
 				Executor:         executor,
@@ -319,17 +374,25 @@ func (e *Engine) Export(ctx context.Context, projectID, env string) (*ProjectDoc
 				}
 			}
 
+			var cachedCost *float64
+			var caps []string
+			if mcs, ok := e.queries.(ModelCapabilitiesSource); ok {
+				cachedCost, caps, _ = mcs.GetModelCapabilities(ctx, projectID, env, m.LogicalModel)
+			}
+
 			doc.Models = append(doc.Models, ModelSpec{
-				ID:                  m.ID,
-				LogicalModel:        m.LogicalModel,
-				Deployment:          m.Deployment,
-				Adapter:             m.Adapter,
-				FallbackDeployments: fallbacks,
-				InputCostPer1M:      numericToFloatPtr(m.InputCostPer1m),
-				OutputCostPer1M:     numericToFloatPtr(m.OutputCostPer1m),
-				InputModalities:     m.InputModalities,
-				OutputModalities:    m.OutputModalities,
-				ProviderConfig:      provSpec,
+				ID:                   m.ID,
+				LogicalModel:         m.LogicalModel,
+				Deployment:           m.Deployment,
+				Adapter:              m.Adapter,
+				FallbackDeployments:  fallbacks,
+				InputCostPer1M:       numericToFloatPtr(m.InputCostPer1m),
+				CachedInputCostPer1M: cachedCost,
+				OutputCostPer1M:      numericToFloatPtr(m.OutputCostPer1m),
+				InputModalities:      m.InputModalities,
+				OutputModalities:     m.OutputModalities,
+				Capabilities:         caps,
+				ProviderConfig:       provSpec,
 			})
 		}
 	}
@@ -417,6 +480,42 @@ func (e *Engine) Export(ctx context.Context, projectID, env string) (*ProjectDoc
 				ResponseSchema: a.ResponseSchema,
 				Auth:           appAuth,
 			})
+		}
+	}
+
+	// 7. API Keys
+	if aks, ok := e.queries.(AppAPIKeySource); ok {
+		keys, err := aks.GetSnapshotAppAPIKeys(ctx, db.GetSnapshotAppAPIKeysParams{
+			ProjectID:   projectID,
+			Environment: env,
+		})
+		if err == nil {
+			for _, k := range keys {
+				doc.APIKeys = append(doc.APIKeys, AppAPIKeySpec{
+					ID:        k.ID,
+					AppID:     k.AppID,
+					Name:      k.Name,
+					KeyPrefix: k.KeyPrefix,
+				})
+			}
+		}
+	}
+
+	// 8. Knowledge Docs
+	if kds, ok := e.queries.(KnowledgeDocSource); ok {
+		kDocs, err := kds.GetSnapshotKnowledgeDocs(ctx, projectID, env)
+		if err == nil {
+			for _, kd := range kDocs {
+				doc.Knowledge = append(doc.Knowledge, KnowledgeDocSpec{
+					ID:          kd.ID,
+					AppID:       kd.AppID,
+					Title:       kd.Title,
+					Description: kd.Description,
+					SourceURL:   kd.SourceURL,
+					Tags:        kd.Tags,
+					Revision:    kd.Revision,
+				})
+			}
 		}
 	}
 
@@ -509,6 +608,12 @@ func (e *Engine) Diff(ctx context.Context, doc *ProjectDocument) (*DiffReport, e
 			if strings.TrimSpace(existing.Template) != strings.TrimSpace(pSpec.Template) {
 				changes = append(changes, "template changed")
 			}
+			if pfs, ok := e.queries.(PromptFragmentsSource); ok {
+				existingFrags, _ := pfs.GetSnapshotPromptFragments(ctx, doc.Project.ID, doc.Environment, pSpec.ID)
+				if !reflect.DeepEqual(existingFrags, pSpec.Fragments) {
+					changes = append(changes, "fragments changed")
+				}
+			}
 			action := ActionUnchanged
 			if len(changes) > 0 {
 				action = ActionUpdate
@@ -547,6 +652,15 @@ func (e *Engine) Diff(ctx context.Context, doc *ProjectDocument) (*DiffReport, e
 				}
 				if existing.InjectionMode != sSpec.InjectionMode && sSpec.InjectionMode != "" {
 					changes = append(changes, fmt.Sprintf("injection_mode: %s -> %s", existing.InjectionMode, sSpec.InjectionMode))
+				}
+				if sgs, ok := sq.(SkillGovernanceSource); ok {
+					st, cn, _ := sgs.GetSkillGovernance(ctx, sSpec.ID)
+					if sSpec.Status != "" && st != sSpec.Status {
+						changes = append(changes, fmt.Sprintf("status: %s -> %s", st, sSpec.Status))
+					}
+					if sSpec.ChangeNote != "" && cn != sSpec.ChangeNote {
+						changes = append(changes, "change_note changed")
+					}
 				}
 				action := ActionUnchanged
 				if len(changes) > 0 {
@@ -625,6 +739,12 @@ func (e *Engine) Diff(ctx context.Context, doc *ProjectDocument) (*DiffReport, e
 			if existing.Authorization != tSpec.Authorization {
 				changes = append(changes, fmt.Sprintf("authorization: %s -> %s", existing.Authorization, tSpec.Authorization))
 			}
+			if tes, ok := e.queries.(ToolExtendedSource); ok {
+				ps, _ := tes.GetToolParallelSafe(ctx, tSpec.ID)
+				if ps != tSpec.ParallelSafe {
+					changes = append(changes, fmt.Sprintf("parallel_safe: %v -> %v", ps, tSpec.ParallelSafe))
+				}
+			}
 			action := ActionUnchanged
 			if len(changes) > 0 {
 				action = ActionUpdate
@@ -662,6 +782,15 @@ func (e *Engine) Diff(ctx context.Context, doc *ProjectDocument) (*DiffReport, e
 			}
 			if existing.Adapter != mSpec.Adapter {
 				changes = append(changes, fmt.Sprintf("adapter: %s -> %s", existing.Adapter, mSpec.Adapter))
+			}
+			if mcs, ok := e.queries.(ModelCapabilitiesSource); ok {
+				cached, caps, _ := mcs.GetModelCapabilities(ctx, doc.Project.ID, doc.Environment, mSpec.LogicalModel)
+				if (cached == nil && mSpec.CachedInputCostPer1M != nil) || (cached != nil && mSpec.CachedInputCostPer1M == nil) || (cached != nil && mSpec.CachedInputCostPer1M != nil && *cached != *mSpec.CachedInputCostPer1M) {
+					changes = append(changes, "cached_input_cost changed")
+				}
+				if !stringSlicesEqualUnordered(caps, mSpec.Capabilities) {
+					changes = append(changes, "capabilities changed")
+				}
 			}
 			action := ActionUnchanged
 			if len(changes) > 0 {
@@ -736,6 +865,82 @@ func (e *Engine) Diff(ctx context.Context, doc *ProjectDocument) (*DiffReport, e
 				ID:     aSpec.ID,
 				Action: ActionCreate,
 			})
+		}
+	}
+
+	// 8. API Keys
+	if aks, ok := e.queries.(AppAPIKeySource); ok {
+		existingKeys, _ := aks.GetSnapshotAppAPIKeys(ctx, db.GetSnapshotAppAPIKeysParams{
+			ProjectID:   doc.Project.ID,
+			Environment: doc.Environment,
+		})
+		keyMap := make(map[string]db.AppApiKeys)
+		for _, k := range existingKeys {
+			keyMap[k.ID] = k
+		}
+
+		allKeys := append([]AppAPIKeySpec(nil), doc.APIKeys...)
+		for _, a := range doc.Apps {
+			allKeys = append(allKeys, a.APIKeys...)
+		}
+
+		for _, kSpec := range allKeys {
+			if existing, ok := keyMap[kSpec.ID]; ok {
+				var changes []string
+				if existing.Name != kSpec.Name {
+					changes = append(changes, fmt.Sprintf("name: %s -> %s", existing.Name, kSpec.Name))
+				}
+				action := ActionUnchanged
+				if len(changes) > 0 {
+					action = ActionUpdate
+				}
+				report.Resources = append(report.Resources, ResourceDiff{
+					Type:    "api_key",
+					ID:      kSpec.ID,
+					Action:  action,
+					Changes: changes,
+				})
+			} else {
+				report.Resources = append(report.Resources, ResourceDiff{
+					Type:   "api_key",
+					ID:     kSpec.ID,
+					Action: ActionCreate,
+				})
+			}
+		}
+	}
+
+	// 9. Knowledge Docs
+	if kds, ok := e.queries.(KnowledgeDocSource); ok {
+		existingDocs, _ := kds.GetSnapshotKnowledgeDocs(ctx, doc.Project.ID, doc.Environment)
+		docMap := make(map[string]core.KnowledgeDocMeta)
+		for _, d := range existingDocs {
+			docMap[d.ID] = d
+		}
+
+		for _, kSpec := range doc.Knowledge {
+			if existing, ok := docMap[kSpec.ID]; ok {
+				var changes []string
+				if existing.Title != kSpec.Title {
+					changes = append(changes, fmt.Sprintf("title: %s -> %s", existing.Title, kSpec.Title))
+				}
+				action := ActionUnchanged
+				if len(changes) > 0 {
+					action = ActionUpdate
+				}
+				report.Resources = append(report.Resources, ResourceDiff{
+					Type:    "knowledge",
+					ID:      kSpec.ID,
+					Action:  action,
+					Changes: changes,
+				})
+			} else {
+				report.Resources = append(report.Resources, ResourceDiff{
+					Type:   "knowledge",
+					ID:     kSpec.ID,
+					Action: ActionCreate,
+				})
+			}
 		}
 	}
 
@@ -856,6 +1061,9 @@ func (e *Engine) Apply(ctx context.Context, doc *ProjectDocument) (*DiffReport, 
 				})
 			}
 		}
+		if pfs, ok := e.queries.(PromptFragmentsSource); ok && len(pSpec.Fragments) > 0 {
+			_ = pfs.UpsertPromptFragments(ctx, doc.Project.ID, doc.Environment, pSpec.ID, pSpec.Fragments)
+		}
 	}
 
 	// 4b. Upsert Skills
@@ -924,6 +1132,9 @@ func (e *Engine) Apply(ctx context.Context, doc *ProjectDocument) (*DiffReport, 
 						ActiveVersion: newV,
 					})
 				}
+			}
+			if sgs, ok := sq.(SkillGovernanceSource); ok && (sSpec.Status != "" || sSpec.ChangeNote != "") {
+				_ = sgs.UpdateSkillGovernance(ctx, sSpec.ID, sSpec.Status, sSpec.ChangeNote)
 			}
 		}
 	}
@@ -1051,6 +1262,9 @@ func (e *Engine) Apply(ctx context.Context, doc *ProjectDocument) (*DiffReport, 
 				})
 			}
 		}
+		if tes, ok := e.queries.(ToolExtendedSource); ok {
+			_ = tes.SetToolParallelSafe(ctx, tSpec.ID, tSpec.ParallelSafe)
+		}
 	}
 
 	// 7. Upsert Models & Providers
@@ -1103,6 +1317,9 @@ func (e *Engine) Apply(ctx context.Context, doc *ProjectDocument) (*DiffReport, 
 		})
 		if err != nil {
 			return nil, fmt.Errorf("upsert model routing %s: %w", mSpec.LogicalModel, err)
+		}
+		if mcs, ok := e.queries.(ModelCapabilitiesSource); ok && (mSpec.CachedInputCostPer1M != nil || len(mSpec.Capabilities) > 0) {
+			_ = mcs.UpdateModelCapabilities(ctx, doc.Project.ID, doc.Environment, mSpec.LogicalModel, mSpec.CachedInputCostPer1M, mSpec.Capabilities)
 		}
 	}
 
@@ -1219,6 +1436,24 @@ func (e *Engine) Apply(ctx context.Context, doc *ProjectDocument) (*DiffReport, 
 					ModelRoutes:   routesBytes,
 				})
 			}
+		}
+	}
+
+	// 8b. Upsert API Keys
+	if aks, ok := e.queries.(AppAPIKeySource); ok {
+		allKeys := append([]AppAPIKeySpec(nil), doc.APIKeys...)
+		for _, a := range doc.Apps {
+			allKeys = append(allKeys, a.APIKeys...)
+		}
+		for _, k := range allKeys {
+			_ = aks.UpsertAppAPIKey(ctx, k, doc.Project.ID, doc.Environment)
+		}
+	}
+
+	// 8c. Upsert Knowledge Docs
+	if kds, ok := e.queries.(KnowledgeDocSource); ok {
+		for _, kd := range doc.Knowledge {
+			_ = kds.UpsertKnowledgeDoc(ctx, kd, doc.Project.ID, doc.Environment)
 		}
 	}
 

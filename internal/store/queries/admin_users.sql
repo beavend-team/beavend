@@ -27,9 +27,19 @@ SET role = $2, updated_at = NOW()
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateAdminUserDisabled :one
+UPDATE admin_users
+SET is_disabled = $2, updated_at = NOW()
+WHERE id = $1
+RETURNING *;
+
 -- name: DeleteAdminUser :exec
 DELETE FROM admin_users
 WHERE id = $1;
 
 -- name: CountAdminUsers :one
 SELECT COUNT(*) FROM admin_users;
+
+-- name: CountOwnerAdminUsers :one
+SELECT COUNT(*) FROM admin_users
+WHERE role = 'owner' AND is_disabled = FALSE;

@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/beavend/beavend/internal/core"
@@ -141,6 +142,125 @@ func TestWireConversion_CanonicalParts(t *testing.T) {
 	imgURL, ok := blocks[1]["image_url"].(map[string]any)
 	if !ok || imgURL["url"] != "https://storage.beavend.io/med_123.jpg" {
 		t.Fatalf("unexpected image_url payload: %+v", blocks[1])
+	}
+}
+
+func TestDocumentAttachmentConversion(t *testing.T) {
+	req := core.ChatRequest{
+		Model: "doc-model",
+		Messages: []core.ChatMessage{
+			{
+				Role:    "user",
+				Content: "Please summarize this document and examine the image",
+			},
+		},
+		Attachments: []core.Attachment{
+			{
+				Type:     "document",
+				MimeType: "application/pdf",
+				Data:     []byte("%PDF-1.3 fake pdf content"),
+				Filename: "report.pdf",
+			},
+			{
+				Type:     "image",
+				MimeType: "image/png",
+				Data:     []byte("fake png bytes"),
+			},
+		},
+	}
+
+	wireReq := FromCoreChatRequest(req, "claude-3-5-sonnet")
+	if len(wireReq.Messages) != 1 {
+		t.Fatalf("expected 1 wire message, got %d", len(wireReq.Messages))
+	}
+	msg := wireReq.Messages[0]
+	blocks, ok := msg.Content.([]map[string]any)
+	if !ok {
+		t.Fatalf("expected []map[string]any content, got %T: %+v", msg.Content, msg.Content)
+	}
+	if len(blocks) != 3 {
+		t.Fatalf("expected 3 blocks (text, doc file, image), got %d: %+v", len(blocks), blocks)
+	}
+
+	// 1. Text block
+	if blocks[0]["type"] != "text" {
+		t.Fatalf("expected text block, got: %+v", blocks[0])
+	}
+
+	// 2. Document file block (must be type: "file", NOT "image_url")
+	if blocks[1]["type"] != "file" {
+		t.Fatalf("expected document to be formatted as type 'file', got: %+v", blocks[1])
+	}
+	fileBlock, ok := blocks[1]["file"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected 'file' object in block: %+v", blocks[1])
+	}
+	if fileBlock["filename"] != "report.pdf" {
+		t.Fatalf("expected filename 'report.pdf', got: %v", fileBlock["filename"])
+	}
+	fileData, ok := fileBlock["file_data"].(string)
+	if !ok || !strings.HasPrefix(fileData, "data:application/pdf;base64,") {
+		t.Fatalf("expected file_data to start with 'data:application/pdf;base64,', got: %v", fileData)
+	}
+
+	// 3. Image block (must be type: "image_url")
+	if blocks[2]["type"] != "image_url" {
+		t.Fatalf("expected image to be formatted as type 'image_url', got: %+v", blocks[2])
+	}
+	imgBlock, ok := blocks[2]["image_url"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected 'image_url' object in block: %+v", blocks[2])
+	}
+	imgURL, ok := imgBlock["url"].(string)
+	if !ok || !strings.HasPrefix(imgURL, "data:image/png;base64,") {
+		t.Fatalf("expected image url to start with 'data:image/png;base64,', got: %v", imgURL)
+	}
+}
+
+func TestDocumentMediaPartConversion(t *testing.T) {
+	req := core.ChatRequest{
+		Model: "doc-model",
+		Messages: []core.ChatMessage{
+			{
+				Role: "user",
+				Parts: []core.Part{
+					core.TextPart("Analyze the attached PDF"),
+					core.MediaPart(&core.MediaRef{
+						MediaID:  "med_pdf_1",
+						MimeType: "application/pdf",
+						URL:      "https://storage.beavend.io/contract.pdf",
+						Filename: "contract.pdf",
+					}),
+				},
+			},
+		},
+	}
+
+	wireReq := FromCoreChatRequest(req, "gpt-4o")
+	if len(wireReq.Messages) != 1 {
+		t.Fatalf("expected 1 wire message, got %d", len(wireReq.Messages))
+	}
+	msg := wireReq.Messages[0]
+	blocks, ok := msg.Content.([]map[string]any)
+	if !ok {
+		t.Fatalf("expected []map[string]any content, got %T: %+v", msg.Content, msg.Content)
+	}
+	if len(blocks) != 2 {
+		t.Fatalf("expected 2 blocks, got %d: %+v", len(blocks), blocks)
+	}
+
+	if blocks[1]["type"] != "file" {
+		t.Fatalf("expected media part document to be type 'file', got: %+v", blocks[1])
+	}
+	fileBlock, ok := blocks[1]["file"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected 'file' object, got: %+v", blocks[1])
+	}
+	if fileBlock["filename"] != "contract.pdf" {
+		t.Fatalf("expected filename 'contract.pdf', got: %v", fileBlock["filename"])
+	}
+	if fileBlock["file_data"] != "https://storage.beavend.io/contract.pdf" {
+		t.Fatalf("expected file_data to match URL, got: %v", fileBlock["file_data"])
 	}
 }
 

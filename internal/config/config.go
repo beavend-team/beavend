@@ -39,6 +39,13 @@ type Config struct {
 	Usage    UsageConfig    `json:"usage" yaml:"usage"`
 	Search   SearchConfig   `json:"search" yaml:"search"`
 	Pricing  PricingConfig  `json:"pricing" yaml:"pricing"`
+	MCP      MCPConfig      `json:"mcp" yaml:"mcp"`
+}
+
+// MCPConfig holds Model Context Protocol execution settings.
+type MCPConfig struct {
+	AllowStdio     bool     `json:"allow_stdio" yaml:"allow_stdio"`
+	StdioAllowlist []string `json:"stdio_allowlist" yaml:"stdio_allowlist"`
 }
 
 // PricingConfig holds model pricing and background catalog synchronization settings.
@@ -162,7 +169,22 @@ func DefaultConfig() *Config {
 			CatalogURL:   "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
 			SyncInterval: 24 * time.Hour,
 		},
+		MCP: MCPConfig{
+			AllowStdio:     false,
+			StdioAllowlist: []string{},
+		},
 	}
+}
+
+func resolveSecretFile(lookup func(string) string, envVar string, fileEnvVars ...string) string {
+	for _, fileEnv := range fileEnvVars {
+		if path := strings.TrimSpace(lookup(fileEnv)); path != "" {
+			if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
+				return strings.TrimSpace(string(data))
+			}
+		}
+	}
+	return strings.TrimSpace(lookup(envVar))
 }
 
 // Load loads configuration from environment variables with sensible defaults.
@@ -235,26 +257,58 @@ func LoadFileWithLookup(filePath string, lookup func(string) string) (*Config, e
 		cfg.HTTP.IdleTimeout = d
 	}
 
-	if val := lookup("BEAVEND_DATABASE_URL"); val != "" {
-		cfg.Database.URL = strings.TrimSpace(val)
+	if val := resolveSecretFile(lookup, "BEAVEND_DATABASE_URL", "BEAVEND_DATABASE_URL_FILE"); val != "" {
+		cfg.Database.URL = val
 	}
-	if val := lookup("BEAVEND_REDIS_URL"); val != "" {
-		cfg.Redis.URL = strings.TrimSpace(val)
+	// If BEAVEND_DB_PASSWORD_FILE is provided, replace password or override URL credentials
+	if pwd := resolveSecretFile(lookup, "", "BEAVEND_DB_PASSWORD_FILE"); pwd != "" {
+		// If Database.URL has user/pass format, replace password
+		if strings.Contains(cfg.Database.URL, "@") {
+			parts := strings.SplitN(cfg.Database.URL, "@", 2)
+			userPart := parts[0]
+			hostPart := parts[1]
+			if slashIdx := strings.Index(userPart, "://"); slashIdx != -1 {
+				proto := userPart[:slashIdx+3]
+				cred := userPart[slashIdx+3:]
+				user := cred
+				if colonIdx := strings.Index(cred, ":"); colonIdx != -1 {
+					user = cred[:colonIdx]
+				}
+				cfg.Database.URL = fmt.Sprintf("%s%s:%s@%s", proto, user, pwd, hostPart)
+			}
+		}
+	}
+
+	if val := resolveSecretFile(lookup, "BEAVEND_REDIS_URL", "BEAVEND_REDIS_URL_FILE"); val != "" {
+		cfg.Redis.URL = val
 	}
 	if val := lookup("BEAVEND_LITELLM_URL"); val != "" {
 		cfg.LiteLLM.URL = strings.TrimSpace(val)
 	}
-	if val := lookup("BEAVEND_LITELLM_KEY"); val != "" {
-		cfg.LiteLLM.Key = strings.TrimSpace(val)
+	if val := resolveSecretFile(lookup, "BEAVEND_LITELLM_KEY", "BEAVEND_LITELLM_KEY_FILE"); val != "" {
+		cfg.LiteLLM.Key = val
 	}
-	if val := lookup("BEAVEND_MASTER_KEY"); val != "" {
-		cfg.Security.MasterKey = strings.TrimSpace(val)
+	if val := resolveSecretFile(lookup, "BEAVEND_MASTER_KEY", "BEAVEND_MASTER_KEY_FILE", "BEAVEND_SECRET_KEY_FILE"); val != "" {
+		cfg.Security.MasterKey = val
 	}
 	if val := lookup("BEAVEND_ADMIN_EMAIL"); val != "" {
 		cfg.Admin.Email = strings.TrimSpace(val)
 	}
-	if val := lookup("BEAVEND_ADMIN_PASSWORD"); val != "" {
-		cfg.Admin.Password = strings.TrimSpace(val)
+	if val := resolveSecretFile(lookup, "BEAVEND_ADMIN_PASSWORD", "BEAVEND_ADMIN_PASSWORD_FILE"); val != "" {
+		cfg.Admin.Password = val
+	}
+	if val := lookup("BEAVEND_MCP_ALLOW_STDIO"); val != "" {
+		cfg.MCP.AllowStdio = strings.EqualFold(strings.TrimSpace(val), "true") || strings.TrimSpace(val) == "1"
+	}
+	if val := lookup("BEAVEND_MCP_STDIO_ALLOWLIST"); val != "" {
+		rawList := strings.Split(val, ",")
+		var cleanList []string
+		for _, item := range rawList {
+			if trimmed := strings.TrimSpace(item); trimmed != "" {
+				cleanList = append(cleanList, trimmed)
+			}
+		}
+		cfg.MCP.StdioAllowlist = cleanList
 	}
 	if val := lookup("BEAVEND_LOG_LEVEL"); val != "" {
 		cfg.Log.Level = strings.TrimSpace(val)

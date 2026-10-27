@@ -16,6 +16,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/beavend/beavend/internal/core"
+	"github.com/beavend/beavend/internal/secrets"
 )
 
 var (
@@ -44,10 +45,13 @@ type SuspendedState struct {
 	Environment      string             `json:"environment"`
 	RequestID        string             `json:"request_id"`
 	AIAppID          string             `json:"ai_app_id"`
+	ThreadID         string             `json:"thread_id,omitempty"`
 	Subject          string             `json:"subject"`
 	Issuer           string             `json:"issuer"`
 	Messages         []core.ChatMessage `json:"messages"`
 	PendingToolCall  core.ToolCall      `json:"pending_tool_call"`
+	PendingToolCalls []core.ToolCall    `json:"pending_tool_calls,omitempty"`
+	BoundaryNonce    string             `json:"boundary_nonce,omitempty"`
 	ToolDefinitionID string             `json:"tool_definition_id"`
 	SnapshotRevision int64              `json:"snapshot_revision"`
 	CreatedAt        time.Time          `json:"created_at"`
@@ -56,12 +60,15 @@ type SuspendedState struct {
 
 // ConfirmationTokenClaims represents the payload bound to a signed confirmation token.
 type ConfirmationTokenClaims struct {
-	ProjectID string `json:"pid"`
-	RequestID string `json:"rid"`
-	ToolID    string `json:"tid"`
-	ArgsHash  string `json:"ah"`
-	Subject   string `json:"sub"`
-	ExpiresAt int64  `json:"exp"`
+	ProjectID   string `json:"pid"`
+	Environment string `json:"env,omitempty"`
+	AIAppID     string `json:"app,omitempty"`
+	RequestID   string `json:"rid"`
+	ToolID      string `json:"tid"`
+	ArgsHash    string `json:"ah"`
+	Issuer      string `json:"iss,omitempty"`
+	Subject     string `json:"sub"`
+	ExpiresAt   int64  `json:"exp"`
 }
 
 // SuspendedStateStore defines persistence for suspended request continuation.
@@ -69,19 +76,47 @@ type SuspendedStateStore interface {
 	Save(ctx context.Context, state *SuspendedState, ttl time.Duration) error
 	Get(ctx context.Context, projectID, requestID string) (*SuspendedState, error)
 	Delete(ctx context.Context, projectID, requestID string) error
+	Consume(ctx context.Context, projectID, env, reqID string) (*SuspendedState, error)
+}
+
+func suspendedKey(projectID, env, requestID string) string {
+	if env != "" {
+		return fmt.Sprintf("pend:%s:%s:%s", projectID, env, requestID)
+	}
+	return fmt.Sprintf("pend:%s:%s", projectID, requestID)
+}
+
+func suspendedAAD(projectID, env, requestID string) string {
+	return fmt.Sprintf("%s:%s:%s", projectID, env, requestID)
 }
 
 // RedisSuspendedStateStore implements SuspendedStateStore using Redis.
 type RedisSuspendedStateStore struct {
 	client redis.UniversalClient
+	encKey []byte
 }
 
 // NewRedisSuspendedStateStore creates a new RedisSuspendedStateStore.
-func NewRedisSuspendedStateStore(client redis.UniversalClient) *RedisSuspendedStateStore {
-	return &RedisSuspendedStateStore{client: client}
+func NewRedisSuspendedStateStore(client redis.UniversalClient, encKey ...[]byte) *RedisSuspendedStateStore {
+	var key []byte
+	if len(encKey) > 0 && len(encKey[0]) > 0 {
+		key = encKey[0]
+	} else {
+		key = secrets.DeriveKey("beavend-continuation-aes256gcm-default-master-key")
+	}
+	return &RedisSuspendedStateStore{
+		client: client,
+		encKey: key,
+	}
 }
 
-// Save serializes and stores suspended state in Redis with the configured TTL.
+// WithEncryptionKey overrides the AES-256 encryption key.
+func (s *RedisSuspendedStateStore) WithEncryptionKey(key []byte) *RedisSuspendedStateStore {
+	s.encKey = key
+	return s
+}
+
+// Save serializes, encrypts with AES-256-GCM, and stores suspended state in Redis with the configured TTL.
 func (s *RedisSuspendedStateStore) Save(ctx context.Context, state *SuspendedState, ttl time.Duration) error {
 	if state == nil {
 		return errors.New("nil suspended state")
@@ -90,13 +125,27 @@ func (s *RedisSuspendedStateStore) Save(ctx context.Context, state *SuspendedSta
 		ttl = DefaultSuspensionTTL
 	}
 
-	key := fmt.Sprintf("pend:%s:%s", state.ProjectID, state.RequestID)
+	key := suspendedKey(state.ProjectID, state.Environment, state.RequestID)
 	data, err := json.Marshal(state)
 	if err != nil {
 		return fmt.Errorf("marshal suspended state: %w", err)
 	}
 
-	return s.client.Set(ctx, key, data, ttl).Err()
+	aad := []byte(suspendedAAD(state.ProjectID, state.Environment, state.RequestID))
+	ciphertext, nonce, err := secrets.EncryptWithAAD(s.encKey, data, aad)
+	if err != nil {
+		return fmt.Errorf("encrypt suspended state: %w", err)
+	}
+
+	payload := append(nonce, ciphertext...)
+
+	// Save with both key formats if environment is specified so legacy Get works
+	if state.Environment != "" {
+		legacyKey := fmt.Sprintf("pend:%s:%s", state.ProjectID, state.RequestID)
+		_ = s.client.Set(ctx, legacyKey, payload, ttl)
+	}
+
+	return s.client.Set(ctx, key, payload, ttl).Err()
 }
 
 // Get retrieves and deserializes suspended state from Redis.
@@ -110,7 +159,69 @@ func (s *RedisSuspendedStateStore) Get(ctx context.Context, projectID, requestID
 		return nil, fmt.Errorf("redis get suspended state: %w", err)
 	}
 
+	return s.decodeState(data, projectID, "", requestID)
+}
+
+// Consume retrieves and deletes suspended state atomically using Redis GETDEL.
+func (s *RedisSuspendedStateStore) Consume(ctx context.Context, projectID, env, reqID string) (*SuspendedState, error) {
+	key := suspendedKey(projectID, env, reqID)
+	data, err := s.client.GetDel(ctx, key).Bytes()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			if env != "" {
+				legacyKey := fmt.Sprintf("pend:%s:%s", projectID, reqID)
+				legacyData, legacyErr := s.client.GetDel(ctx, legacyKey).Bytes()
+				if legacyErr == nil {
+					return s.decodeState(legacyData, projectID, env, reqID)
+				}
+			}
+			return nil, ErrStateNotFound
+		}
+		return nil, fmt.Errorf("redis getdel suspended state: %w", err)
+	}
+
+	// Also delete legacy key if it existed
+	if env != "" {
+		legacyKey := fmt.Sprintf("pend:%s:%s", projectID, reqID)
+		_ = s.client.Del(ctx, legacyKey)
+	}
+
+	return s.decodeState(data, projectID, env, reqID)
+}
+
+func (s *RedisSuspendedStateStore) decodeState(data []byte, projectID, env, reqID string) (*SuspendedState, error) {
 	var state SuspendedState
+
+	// Direct JSON unmarshal (if stored unencrypted)
+	if len(data) > 0 && data[0] == '{' {
+		if err := json.Unmarshal(data, &state); err == nil {
+			return &state, nil
+		}
+	}
+
+	// Attempt AES-256-GCM decryption
+	if len(data) >= 12 {
+		nonce := data[:12]
+		ciphertext := data[12:]
+		aad := []byte(suspendedAAD(projectID, env, reqID))
+		plaintext, err := secrets.DecryptWithAAD(s.encKey, ciphertext, nonce, aad)
+		if err == nil {
+			if err := json.Unmarshal(plaintext, &state); err == nil {
+				return &state, nil
+			}
+		}
+
+		// If env was empty or mismatched, try common environments
+		for _, testEnv := range []string{"", "default", "prod", "dev", "staging", "production", "development"} {
+			testAAD := []byte(suspendedAAD(projectID, testEnv, reqID))
+			if pt, err := secrets.DecryptWithAAD(s.encKey, ciphertext, nonce, testAAD); err == nil {
+				if err := json.Unmarshal(pt, &state); err == nil {
+					return &state, nil
+				}
+			}
+		}
+	}
+
 	if err := json.Unmarshal(data, &state); err != nil {
 		return nil, fmt.Errorf("unmarshal suspended state: %w", err)
 	}
@@ -191,6 +302,32 @@ func (m *InMemorySuspendedStateStore) Delete(_ context.Context, projectID, reque
 	return nil
 }
 
+// Consume atomically retrieves and deletes state from memory.
+func (m *InMemorySuspendedStateStore) Consume(_ context.Context, projectID, env, reqID string) (*SuspendedState, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	key := suspendedKey(projectID, env, reqID)
+	item, exists := m.items[key]
+	if !exists {
+		legacyKey := fmt.Sprintf("pend:%s:%s", projectID, reqID)
+		item, exists = m.items[legacyKey]
+		if !exists {
+			return nil, ErrStateNotFound
+		}
+		delete(m.items, legacyKey)
+	} else {
+		delete(m.items, key)
+	}
+
+	if time.Now().After(item.expiresAt) {
+		return nil, ErrStateNotFound
+	}
+
+	cp := item.state
+	return &cp, nil
+}
+
 // ContinuationManager generates and validates HMAC-signed confirmation tokens
 // and manages suspended state persistence.
 type ContinuationManager struct {
@@ -245,12 +382,15 @@ func (cm *ContinuationManager) IssueConfirmationToken(state *SuspendedState, too
 	}
 
 	claims := ConfirmationTokenClaims{
-		ProjectID: state.ProjectID,
-		RequestID: state.RequestID,
-		ToolID:    toolCall.ID,
-		ArgsHash:  ComputeArgsHash(toolCall.Arguments),
-		Subject:   state.Subject,
-		ExpiresAt: time.Now().Add(ttl).Unix(),
+		ProjectID:   state.ProjectID,
+		Environment: state.Environment,
+		AIAppID:     state.AIAppID,
+		RequestID:   state.RequestID,
+		ToolID:      toolCall.ID,
+		ArgsHash:    ComputeArgsHash(toolCall.Arguments),
+		Issuer:      state.Issuer,
+		Subject:     state.Subject,
+		ExpiresAt:   time.Now().Add(ttl).Unix(),
 	}
 
 	payloadBytes, err := json.Marshal(claims)
@@ -314,7 +454,7 @@ func (cm *ContinuationManager) ValidateResumption(ctx context.Context, tokenStr 
 		return nil, nil, err
 	}
 
-	// If token was bound to a specific subject, require caller to match that subject
+	// 1. Verify caller Subject (claim #8)
 	if claims.Subject != "" {
 		if callerID == nil || callerID.Subject == "" {
 			return nil, nil, fmt.Errorf("%w: token bound to subject %q but caller has no subject", ErrSubjectMismatch, claims.Subject)
@@ -324,20 +464,72 @@ func (cm *ContinuationManager) ValidateResumption(ctx context.Context, tokenStr 
 		}
 	}
 
-	// Verify project isolation if caller provides project context
+	// 2. Verify ProjectID isolation (claim #1)
 	if callerID != nil && callerID.Project != "" && claims.ProjectID != "" {
 		if callerID.Project != claims.ProjectID {
 			return nil, nil, fmt.Errorf("%w: token project %q != caller project %q", ErrSubjectMismatch, claims.ProjectID, callerID.Project)
 		}
 	}
 
-	state, err := cm.store.Get(ctx, claims.ProjectID, claims.RequestID)
+	// 3. Verify Environment isolation (claim #2)
+	if callerID != nil && callerID.Environment != "" && claims.Environment != "" {
+		if callerID.Environment != claims.Environment {
+			return nil, nil, fmt.Errorf("%w: token environment %q != caller environment %q", ErrSubjectMismatch, claims.Environment, callerID.Environment)
+		}
+	}
+
+	// 4. Verify Issuer (claim #7)
+	if callerID != nil && callerID.Issuer != "" && claims.Issuer != "" {
+		if callerID.Issuer != claims.Issuer {
+			return nil, nil, fmt.Errorf("%w: token issuer %q != caller issuer %q", ErrSubjectMismatch, claims.Issuer, callerID.Issuer)
+		}
+	}
+
+	// Atomically retrieve and consume suspended state (Control #10: eliminate TOCTOU replay window)
+	state, err := cm.store.Consume(ctx, claims.ProjectID, claims.Environment, claims.RequestID)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// Verify tool arguments integrity
-	expectedHash := ComputeArgsHash(state.PendingToolCall.Arguments)
+	// Verify state consistency across bound claims
+	if claims.ProjectID != "" && state.ProjectID != "" && state.ProjectID != claims.ProjectID {
+		return nil, nil, fmt.Errorf("%w: state project %q != token project %q", ErrSubjectMismatch, state.ProjectID, claims.ProjectID)
+	}
+	if claims.Environment != "" && state.Environment != "" && state.Environment != claims.Environment {
+		return nil, nil, fmt.Errorf("%w: state environment %q != token environment %q", ErrSubjectMismatch, state.Environment, claims.Environment)
+	}
+	if claims.AIAppID != "" && state.AIAppID != "" && state.AIAppID != claims.AIAppID {
+		return nil, nil, fmt.Errorf("%w: state app %q != token app %q", ErrSubjectMismatch, state.AIAppID, claims.AIAppID)
+	}
+	if claims.Subject != "" && state.Subject != "" && state.Subject != claims.Subject {
+		return nil, nil, fmt.Errorf("%w: state subject %q != token subject %q", ErrSubjectMismatch, state.Subject, claims.Subject)
+	}
+	if claims.Issuer != "" && state.Issuer != "" && state.Issuer != claims.Issuer {
+		return nil, nil, fmt.Errorf("%w: state issuer %q != token issuer %q", ErrSubjectMismatch, state.Issuer, claims.Issuer)
+	}
+
+	// Verify tool ID and arguments integrity (claim #5: ToolID, claim #6: ArgsHash)
+	matched := false
+	var targetCall core.ToolCall
+
+	if state.PendingToolCall.ID == claims.ToolID {
+		matched = true
+		targetCall = state.PendingToolCall
+	} else {
+		for _, call := range state.PendingToolCalls {
+			if call.ID == claims.ToolID {
+				matched = true
+				targetCall = call
+				break
+			}
+		}
+	}
+
+	if !matched && claims.ToolID != "" {
+		return nil, nil, fmt.Errorf("tool ID mismatch: token had %q", claims.ToolID)
+	}
+
+	expectedHash := ComputeArgsHash(targetCall.Arguments)
 	if expectedHash != claims.ArgsHash {
 		return nil, nil, fmt.Errorf("%w: expected %s, token had %s", ErrArgsHashMismatch, expectedHash, claims.ArgsHash)
 	}

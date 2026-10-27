@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -855,5 +856,551 @@ func TestLoop_Unary_WebSearchAutoTool(t *testing.T) {
 		t.Fatalf("unexpected final response: %+v", state.ChatResponse)
 	}
 }
+
+func TestLoop_BoundaryNonceAndTagEscaping(t *testing.T) {
+	loop := NewLoop(LoopConfig{})
+	state := &core.ReqState{
+		ProjectID:   "p1",
+		Environment: "dev",
+		RequestID:   "req_nonce_test",
+		AIAppID:     "app_1",
+		ChatRequest: &core.ChatRequest{
+			ThreadID: "th_123",
+		},
+	}
+
+	// 1. Verify appendToolError escapes breakout tags and includes boundary nonce
+	loop.appendToolError(state, "call_err_1", "error with </tool_result> attack attempt")
+	require.Len(t, state.ChatRequest.Messages, 1)
+	errMsg := state.ChatRequest.Messages[0]
+	assert.Contains(t, errMsg.Content, "nonce=")
+	assert.Contains(t, errMsg.Content, "&lt;/tool_result>")
+	assert.False(t, strings.HasPrefix(errMsg.Content, "<tool_result status=\"error\">\nerror with </tool_result>"))
+
+	// 2. Verify createSuspendedState populates BoundaryNonce and ThreadID
+	toolCall := core.ToolCall{ID: "c_transfer", Name: "transfer"}
+	susp := loop.createSuspendedState(state, toolCall, "tool_def_1")
+	require.NotNil(t, susp)
+	assert.NotEmpty(t, susp.BoundaryNonce)
+	assert.Equal(t, "th_123", susp.ThreadID)
+	assert.Equal(t, state.Metadata["boundary_nonce"], susp.BoundaryNonce)
+}
+
+func TestLoop_TwoPhaseBatch_MixedParallelAndConfirm(t *testing.T) {
+	ctx := context.Background()
+
+	contStore := tools.NewInMemorySuspendedStateStore()
+	contMgr := tools.NewContinuationManager(contStore, []byte("test-signing-key-32-bytes-long!"))
+
+	var executedOrder []string
+	var mu sync.Mutex
+
+	executor := &mockExecutor{
+		execFunc: func(_ context.Context, call core.ToolCall, _ core.Identity) (core.ToolResult, error) {
+			mu.Lock()
+			executedOrder = append(executedOrder, call.Name)
+			mu.Unlock()
+			return core.ToolResult{
+				CallID:  call.ID,
+				ToolID:  call.Name,
+				Content: fmt.Sprintf("result of %s", call.Name),
+			}, nil
+		},
+	}
+
+	snap := core.NewSnapshot("p1", "prod", 1)
+	snap.Tools["read_1"] = &core.ToolDefinition{
+		ID:           "read_1",
+		Name:         "read_1",
+		SideEffect:   "read",
+		Confirmation: "none",
+		ParallelSafe: true,
+	}
+	snap.Tools["confirm_write"] = &core.ToolDefinition{
+		ID:           "confirm_write",
+		Name:         "confirm_write",
+		SideEffect:   "write",
+		Confirmation: "required",
+		ParallelSafe: false,
+	}
+	snap.Tools["read_2"] = &core.ToolDefinition{
+		ID:           "read_2",
+		Name:         "read_2",
+		SideEffect:   "read",
+		Confirmation: "none",
+		ParallelSafe: true,
+	}
+
+	snap.Apps["app_batch"] = &core.AIApp{
+		ID:      "app_batch",
+		ToolIDs: []string{"read_1", "confirm_write", "read_2"},
+	}
+
+	loop := NewLoop(LoopConfig{
+		ContinuationMgr:  contMgr,
+		ExecutorRegistry: &mockRegistry{executor: executor},
+	})
+
+	state := &core.ReqState{
+		RequestID:   "req_batch_1",
+		ProjectID:   "p1",
+		Environment: "prod",
+		AIAppID:     "app_batch",
+		Snapshot:    snap,
+		AIApp:       snap.Apps["app_batch"],
+		ChatRequest: &core.ChatRequest{
+			ThreadID: "th_batch",
+			Messages: []core.ChatMessage{
+				{Role: "user", Content: "Run batch"},
+			},
+		},
+	}
+
+	provider := &mockProvider{
+		chatFunc: func(_ context.Context, _ core.ChatRequest) (*core.ChatResponse, error) {
+			return &core.ChatResponse{
+				ID: "resp_batch",
+				Message: core.ChatMessage{
+					Role: "assistant",
+					ToolCalls: []core.ToolCall{
+						{ID: "c1", Name: "read_1", Arguments: "{}"},
+						{ID: "c2", Name: "confirm_write", Arguments: "{}"},
+						{ID: "c3", Name: "read_2", Arguments: "{}"},
+					},
+				},
+				Usage: core.UsageStats{TotalTokens: 100},
+			}, nil
+		},
+	}
+
+	err := loop.Run(ctx, state, provider)
+	require.NoError(t, err)
+
+	// 1. Verify loop suspended due to confirm_write
+	require.NotNil(t, state.ChatResponse)
+	assert.Equal(t, "confirmation_required", state.ChatResponse.FinishReason)
+	assert.NotEmpty(t, state.ChatRequest.Metadata["confirmation_token"])
+
+	// 2. Verify non-suspending tools read_1 and read_2 executed first
+	mu.Lock()
+	assert.Contains(t, executedOrder, "read_1")
+	assert.Contains(t, executedOrder, "read_2")
+	assert.NotContains(t, executedOrder, "confirm_write") // Not executed yet, suspended!
+	mu.Unlock()
+
+	// 3. Verify messages slice contains results for read_1 and read_2 in deterministic order
+	msgs := state.ChatRequest.Messages
+	// Expected: [user, assistant (with 3 tool calls), tool:read_1, tool:read_2]
+	require.Len(t, msgs, 4)
+	assert.Equal(t, "assistant", msgs[1].Role)
+	assert.Equal(t, "tool", msgs[2].Role)
+	assert.Equal(t, "c1", msgs[2].ToolCallID)
+	assert.Equal(t, "tool", msgs[3].Role)
+	assert.Equal(t, "c3", msgs[3].ToolCallID)
+
+	// 4. Verify suspended state has confirm_write stored in PendingToolCalls
+	susp, err := contStore.Get(ctx, "p1", "req_batch_1")
+	require.NoError(t, err)
+	require.NotNil(t, susp)
+	assert.Equal(t, "confirm_write", susp.PendingToolCall.Name)
+	require.Len(t, susp.PendingToolCalls, 1)
+	assert.Equal(t, "confirm_write", susp.PendingToolCalls[0].Name)
+}
+
+func TestLoop_BuiltinAskUser_Suspension(t *testing.T) {
+	ctx := context.Background()
+
+	contStore := tools.NewInMemorySuspendedStateStore()
+	contMgr := tools.NewContinuationManager(contStore, []byte("test-signing-key-32-bytes-long!"))
+
+	snap := core.NewSnapshot("p1", "dev", 1)
+	snap.Apps["app_ask"] = &core.AIApp{
+		ID:      "app_ask",
+		ToolIDs: []string{"ask_user"},
+	}
+
+	loop := NewLoop(LoopConfig{
+		ContinuationMgr: contMgr,
+	})
+
+	// 1. Unary turn suspension
+	state := &core.ReqState{
+		RequestID:   "req_ask_1",
+		ProjectID:   "p1",
+		Environment: "dev",
+		AIAppID:     "app_ask",
+		Snapshot:    snap,
+		AIApp:       snap.Apps["app_ask"],
+		ChatRequest: &core.ChatRequest{
+			ThreadID: "th_ask",
+			Messages: []core.ChatMessage{
+				{Role: "user", Content: "I want to book a ticket"},
+			},
+		},
+	}
+
+	provider := &mockProvider{
+		chatFunc: func(_ context.Context, _ core.ChatRequest) (*core.ChatResponse, error) {
+			return &core.ChatResponse{
+				ID: "resp_ask",
+				Message: core.ChatMessage{
+					Role: "assistant",
+					ToolCalls: []core.ToolCall{
+						{
+							ID:        "c_ask",
+							Name:      "ask_user",
+							Arguments: `{"question":"Window or aisle?","options":["window","aisle"]}`,
+						},
+					},
+				},
+				Usage: core.UsageStats{TotalTokens: 50},
+			}, nil
+		},
+	}
+
+	err := loop.Run(ctx, state, provider)
+	require.NoError(t, err)
+
+	require.NotNil(t, state.ChatResponse)
+	assert.Equal(t, "question_required", state.ChatResponse.FinishReason)
+	assert.NotEmpty(t, state.ChatRequest.Metadata["confirmation_token"])
+
+	susp, err := contStore.Get(ctx, "p1", "req_ask_1")
+	require.NoError(t, err)
+	assert.Equal(t, "ask_user", susp.PendingToolCall.Name)
+
+	// 2. Streaming turn question event
+	streamState := &core.ReqState{
+		RequestID:   "req_ask_stream",
+		ProjectID:   "p1",
+		Environment: "dev",
+		AIAppID:     "app_ask",
+		Snapshot:    snap,
+		AIApp:       snap.Apps["app_ask"],
+		IsStreaming: true,
+		StreamChan:  make(chan core.StreamEvent, 16),
+		ChatRequest: &core.ChatRequest{
+			ThreadID: "th_ask",
+			Messages: []core.ChatMessage{
+				{Role: "user", Content: "Stream ask"},
+			},
+		},
+	}
+
+	streamProvider := &mockProvider{
+		streamFunc: func(_ context.Context, _ core.ChatRequest) (<-chan core.StreamEvent, error) {
+			ch := make(chan core.StreamEvent, 4)
+			go func() {
+				defer close(ch)
+				ch <- core.StreamEvent{
+					Type: core.StreamEventToolCall,
+					ToolCall: &core.ToolCall{
+						ID:        "c_stream_ask",
+						Name:      "ask_user",
+						Arguments: `{"question":"Confirm proceed?","options":["yes","no"]}`,
+					},
+				}
+				ch <- core.StreamEvent{Type: core.StreamEventDone}
+			}()
+			return ch, nil
+		},
+	}
+
+	err = loop.Run(ctx, streamState, streamProvider)
+	require.NoError(t, err)
+	close(streamState.StreamChan)
+
+	var emittedEvents []core.StreamEvent
+	for ev := range streamState.StreamChan {
+		emittedEvents = append(emittedEvents, ev)
+	}
+
+	require.NotEmpty(t, emittedEvents)
+	var foundQuestion bool
+	for _, ev := range emittedEvents {
+		if ev.Type == core.StreamEventQuestion {
+			foundQuestion = true
+			assert.NotEmpty(t, ev.ConfirmationToken)
+			qMap, ok := ev.Data.(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, "Confirm proceed?", qMap["question"])
+		}
+	}
+	assert.True(t, foundQuestion, "stream should emit StreamEventQuestion")
+}
+
+func TestLoop_BuiltinSubAgent(t *testing.T) {
+	ctx := context.Background()
+
+	var childToolsReceived []core.ToolDefinition
+
+	childProvider := &mockProvider{
+		chatFunc: func(_ context.Context, req core.ChatRequest) (*core.ChatResponse, error) {
+			childToolsReceived = req.Tools
+			return &core.ChatResponse{
+				ID: "resp_child",
+				Message: core.ChatMessage{
+					Role:    "assistant",
+					Content: "Subtask completed successfully with calculation 42.",
+				},
+				Usage: core.UsageStats{
+					TotalTokens: 30,
+				},
+			}, nil
+		},
+	}
+
+	snap := core.NewSnapshot("p1", "dev", 1)
+	snap.Tools["safe_read"] = &core.ToolDefinition{
+		ID:           "safe_read",
+		Name:         "safe_read",
+		SideEffect:   "read",
+		Confirmation: "none",
+	}
+	snap.Tools["write_danger"] = &core.ToolDefinition{
+		ID:           "write_danger",
+		Name:         "write_danger",
+		SideEffect:   "write",
+		Confirmation: "required",
+	}
+	snap.Tools["client_tool"] = &core.ToolDefinition{
+		ID:   "client_tool",
+		Name: "client_tool",
+		Executor: core.ExecutorConfig{
+			Type: "client_side",
+		},
+	}
+
+	snap.Apps["app_sub"] = &core.AIApp{
+		ID:      "app_sub",
+		ToolIDs: []string{"safe_read", "write_danger", "client_tool", "ask_user", "sub_agent"},
+	}
+
+	loop := NewLoop(LoopConfig{})
+
+	// 1. Normal execution with depth 0
+	tokenBudget := core.NewTokenBudgetTracker(100)
+
+	state := &core.ReqState{
+		RequestID:       "req_sub_parent",
+		ProjectID:       "p1",
+		Environment:     "dev",
+		AIAppID:         "app_sub",
+		Snapshot:        snap,
+		AIApp:           snap.Apps["app_sub"],
+		TokenBudget:     tokenBudget,
+		ResolvedAdapter: childProvider,
+		ChatRequest: &core.ChatRequest{
+			Messages: []core.ChatMessage{
+				{Role: "user", Content: "Calculate subtask"},
+			},
+		},
+	}
+
+	subToolDef := tools.BuiltinSubAgentToolDefinition()
+	subToolCall := core.ToolCall{
+		ID:        "c_sub_1",
+		Name:      "sub_agent",
+		Arguments: `{"task":"compute 6*7","context":"mathematics"}`,
+	}
+
+	toolMsg, err := loop.executeSubAgent(ctx, state, &subToolDef, subToolCall)
+	require.NoError(t, err)
+	assert.Contains(t, toolMsg.Content, "Subtask completed successfully with calculation 42.")
+	assert.Equal(t, int64(30), tokenBudget.UsedTokens.Load())
+
+	// Verify suspending tools were stripped from child tools
+	var strippedToolNames []string
+	for _, ct := range childToolsReceived {
+		strippedToolNames = append(strippedToolNames, ct.Name)
+	}
+	assert.Contains(t, strippedToolNames, "safe_read")
+	assert.NotContains(t, strippedToolNames, "write_danger") // confirmation: required stripped!
+	assert.NotContains(t, strippedToolNames, "client_tool")  // client_side stripped!
+	assert.NotContains(t, strippedToolNames, "ask_user")     // ask_user stripped!
+	assert.NotContains(t, strippedToolNames, "sub_agent")    // recursion prevention stripped!
+
+	// 2. Bounded recursion depth: if current depth >= 1, reject
+	stateDepth1 := &core.ReqState{
+		RequestID: "req_sub_nested",
+		Metadata: map[string]any{
+			"sub_agent_depth": 1,
+		},
+	}
+	nestedMsg, err := loop.executeSubAgent(ctx, stateDepth1, &subToolDef, subToolCall)
+	require.NoError(t, err)
+	assert.Contains(t, nestedMsg.Content, "sub_agent recursion depth limit exceeded (max depth: 1)")
+
+	// 3. Token runaway prevention: when token budget is exceeded
+	budgetExhausted := core.NewTokenBudgetTracker(10)
+	budgetExhausted.UsedTokens.Store(10) // 0 remaining
+
+	stateExhausted := &core.ReqState{
+		RequestID:   "req_sub_exhausted",
+		TokenBudget: budgetExhausted,
+	}
+	budgetMsg, err := loop.executeSubAgent(ctx, stateExhausted, &subToolDef, subToolCall)
+	require.NoError(t, err)
+	assert.Contains(t, budgetMsg.Content, "token budget exceeded")
+}
+
+func TestLoop_SubAgentChildToolExecution(t *testing.T) {
+	ctx := context.Background()
+
+	turn := 0
+	childProvider := &mockProvider{
+		chatFunc: func(ctx context.Context, req core.ChatRequest) (*core.ChatResponse, error) {
+			turn++
+			if turn == 1 {
+				// Turn 1: model returns tool call for safe_read
+				return &core.ChatResponse{
+					ID: "resp_child_turn1",
+					Message: core.ChatMessage{
+						Role: "assistant",
+						ToolCalls: []core.ToolCall{
+							{
+								ID:        "c_child_read",
+								Name:      "safe_read",
+								Arguments: `{"path":"/secret.txt"}`,
+							},
+						},
+					},
+					Usage: core.UsageStats{TotalTokens: 25},
+				}, nil
+			}
+
+			// Turn 2: verify child tool result is in messages, return final text
+			require.GreaterOrEqual(t, len(req.Messages), 3)
+			lastMsg := req.Messages[len(req.Messages)-1]
+			assert.Equal(t, "tool", lastMsg.Role)
+			assert.Equal(t, "c_child_read", lastMsg.ToolCallID)
+			assert.Contains(t, lastMsg.Content, "file content: classified data")
+
+			return &core.ChatResponse{
+				ID: "resp_child_turn2",
+				Message: core.ChatMessage{
+					Role:    "assistant",
+					Content: "Analysis based on file: classified data.",
+				},
+				Usage: core.UsageStats{TotalTokens: 35},
+			}, nil
+		},
+	}
+
+	exec := &mockExecutor{
+		execFunc: func(ctx context.Context, call core.ToolCall, id core.Identity) (core.ToolResult, error) {
+			assert.Equal(t, "c_child_read", call.ID)
+			return core.ToolResult{
+				CallID:  call.ID,
+				Content: "file content: classified data",
+			}, nil
+		},
+	}
+
+	snap := core.NewSnapshot("p1", "dev", 1)
+	snap.Tools["safe_read"] = &core.ToolDefinition{
+		ID:           "safe_read",
+		Name:         "safe_read",
+		SideEffect:   "read",
+		Confirmation: "none",
+	}
+	snap.Apps["app_sub"] = &core.AIApp{
+		ID:      "app_sub",
+		ToolIDs: []string{"safe_read", "sub_agent"},
+	}
+
+	loop := NewLoop(LoopConfig{
+		ExecutorRegistry: &mockRegistry{executor: exec},
+	})
+
+	tokenBudget := core.NewTokenBudgetTracker(200)
+	state := &core.ReqState{
+		RequestID:       "req_sub_tool_exec",
+		ProjectID:       "p1",
+		Environment:     "dev",
+		AIAppID:         "app_sub",
+		Snapshot:        snap,
+		AIApp:           snap.Apps["app_sub"],
+		TokenBudget:     tokenBudget,
+		ResolvedAdapter: childProvider,
+	}
+
+	subToolDef := tools.BuiltinSubAgentToolDefinition()
+	subToolCall := core.ToolCall{
+		ID:        "c_sub_parent",
+		Name:      "sub_agent",
+		Arguments: `{"task":"read file and summarize"}`,
+	}
+
+	toolMsg, err := loop.executeSubAgent(ctx, state, &subToolDef, subToolCall)
+	require.NoError(t, err)
+	assert.Contains(t, toolMsg.Content, "Analysis based on file: classified data.")
+	// Both turns accounted for: 25 + 35 = 60 tokens
+	assert.Equal(t, int64(60), tokenBudget.UsedTokens.Load())
+	assert.Equal(t, 60, state.Usage.TotalTokens)
+}
+
+func TestLoop_ResolveBuiltinDocumentAndKnowledgeTools(t *testing.T) {
+	ctx := context.Background()
+
+	snap := core.NewSnapshot("proj_test", "prod", 42)
+	snap.Apps["app_kb"] = &core.AIApp{
+		ID:      "app_kb",
+		ToolIDs: []string{"propose_memory"},
+	}
+	snap.KnowledgeCatalog["app_kb"] = []core.KnowledgeDocMeta{
+		{ID: "doc_1", Title: "Runbook"},
+	}
+
+	loop := NewLoop(LoopConfig{})
+
+	state := &core.ReqState{
+		ProjectID:   "proj_test",
+		Environment: "prod",
+		AIAppID:     "app_kb",
+		Snapshot:    snap,
+		AIApp:       snap.Apps["app_kb"],
+	}
+
+	// 1. findToolDef resolves both builtins
+	propDef, ok := loop.findToolDef(state, "propose_memory")
+	require.True(t, ok)
+	assert.Equal(t, "propose_memory", propDef.Name)
+
+	kbDef, ok := loop.findToolDef(state, "knowledge_search")
+	require.True(t, ok)
+	assert.Equal(t, "knowledge_search", kbDef.Name)
+
+	// 2. resolveTools resolves propose_memory from ToolIDs AND auto-injects knowledge_search from KnowledgeCatalog
+	resolved := loop.resolveTools(state)
+	require.Len(t, resolved, 2)
+	toolNames := []string{resolved[0].Name, resolved[1].Name}
+	assert.Contains(t, toolNames, "propose_memory")
+	assert.Contains(t, toolNames, "knowledge_search")
+
+	// 3. executeServerTool propagates snapshot and appID to executor context
+	var receivedSnap *core.Snapshot
+	var receivedAppID string
+	testExec := &mockExecutor{
+		execFunc: func(execCtx context.Context, call core.ToolCall, id core.Identity) (core.ToolResult, error) {
+			s, _ := core.SnapshotFromContext(execCtx)
+			receivedSnap = s
+			a, _ := core.AppIDFromContext(execCtx)
+			receivedAppID = a
+			return core.ToolResult{CallID: call.ID, Content: "ok"}, nil
+		},
+	}
+	execLoop := NewLoop(LoopConfig{
+		ExecutorRegistry: &mockRegistry{executor: testExec},
+	})
+	_, err := execLoop.executeServerTool(ctx, state, propDef, core.ToolCall{ID: "tc_1", Name: "propose_memory"})
+	require.NoError(t, err)
+	require.NotNil(t, receivedSnap)
+	assert.Equal(t, "proj_test", receivedSnap.ProjectID)
+	assert.Equal(t, int64(42), receivedSnap.Revision)
+	assert.Equal(t, "app_kb", receivedAppID)
+}
+
+
 
 

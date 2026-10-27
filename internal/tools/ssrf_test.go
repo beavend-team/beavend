@@ -37,6 +37,13 @@ func TestSafeDialer_IsSafeIP(t *testing.T) {
 		{"Public Cloudflare DNS", "1.1.1.1", true},
 		{"Public Google DNS", "8.8.8.8", true},
 		{"Public Cloudflare IPv6", "2606:4700:4700::1111", true},
+		{"NAT64 Well-Known", "64:ff9b::1", false},
+		{"NAT64 Local", "64:ff9b:1::1", false},
+		{"6to4", "2002::1", false},
+		{"Teredo", "2001::1", false},
+		{"Benchmarking RFC 2544", "198.18.0.1", false},
+		{"IPv6 Documentation", "2001:db8::1", false},
+		{"Carrier-Grade NAT", "100.64.0.1", false},
 	}
 
 	for _, tt := range tests {
@@ -177,5 +184,42 @@ func TestSafeHTTPClient_CheckRedirect(t *testing.T) {
 	}
 	if redirectReq.Header.Get("Content-Type") != "application/json" {
 		t.Errorf("Content-Type should have been preserved, got %q", redirectReq.Header.Get("Content-Type"))
+	}
+}
+
+func TestSafeDialer_AllowedPorts(t *testing.T) {
+	dialer := NewSafeDialer(SafeDialerConfig{
+		AllowedPorts: []uint16{80, 443},
+		AllowPrivate: true,
+	})
+
+	ctx := context.Background()
+
+	tests := []struct {
+		addr    string
+		wantErr bool
+	}{
+		{"1.1.1.1:80", false},
+		{"1.1.1.1:443", false},
+		{"1.1.1.1:22", true},
+		{"1.1.1.1:8080", true},
+		{"1.1.1.1:6379", true},
+		{"1.1.1.1:invalid", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.addr, func(t *testing.T) {
+			_, err := dialer.DialContext(ctx, "tcp", tt.addr)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error for addr %s, got nil", tt.addr)
+				}
+			} else {
+				// Dial may fail to connect to 1.1.1.1:80 if offline/sandboxed, but should NOT be rejected for port error
+				if err != nil && strings.Contains(err.Error(), "is not in allowed ports") {
+					t.Errorf("addr %s unexpectedly rejected by port filter: %v", tt.addr, err)
+				}
+			}
+		})
 	}
 }

@@ -51,6 +51,7 @@ type Handler struct {
 	memoryEngine    *memory.Engine
 	jobStore        media.JobStore
 	mediaStore      core.MediaStore
+	runManager      *AsyncRunManager
 	defaultEnv      string
 }
 
@@ -66,6 +67,9 @@ type HandlerOptions struct {
 	MemoryEngine       *memory.Engine
 	JobStore           media.JobStore
 	MediaStore         core.MediaStore
+	RunManager         *AsyncRunManager
+	RunStore           core.RunStore
+	EventBuffer        stream.TurnEventBuffer
 }
 
 // NewHandler creates a new runtime Handler.
@@ -80,6 +84,7 @@ func NewHandler(resolver SnapshotResolver, pipeline *Pipeline, opts ...HandlerOp
 	var memoryEngine *memory.Engine
 	var jobStore media.JobStore
 	var mediaStore core.MediaStore
+	var runManager *AsyncRunManager
 
 	if len(opts) > 0 {
 		if opts[0].DefaultEnvironment != "" {
@@ -96,6 +101,15 @@ func NewHandler(resolver SnapshotResolver, pipeline *Pipeline, opts ...HandlerOp
 		memoryEngine = opts[0].MemoryEngine
 		jobStore = opts[0].JobStore
 		mediaStore = opts[0].MediaStore
+		runManager = opts[0].RunManager
+
+		if runManager == nil && (opts[0].RunStore != nil || opts[0].EventBuffer != nil) {
+			runManager = NewAsyncRunManager(AsyncRunManagerConfig{
+				RunStore:    opts[0].RunStore,
+				EventBuffer: opts[0].EventBuffer,
+				Pipeline:    pipeline,
+			})
+		}
 	}
 
 	if continuationMgr == nil {
@@ -118,8 +132,19 @@ func NewHandler(resolver SnapshotResolver, pipeline *Pipeline, opts ...HandlerOp
 		memoryEngine:    memoryEngine,
 		jobStore:        jobStore,
 		mediaStore:      mediaStore,
+		runManager:      runManager,
 		defaultEnv:      defaultEnv,
 	}
+}
+
+// SetRunManager sets the handler's asynchronous run manager.
+func (h *Handler) SetRunManager(mgr *AsyncRunManager) {
+	h.runManager = mgr
+}
+
+// RunManager returns the handler's asynchronous run manager.
+func (h *Handler) RunManager() *AsyncRunManager {
+	return h.runManager
 }
 
 // ContinuationManager returns the handler's continuation manager.
@@ -773,15 +798,12 @@ func (h *Handler) HandleConfirm(w http.ResponseWriter, r *http.Request) {
 
 	id, _ := identity.FromContext(r.Context())
 
-	// Validate confirmation token and retrieve state
-	suspState, claims, err := h.continuationMgr.ValidateResumption(r.Context(), req.ConfirmationToken, id)
+	// Validate confirmation token and atomically consume state (preventing TOCTOU replay)
+	suspState, _, err := h.continuationMgr.ValidateResumption(r.Context(), req.ConfirmationToken, id)
 	if err != nil {
 		h.writeRawError(w, continuationErrorCode(err), fmt.Sprintf("continuation validation failed: %v", err), reqID)
 		return
 	}
-
-	// Delete state from store once consumed
-	_ = h.continuationMgr.Store().Delete(r.Context(), claims.ProjectID, claims.RequestID)
 
 	snap, ok := h.resolver.Get(suspState.ProjectID, suspState.Environment)
 	if !ok || snap == nil {
@@ -796,70 +818,106 @@ func (h *Handler) HandleConfirm(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !req.Approved {
-		// User declined execution: inject cancellation tool message
-		suspState.Messages = append(suspState.Messages, core.ChatMessage{
-			Role:       "tool",
-			ToolCallID: suspState.PendingToolCall.ID,
-			Content:    "<tool_result status=\"cancelled\">\nUser declined to confirm tool execution.\n</tool_result>",
-		})
-	} else {
-		// User approved: execute pending tool
-		toolDef, ok := snap.Tool(suspState.PendingToolCall.Name)
-		if !ok {
-			toolDef, ok = snap.Tool(suspState.PendingToolCall.ID)
+		// User declined execution: cancel ALL pending tool calls to avoid orphan tool calls
+		pendingCalls := suspState.PendingToolCalls
+		if len(pendingCalls) == 0 {
+			pendingCalls = []core.ToolCall{suspState.PendingToolCall}
+		}
+		for _, pending := range pendingCalls {
+			cancelledContent := tools.WrapToolResult("User declined to confirm tool execution.", suspState.BoundaryNonce, pending.Name, pending.ID, "cancelled")
+			suspState.Messages = append(suspState.Messages, core.ChatMessage{
+				Role:       "tool",
+				ToolCallID: pending.ID,
+				Content:    cancelledContent,
+			})
 		}
 
-		if !ok || toolDef == nil {
-			h.writeRawError(w, "not_found", fmt.Sprintf("tool %q not found", suspState.PendingToolCall.Name), reqID)
-			return
+		state := &core.ReqState{
+			RequestID:   suspState.RequestID,
+			ProjectID:   suspState.ProjectID,
+			Environment: suspState.Environment,
+			AIAppID:     suspState.AIAppID,
+			Snapshot:    snap,
+			AIApp:       app,
+			Identity:    id,
+			IsStreaming: suspState.IsStreaming,
+			ChatRequest: &core.ChatRequest{
+				ThreadID: suspState.ThreadID,
+				Messages: suspState.Messages,
+			},
+			Metadata: map[string]any{
+				"is_resumed_turn": true,
+				"boundary_nonce":  suspState.BoundaryNonce,
+			},
+			StartTime: time.Now(),
 		}
 
-		executor, err := h.execRegistry.GetExecutor(*toolDef)
-		if err != nil {
-			h.writeRawError(w, "internal_error", fmt.Sprintf("resolve executor: %v", err), reqID)
-			return
-		}
-
-		var callerID core.Identity
-		if id != nil {
-			callerID = *id
-		}
-
-		res, err := executor.Execute(r.Context(), suspState.PendingToolCall, callerID)
-		if err != nil {
-			res = core.ToolResult{
-				CallID:  suspState.PendingToolCall.ID,
-				ToolID:  toolDef.ID,
-				Content: fmt.Sprintf("execution error: %v", err),
-				IsError: true,
-			}
-		}
-
-		sanitized := h.sanitizer.Sanitize(res, toolDef.Result)
-
-		suspState.Messages = append(suspState.Messages, core.ChatMessage{
-			Role:       "tool",
-			ToolCallID: suspState.PendingToolCall.ID,
-			Content:    sanitized.Content,
-		})
+		h.executeResumption(w, r, state)
+		return
 	}
 
-	state := &core.ReqState{
-		RequestID:   suspState.RequestID,
-		ProjectID:   suspState.ProjectID,
-		Environment: suspState.Environment,
-		AIAppID:     suspState.AIAppID,
-		Snapshot:    snap,
-		AIApp:       app,
-		Identity:    id,
-		IsStreaming: suspState.IsStreaming,
-		ChatRequest: &core.ChatRequest{
-			Messages: suspState.Messages,
-		},
-		StartTime: time.Now(),
+	// User approved: execute pending tool
+	toolDef, ok := snap.Tool(suspState.PendingToolCall.Name)
+	if !ok {
+		toolDef, ok = snap.Tool(suspState.PendingToolCall.ID)
 	}
 
-	h.executeResumption(w, r, state)
+	if !ok || toolDef == nil {
+		switch suspState.PendingToolCall.Name {
+		case "propose_memory":
+			t := tools.BuiltinProposeMemoryToolDefinition()
+			toolDef = &t
+			ok = true
+		case "knowledge_search":
+			t := tools.BuiltinKnowledgeSearchToolDefinition()
+			toolDef = &t
+			ok = true
+		}
+	}
+
+	if !ok || toolDef == nil {
+		h.writeRawError(w, "not_found", fmt.Sprintf("tool %q not found", suspState.PendingToolCall.Name), reqID)
+		return
+	}
+
+	executor, err := h.execRegistry.GetExecutor(*toolDef)
+	if err != nil {
+		h.writeRawError(w, "internal_error", fmt.Sprintf("resolve executor: %v", err), reqID)
+		return
+	}
+
+	var callerID core.Identity
+	if id != nil {
+		callerID = *id
+	}
+
+	execCtx := r.Context()
+	if snap != nil {
+		execCtx = core.ContextWithSnapshot(execCtx, snap)
+	}
+	if suspState.AIAppID != "" {
+		execCtx = core.ContextWithAppID(execCtx, suspState.AIAppID)
+	}
+
+	res, err := executor.Execute(execCtx, suspState.PendingToolCall, callerID)
+	if err != nil {
+		res = core.ToolResult{
+			CallID:  suspState.PendingToolCall.ID,
+			ToolID:  toolDef.ID,
+			Content: fmt.Sprintf("execution error: %v", err),
+			IsError: true,
+		}
+	}
+
+	sanitized := h.sanitizer.Sanitize(res, toolDef.Result, tools.WithNonce(suspState.BoundaryNonce))
+
+	suspState.Messages = append(suspState.Messages, core.ChatMessage{
+		Role:       "tool",
+		ToolCallID: suspState.PendingToolCall.ID,
+		Content:    sanitized.Content,
+	})
+
+	h.advanceOrResume(w, r, suspState, suspState.PendingToolCall.ID, snap, app, id, reqID)
 }
 
 // ToolResultsRequestBody represents the payload from client-side tool execution.
@@ -882,13 +940,12 @@ func (h *Handler) HandleToolResults(w http.ResponseWriter, r *http.Request) {
 
 	id, _ := identity.FromContext(r.Context())
 
-	suspState, claims, err := h.continuationMgr.ValidateResumption(r.Context(), req.ContinuationToken, id)
+	// Validate confirmation token and atomically consume state (preventing TOCTOU replay)
+	suspState, _, err := h.continuationMgr.ValidateResumption(r.Context(), req.ContinuationToken, id)
 	if err != nil {
 		h.writeRawError(w, continuationErrorCode(err), fmt.Sprintf("continuation validation failed: %v", err), reqID)
 		return
 	}
-
-	_ = h.continuationMgr.Store().Delete(r.Context(), claims.ProjectID, claims.RequestID)
 
 	snap, ok := h.resolver.Get(suspState.ProjectID, suspState.Environment)
 	if !ok || snap == nil {
@@ -902,10 +959,10 @@ func (h *Handler) HandleToolResults(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Format client result as JSON string and wrap as untrusted data
+	// Format client result as JSON string and wrap as untrusted data with boundary nonce and tag escaping
 	resultJSON, _ := json.Marshal(req.Result)
-	wrappedResult := fmt.Sprintf("<tool_result tool_id=%q call_id=%q status=\"success\">\n%s\n</tool_result>",
-		suspState.PendingToolCall.Name, req.CallID, string(resultJSON))
+	escaped := tools.EscapeClosingToolResultTags(string(resultJSON))
+	wrappedResult := tools.WrapToolResult(escaped, suspState.BoundaryNonce, suspState.PendingToolCall.Name, req.CallID, "success")
 
 	suspState.Messages = append(suspState.Messages, core.ChatMessage{
 		Role:       "tool",
@@ -913,25 +970,245 @@ func (h *Handler) HandleToolResults(w http.ResponseWriter, r *http.Request) {
 		Content:    wrappedResult,
 	})
 
-	state := &core.ReqState{
-		RequestID:   suspState.RequestID,
-		ProjectID:   suspState.ProjectID,
-		Environment: suspState.Environment,
-		AIAppID:     suspState.AIAppID,
-		Snapshot:    snap,
-		AIApp:       app,
-		Identity:    id,
-		IsStreaming: suspState.IsStreaming,
-		ChatRequest: &core.ChatRequest{
-			Messages: suspState.Messages,
-		},
-		StartTime: time.Now(),
+	h.advanceOrResume(w, r, suspState, req.CallID, snap, app, id, reqID)
+}
+
+// AnswerRequestBody represents the payload for answering an ask_user question prompt.
+type AnswerRequestBody struct {
+	ConfirmationToken string `json:"confirmation_token"`
+	Answer            string `json:"answer"`
+}
+
+// HandleAnswer handles answering an ask_user prompt and resuming the agent loop (POST /v1/apps/{ai_app_id}/answer).
+func (h *Handler) HandleAnswer(w http.ResponseWriter, r *http.Request) {
+	reqID := getOrGenerateRequestID(r)
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	var req AnswerRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeRawError(w, "invalid_argument", "invalid request body", reqID)
+		return
 	}
 
-	h.executeResumption(w, r, state)
+	id, _ := identity.FromContext(r.Context())
+
+	// Validate confirmation token and atomically consume state (preventing TOCTOU replay)
+	suspState, _, err := h.continuationMgr.ValidateResumption(r.Context(), req.ConfirmationToken, id)
+	if err != nil {
+		h.writeRawError(w, continuationErrorCode(err), fmt.Sprintf("continuation validation failed: %v", err), reqID)
+		return
+	}
+
+	snap, ok := h.resolver.Get(suspState.ProjectID, suspState.Environment)
+	if !ok || snap == nil {
+		h.writeRawError(w, "unavailable", "configuration snapshot not found", reqID)
+		return
+	}
+
+	app, ok := snap.App(suspState.AIAppID)
+	if !ok || app == nil {
+		h.writeRawError(w, "not_found", "ai app not found", reqID)
+		return
+	}
+
+	sanitizedAnswer := tools.EscapeClosingToolResultTags(req.Answer)
+	wrappedAnswer := tools.WrapToolResult(sanitizedAnswer, suspState.BoundaryNonce, suspState.PendingToolCall.Name, suspState.PendingToolCall.ID, "success")
+
+	suspState.Messages = append(suspState.Messages, core.ChatMessage{
+		Role:       "tool",
+		ToolCallID: suspState.PendingToolCall.ID,
+		Content:    wrappedAnswer,
+	})
+
+	h.advanceOrResume(w, r, suspState, suspState.PendingToolCall.ID, snap, app, id, reqID)
+}
+
+func (h *Handler) advanceOrResume(w http.ResponseWriter, r *http.Request, suspState *tools.SuspendedState, completedCallID string, snap *core.Snapshot, app *core.AIApp, id *core.Identity, reqID string) {
+	// Filter out the completed call from PendingToolCalls
+	var remainingPending []core.ToolCall
+	for _, call := range suspState.PendingToolCalls {
+		if call.ID != completedCallID {
+			remainingPending = append(remainingPending, call)
+		}
+	}
+
+	// If all pending tool calls are resolved, resume pipeline execution
+	if len(remainingPending) == 0 {
+		state := &core.ReqState{
+			RequestID:   suspState.RequestID,
+			ProjectID:   suspState.ProjectID,
+			Environment: suspState.Environment,
+			AIAppID:     suspState.AIAppID,
+			Snapshot:    snap,
+			AIApp:       app,
+			Identity:    id,
+			IsStreaming: suspState.IsStreaming,
+			ChatRequest: &core.ChatRequest{
+				ThreadID: suspState.ThreadID,
+				Messages: suspState.Messages,
+			},
+			Metadata: map[string]any{
+				"is_resumed_turn": true,
+				"boundary_nonce":  suspState.BoundaryNonce,
+			},
+			StartTime: time.Now(),
+		}
+		h.executeResumption(w, r, state)
+		return
+	}
+
+	// More pending calls exist: re-suspend for the next pending call!
+	nextCall := remainingPending[0]
+	nextToolDef, ok := snap.Tool(nextCall.Name)
+	if !ok {
+		nextToolDef, ok = snap.Tool(nextCall.ID)
+	}
+	toolDefID := nextCall.Name
+	if nextToolDef != nil {
+		toolDefID = nextToolDef.ID
+	}
+
+	newSusp := &tools.SuspendedState{
+		ProjectID:        suspState.ProjectID,
+		Environment:      suspState.Environment,
+		RequestID:        suspState.RequestID,
+		AIAppID:          suspState.AIAppID,
+		ThreadID:         suspState.ThreadID,
+		Subject:          suspState.Subject,
+		Issuer:           suspState.Issuer,
+		Messages:         suspState.Messages,
+		PendingToolCall:  nextCall,
+		PendingToolCalls: remainingPending,
+		ToolDefinitionID: toolDefID,
+		SnapshotRevision: suspState.SnapshotRevision,
+		BoundaryNonce:    suspState.BoundaryNonce,
+		CreatedAt:        time.Now().UTC(),
+		IsStreaming:      suspState.IsStreaming,
+	}
+
+	if err := h.continuationMgr.Store().Save(r.Context(), newSusp, tools.DefaultSuspensionTTL); err != nil {
+		h.writeRawError(w, "internal_error", fmt.Sprintf("failed to save suspended state: %v", err), reqID)
+		return
+	}
+
+	newToken, err := h.continuationMgr.IssueConfirmationToken(newSusp, nextCall, tools.DefaultSuspensionTTL)
+	if err != nil {
+		h.writeRawError(w, "internal_error", fmt.Sprintf("failed to issue confirmation token: %v", err), reqID)
+		return
+	}
+
+	// 1. ask_user prompt
+	if nextCall.Name == "ask_user" || (nextToolDef != nil && (nextToolDef.Name == "ask_user" || nextToolDef.ID == "ask_user")) {
+		var qData map[string]any
+		if nextCall.Arguments != "" {
+			_ = json.Unmarshal([]byte(nextCall.Arguments), &qData)
+		}
+		if qData == nil {
+			qData = map[string]any{"question": nextCall.Arguments}
+		}
+
+		if suspState.IsStreaming {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			_ = h.streamWriter.WriteEvent(w, core.StreamEvent{
+				Type:              core.StreamEventQuestion,
+				ConfirmationToken: newToken,
+				Data:              qData,
+				RequestID:         suspState.RequestID,
+			})
+			_ = h.streamWriter.WriteEvent(w, core.StreamEvent{Type: core.StreamEventDone})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Confirmation-Token", newToken)
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(&core.ChatResponse{
+			ID:        fmt.Sprintf("chatcmpl_%s", suspState.RequestID),
+			RequestID: suspState.RequestID,
+			AIAppID:   suspState.AIAppID,
+			CreatedAt: time.Now().UTC().Unix(),
+			Message: core.ChatMessage{
+				Role:      "assistant",
+				ToolCalls: []core.ToolCall{nextCall},
+			},
+			FinishReason: "question_required",
+		})
+		return
+	}
+
+	// 2. client_side tool
+	if nextToolDef != nil && nextToolDef.Executor.Type == "client_side" {
+		if suspState.IsStreaming {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			nc := nextCall
+			_ = h.streamWriter.WriteEvent(w, core.StreamEvent{
+				Type:              core.StreamEventToolCall,
+				ConfirmationToken: newToken,
+				ToolCall:          &nc,
+				RequestID:         suspState.RequestID,
+			})
+			_ = h.streamWriter.WriteEvent(w, core.StreamEvent{Type: core.StreamEventDone})
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Continuation-Token", newToken)
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(&core.ChatResponse{
+			ID:        fmt.Sprintf("chatcmpl_%s", suspState.RequestID),
+			RequestID: suspState.RequestID,
+			AIAppID:   suspState.AIAppID,
+			CreatedAt: time.Now().UTC().Unix(),
+			Message: core.ChatMessage{
+				Role:      "assistant",
+				ToolCalls: []core.ToolCall{nextCall},
+			},
+			FinishReason: "client_tool",
+		})
+		return
+	}
+
+	// 3. confirmation required tool
+	if suspState.IsStreaming {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		nc := nextCall
+		_ = h.streamWriter.WriteEvent(w, core.StreamEvent{
+			Type:              core.StreamEventConfirmation,
+			ConfirmationToken: newToken,
+			ToolCall:          &nc,
+			RequestID:         suspState.RequestID,
+		})
+		_ = h.streamWriter.WriteEvent(w, core.StreamEvent{Type: core.StreamEventDone})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("X-Confirmation-Token", newToken)
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(&core.ChatResponse{
+		ID:        fmt.Sprintf("chatcmpl_%s", suspState.RequestID),
+		RequestID: suspState.RequestID,
+		AIAppID:   suspState.AIAppID,
+		CreatedAt: time.Now().UTC().Unix(),
+		Message: core.ChatMessage{
+			Role:      "assistant",
+			ToolCalls: []core.ToolCall{nextCall},
+		},
+		FinishReason: "confirmation_required",
+	})
 }
 
 func (h *Handler) executeResumption(w http.ResponseWriter, r *http.Request, state *core.ReqState) {
+	if state.Metadata == nil {
+		state.Metadata = make(map[string]any)
+	}
+	state.Metadata["is_resumed_turn"] = true
 	if state.IsStreaming {
 		rc := http.NewResponseController(w) //nolint:bodyclose // False positive: ResponseController is not an http.Response.
 		_ = rc.SetWriteDeadline(time.Time{})
@@ -1141,6 +1418,21 @@ func (h *Handler) buildRequestState(w http.ResponseWriter, r *http.Request, isSt
 		"client_ip": clientIP,
 	}
 
+	var budget int64
+	if chatReq.MaxTokens != nil && *chatReq.MaxTokens > 0 {
+		budget = int64(*chatReq.MaxTokens)
+	}
+	if budget == 0 && app != nil {
+		for _, lim := range app.Limits {
+			if lim.Resource == "tokens" && lim.Max > 0 {
+				if budget == 0 || lim.Max < budget {
+					budget = lim.Max
+				}
+			}
+		}
+	}
+	tokenBudget := core.NewTokenBudgetTracker(budget)
+
 	return &core.ReqState{
 		RequestID:   reqID,
 		ProjectID:   projectID,
@@ -1153,6 +1445,7 @@ func (h *Handler) buildRequestState(w http.ResponseWriter, r *http.Request, isSt
 		IsStreaming: isStreaming,
 		ChatRequest: &chatReq,
 		Metadata:    metadata,
+		TokenBudget: tokenBudget,
 		StartTime:   time.Now(),
 	}, true
 }
@@ -1379,4 +1672,257 @@ func (h *Handler) HandleCreateThread(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(th)
 }
+
+// HandleInvoke handles asynchronous invocation requests (POST /v1/apps/{ai_app_id}/invoke).
+func (h *Handler) HandleInvoke(w http.ResponseWriter, r *http.Request) {
+	state, ok := h.buildRequestState(w, r, false)
+	if !ok {
+		return
+	}
+
+	if h.runManager == nil {
+		h.writeRawError(w, "not_implemented", "async run manager not configured", state.RequestID)
+		return
+	}
+
+	// 1. Run AuthZStage synchronously if configured
+	if h.runManager.AuthZStage() != nil {
+		if err := h.runManager.AuthZStage().Handle(r.Context(), state); err != nil {
+			h.writeError(w, state.Error)
+			return
+		}
+	}
+
+	// 2. Run LimitsStage synchronously if configured
+	if h.runManager.LimitsStage() != nil {
+		if err := h.runManager.LimitsStage().Handle(r.Context(), state); err != nil {
+			h.writeError(w, state.Error)
+			return
+		}
+	}
+
+	// 3. Backpressure check
+	if h.runManager.IsSaturated() {
+		w.Header().Set("Retry-After", "5")
+		h.writeRawErrorWithStatus(w, http.StatusServiceUnavailable, "queue_full", "async run queue is full, retry later", state.RequestID)
+		return
+	}
+
+	// 4. Create Run with Status "queued"
+	runID := fmt.Sprintf("run_%s", state.RequestID)
+	now := time.Now().UTC()
+	runMeta := make(map[string]any)
+	for k, v := range state.Metadata {
+		runMeta[k] = v
+	}
+	run := &core.Run{
+		ID:          runID,
+		ProjectID:   state.ProjectID,
+		Environment: state.Environment,
+		AIAppID:     state.AIAppID,
+		RequestID:   state.RequestID,
+		Status:      core.RunStatusQueued,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		Metadata:    runMeta,
+	}
+
+	if err := h.runManager.RunStore().CreateRun(r.Context(), run); err != nil {
+		h.writeRawError(w, "internal_error", fmt.Sprintf("failed to create run: %v", err), state.RequestID)
+		return
+	}
+
+	// 5. Dispatch background worker
+	if err := h.runManager.Dispatch(run, state); err != nil {
+		if errors.Is(err, ErrQueueFull) {
+			w.Header().Set("Retry-After", "5")
+			h.writeRawErrorWithStatus(w, http.StatusServiceUnavailable, "queue_full", "async run queue is full, retry later", state.RequestID)
+			return
+		}
+		h.writeRawError(w, "internal_error", fmt.Sprintf("failed to dispatch run worker: %v", err), state.RequestID)
+		return
+	}
+
+	// 6. Return HTTP 202 Accepted
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"run_id": runID,
+		"status": core.RunStatusQueued,
+	})
+}
+
+// HandleGetRun returns the current Run status, error, and result (GET /v1/runs/{run_id}).
+func (h *Handler) HandleGetRun(w http.ResponseWriter, r *http.Request) {
+	reqID := getOrGenerateRequestID(r)
+	runID := chi.URLParam(r, "run_id")
+	if runID == "" {
+		runID = strings.TrimPrefix(r.URL.Path, "/v1/runs/")
+		if idx := strings.Index(runID, "/"); idx != -1 {
+			runID = runID[:idx]
+		}
+	}
+	if runID == "" {
+		h.writeRawError(w, "invalid_argument", "missing run_id", reqID)
+		return
+	}
+
+	if h.runManager == nil {
+		h.writeRawError(w, "not_implemented", "async run manager not configured", reqID)
+		return
+	}
+
+	projectID, env := h.resolveProjectAndEnv(r)
+
+	run, err := h.runManager.GetOrRecoverRun(r.Context(), projectID, env, runID)
+	if err != nil {
+		if errors.Is(err, core.ErrRunNotFound) {
+			h.writeRawErrorWithStatus(w, http.StatusNotFound, "not_found", "run not found", reqID)
+			return
+		}
+		h.writeRawError(w, "internal_error", fmt.Sprintf("failed to get run: %v", err), reqID)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(run)
+}
+
+// HandleStreamRun streams events for an active or completed run via SSE (GET /v1/runs/{run_id}/stream).
+func (h *Handler) HandleStreamRun(w http.ResponseWriter, r *http.Request) {
+	reqID := getOrGenerateRequestID(r)
+	runID := chi.URLParam(r, "run_id")
+	if runID == "" {
+		runID = strings.TrimPrefix(r.URL.Path, "/v1/runs/")
+		if idx := strings.Index(runID, "/stream"); idx != -1 {
+			runID = runID[:idx]
+		}
+	}
+	if runID == "" {
+		h.writeRawError(w, "invalid_argument", "missing run_id", reqID)
+		return
+	}
+
+	if h.runManager == nil {
+		h.writeRawError(w, "not_implemented", "async run manager not configured", reqID)
+		return
+	}
+
+	projectID, env := h.resolveProjectAndEnv(r)
+
+	run, err := h.runManager.GetOrRecoverRun(r.Context(), projectID, env, runID)
+	if err != nil {
+		if errors.Is(err, core.ErrRunNotFound) {
+			h.writeRawErrorWithStatus(w, http.StatusNotFound, "not_found", "run not found", reqID)
+			return
+		}
+		h.writeRawError(w, "internal_error", fmt.Sprintf("failed to get run: %v", err), reqID)
+		return
+	}
+
+	lastEventID := r.Header.Get("Last-Event-ID")
+	if lastEventID == "" {
+		lastEventID = r.URL.Query().Get("last_event_id")
+	}
+
+	eventsChan, err := h.runManager.EventBuffer().Subscribe(r.Context(), run.ProjectID, run.Environment, run.RequestID, lastEventID)
+	if err != nil {
+		h.writeRawError(w, "internal_error", fmt.Sprintf("failed to subscribe to run stream: %v", err), reqID)
+		return
+	}
+
+	rc := http.NewResponseController(w) //nolint:bodyclose // False positive: ResponseController is not an http.Response.
+	_ = rc.SetWriteDeadline(time.Time{})
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	writer := h.streamWriter
+	if writer == nil {
+		writer = stream.NewWriter(15 * time.Second)
+	}
+
+	_ = writer.Stream(r.Context(), w, eventsChan)
+}
+
+// HandleCancelRun cancels an active asynchronous run (POST /v1/runs/{run_id}/cancel).
+func (h *Handler) HandleCancelRun(w http.ResponseWriter, r *http.Request) {
+	reqID := getOrGenerateRequestID(r)
+	runID := chi.URLParam(r, "run_id")
+	if runID == "" {
+		runID = strings.TrimPrefix(r.URL.Path, "/v1/runs/")
+		if idx := strings.Index(runID, "/cancel"); idx != -1 {
+			runID = runID[:idx]
+		}
+	}
+	if runID == "" {
+		h.writeRawError(w, "invalid_argument", "missing run_id", reqID)
+		return
+	}
+
+	if h.runManager == nil {
+		h.writeRawError(w, "not_implemented", "async run manager not configured", reqID)
+		return
+	}
+
+	projectID, env := h.resolveProjectAndEnv(r)
+
+	if err := h.runManager.CancelRun(r.Context(), projectID, env, runID); err != nil {
+		if errors.Is(err, core.ErrRunNotFound) {
+			h.writeRawErrorWithStatus(w, http.StatusNotFound, "not_found", "run not found", reqID)
+			return
+		}
+		h.writeRawError(w, "internal_error", fmt.Sprintf("failed to cancel run: %v", err), reqID)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"run_id": runID,
+		"status": core.RunStatusCancelled,
+	})
+}
+
+func (h *Handler) resolveProjectAndEnv(r *http.Request) (string, string) {
+	var projectID string
+	var env string
+
+	if id, ok := identity.FromContext(r.Context()); ok && id != nil {
+		projectID = id.Project
+		env = id.Environment
+	}
+	if s, ok := core.SnapshotFromContext(r.Context()); ok && s != nil {
+		if projectID == "" {
+			projectID = s.ProjectID
+		}
+		if env == "" {
+			env = s.Environment
+		}
+	}
+	if projectID == "" {
+		projectID = strings.TrimSpace(r.Header.Get("X-Project-ID"))
+	}
+	if env == "" {
+		env = strings.TrimSpace(r.Header.Get("X-Environment"))
+		if env == "" {
+			env = h.defaultEnv
+		}
+	}
+	return projectID, env
+}
+
+func (h *Handler) writeRawErrorWithStatus(w http.ResponseWriter, statusCode int, code, message, reqID string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"code":       code,
+		"message":    message,
+		"request_id": reqID,
+	})
+}
+
 

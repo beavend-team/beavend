@@ -271,6 +271,110 @@ func TestAuthMiddleware(t *testing.T) {
 		assert.Equal(t, "beavend:app_key", capturedID.Issuer)
 		assert.Equal(t, "my_app", capturedID.Claims["app_id"])
 		assert.Equal(t, "key_1", capturedID.Claims["key_id"])
+		assert.Equal(t, true, capturedID.Claims["machine"])
+		assert.Empty(t, capturedToken, "RawToken must never be populated from AppAPIKey")
+	})
+
+	t.Run("app api key asserting subject rejected when MayAssertSubject is false", func(t *testing.T) {
+		handled = false
+		appKeyStr := "bv_app_sec_test_secret_1234567890abcdef"
+		r := chi.NewRouter()
+		r.Use(AuthMiddleware(registry, verifier))
+		r.Post("/v1/apps/{ai_app_id}/chat", nextHandler)
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/apps/my_app/chat", nil)
+		req.Header.Set("Authorization", "Bearer "+appKeyStr)
+		req.Header.Set("X-Project-ID", "proj_key")
+		req.Header.Set("X-Environment", "production")
+		req.Header.Set("X-Beavend-Subject", "usr_eve")
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.False(t, handled)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+	})
+
+	t.Run("app api key asserting subject permitted when MayAssertSubject is true with claim filtering", func(t *testing.T) {
+		handled = false
+		capturedID = nil
+		capturedToken = ""
+
+		keyToken := "bv_app_sec_assert_subject_allowed_key_9999"
+		h := sha256.Sum256([]byte(keyToken))
+		hStr := hex.EncodeToString(h[:])
+
+		snapAssert := core.NewSnapshot("proj_assert", "production", 1)
+		snapAssert.Apps["app_bridge"] = &core.AIApp{
+			ID:          "app_bridge",
+			ProjectID:   "proj_assert",
+			Environment: "production",
+			AuthConfig: &core.AuthConfig{
+				Issuer: "https://my-company.auth0.com/",
+			},
+		}
+		snapAssert.AppAPIKeys[hStr] = &core.AppAPIKey{
+			ID:               "key_assert_1",
+			AppID:            "app_bridge",
+			ProjectID:        "proj_assert",
+			Environment:      "production",
+			Name:             "Backend Key With Subject Assertion",
+			KeyPrefix:        "bv_app_sec_assert",
+			KeyHash:          hStr,
+			MayAssertSubject: true,
+			AllowedClaims:    []string{"tier", "organization_id", "email"},
+			CreatedAt:        time.Now().UTC(),
+		}
+		registry.Swap(snapAssert)
+
+		r := chi.NewRouter()
+		r.Use(AuthMiddleware(registry, verifier))
+		r.Post("/v1/apps/{ai_app_id}/chat", nextHandler)
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/apps/app_bridge/chat", nil)
+		req.Header.Set("Authorization", "Bearer "+keyToken)
+		req.Header.Set("X-Project-ID", "proj_assert")
+		req.Header.Set("X-Environment", "production")
+		req.Header.Set("X-Beavend-Subject", "usr_alice_123")
+		req.Header.Set("X-Beavend-Claims", `{"tier":"enterprise","organization_id":"org_456","admin":true,"scope":"superuser","unallowed_field":"hack"}`)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.True(t, handled)
+		assert.Equal(t, http.StatusOK, w.Code)
+		require.NotNil(t, capturedID)
+		assert.Equal(t, "usr_alice_123", capturedID.Subject)
+		assert.Equal(t, "https://my-company.auth0.com/", capturedID.Issuer)
+		assert.Equal(t, "enterprise", capturedID.Claims["tier"])
+		assert.Equal(t, "org_456", capturedID.Claims["organization_id"])
+		assert.Nil(t, capturedID.Claims["admin"], "reserved claim 'admin' must be stripped")
+		assert.NotEqual(t, "superuser", capturedID.Claims["scope"], "reserved claim 'scope' must be stripped")
+		assert.Nil(t, capturedID.Claims["unallowed_field"], "unallowed claim must be stripped")
+		assert.Empty(t, capturedToken, "RawToken must never be populated from AppAPIKey")
+	})
+
+	t.Run("app api key asserting subject with malformed X-Beavend-Claims returns 400", func(t *testing.T) {
+		handled = false
+		keyToken := "bv_app_sec_assert_subject_allowed_key_9999"
+
+		r := chi.NewRouter()
+		r.Use(AuthMiddleware(registry, verifier))
+		r.Post("/v1/apps/{ai_app_id}/chat", nextHandler)
+
+		req := httptest.NewRequest(http.MethodPost, "/v1/apps/app_bridge/chat", nil)
+		req.Header.Set("Authorization", "Bearer "+keyToken)
+		req.Header.Set("X-Project-ID", "proj_assert")
+		req.Header.Set("X-Environment", "production")
+		req.Header.Set("X-Beavend-Subject", "usr_alice_123")
+		req.Header.Set("X-Beavend-Claims", `{malformed:json:bad}`)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.False(t, handled)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "malformed X-Beavend-Claims JSON header")
 	})
 
 	t.Run("app api key scoped to different app returns 403", func(t *testing.T) {

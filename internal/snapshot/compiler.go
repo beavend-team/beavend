@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -41,6 +42,21 @@ type ProviderQuerySource interface {
 // SkillQuerySource provides active skill versions from store.
 type SkillQuerySource interface {
 	GetSnapshotSkills(ctx context.Context, arg db.GetSnapshotSkillsParams) ([]db.GetSnapshotSkillsRow, error)
+}
+
+// DocumentMemoryQuerySource provides compiled document memories from store.
+type DocumentMemoryQuerySource interface {
+	GetSnapshotDocumentMemories(ctx context.Context, projectID, env string) ([]core.DocumentMemory, error)
+}
+
+// KnowledgeQuerySource provides compiled knowledge catalog documents from store.
+type KnowledgeQuerySource interface {
+	GetSnapshotKnowledgeDocs(ctx context.Context, projectID, env string) ([]core.KnowledgeDocMeta, error)
+}
+
+// PromptFragmentsQuerySource provides modular prompt fragments from store.
+type PromptFragmentsQuerySource interface {
+	GetSnapshotPromptFragments(ctx context.Context, projectID, env, promptID string) ([]core.PromptFragmentRef, error)
 }
 
 // Compiler compiles raw store records into an in-memory immutable Snapshot.
@@ -115,11 +131,35 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 			}
 		}
 
+		var fragments []core.PromptFragmentRef
+		if pfqs, ok := c.queries.(PromptFragmentsQuerySource); ok {
+			frags, err := pfqs.GetSnapshotPromptFragments(ctx, projectID, env, p.PromptID)
+			if err != nil {
+				return nil, fmt.Errorf("fetch prompt fragments for %s: %w", p.PromptID, err)
+			}
+			fragments = frags
+		}
+
+		if len(fragments) > 0 {
+			sort.SliceStable(fragments, func(i, j int) bool {
+				return fragments[i].Order < fragments[j].Order
+			})
+			for _, frag := range fragments {
+				if frag.ID == "" {
+					return nil, fmt.Errorf("prompt %s has fragment with empty ID", p.PromptID)
+				}
+				if frag.Content == "" {
+					return nil, fmt.Errorf("prompt %s fragment %q has empty content", p.PromptID, frag.ID)
+				}
+			}
+		}
+
 		pv := &core.PromptVersion{
 			ID:        p.ID,
 			PromptID:  p.PromptID,
 			Version:   int(p.Version),
 			Template:  p.Template,
+			Fragments: fragments,
 			Variables: vars,
 			IsActive:  p.IsActive,
 			CreatedAt: p.CreatedAt.Time,
@@ -432,7 +472,8 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 		for _, toolID := range toolIDs {
 			// Built-in tools provided by Beavend runtime are always valid
 			switch toolID {
-			case "web_search", "generate_image", "generate_speech", "generate_video", "load_skill":
+			case "web_search", "generate_image", "generate_speech", "generate_video", "load_skill",
+				"ask_user", "sub_agent", "propose_memory", "knowledge_search":
 				continue
 			}
 			if _, exists := snap.Tools[toolID]; !exists {
@@ -677,6 +718,35 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 				LastUsedAt:  lastUsed,
 				ExpiresAt:   expires,
 			}
+		}
+	}
+
+	// 8. Document Memories
+	if dqs, ok := c.queries.(DocumentMemoryQuerySource); ok {
+		mems, err := dqs.GetSnapshotDocumentMemories(ctx, projectID, env)
+		if err != nil {
+			return nil, fmt.Errorf("fetch document memories: %w", err)
+		}
+		for _, m := range mems {
+			if len(m.Value) > core.MaxDocumentMemoryBytes {
+				return nil, fmt.Errorf("document memory %s exceeds maximum compiled limit of %d bytes", m.Key, core.MaxDocumentMemoryBytes)
+			}
+			if m.Scope == core.DocumentMemoryScopeProject || m.Scope == core.DocumentMemoryScopeApp {
+				memCopy := m
+				k := m.Scope + ":" + m.TargetID + ":" + m.Key
+				snap.DocumentMemories[k] = &memCopy
+			}
+		}
+	}
+
+	// 9. Knowledge Catalog
+	if kqs, ok := c.queries.(KnowledgeQuerySource); ok {
+		docs, err := kqs.GetSnapshotKnowledgeDocs(ctx, projectID, env)
+		if err != nil {
+			return nil, fmt.Errorf("fetch knowledge catalog: %w", err)
+		}
+		for _, d := range docs {
+			snap.KnowledgeCatalog[d.AppID] = append(snap.KnowledgeCatalog[d.AppID], d)
 		}
 	}
 

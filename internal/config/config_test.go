@@ -217,3 +217,56 @@ func TestConfig_ValidationErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestConfig_SecretFileResolution(t *testing.T) {
+	tempDir := t.TempDir()
+
+	masterKeyFile := filepath.Join(tempDir, "master_key.txt")
+	err := os.WriteFile(masterKeyFile, []byte("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n"), 0600)
+	if err != nil {
+		t.Fatalf("failed to write master key file: %v", err)
+	}
+
+	adminPassFile := filepath.Join(tempDir, "admin_pass.txt")
+	err = os.WriteFile(adminPassFile, []byte("custom_admin_pass\n"), 0600)
+	if err != nil {
+		t.Fatalf("failed to write admin pass file: %v", err)
+	}
+
+	dbPassFile := filepath.Join(tempDir, "db_pass.txt")
+	err = os.WriteFile(dbPassFile, []byte("injected_db_password\n"), 0600)
+	if err != nil {
+		t.Fatalf("failed to write db pass file: %v", err)
+	}
+
+	envMap := map[string]string{
+		"BEAVEND_DATABASE_URL":       "postgres://postgres:old@localhost:5432/beavend",
+		"BEAVEND_DB_PASSWORD_FILE":   dbPassFile,
+		"BEAVEND_SECRET_KEY_FILE":    masterKeyFile,
+		"BEAVEND_ADMIN_PASSWORD_FILE": adminPassFile,
+		"BEAVEND_MCP_ALLOW_STDIO":    "true",
+		"BEAVEND_MCP_STDIO_ALLOWLIST": "/usr/bin/git, /usr/local/bin/curl",
+	}
+
+	lookup := func(k string) string { return envMap[k] }
+	cfg, err := LoadWithLookup(lookup)
+	if err != nil {
+		t.Fatalf("unexpected error loading config with secret files: %v", err)
+	}
+
+	if cfg.Security.MasterKey != "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" {
+		t.Errorf("expected master key from file, got %s", cfg.Security.MasterKey)
+	}
+	if cfg.Admin.Password != "custom_admin_pass" {
+		t.Errorf("expected admin pass from file, got %s", cfg.Admin.Password)
+	}
+	if !strings.Contains(cfg.Database.URL, ":injected_db_password@") {
+		t.Errorf("expected db URL to contain injected password, got %s", cfg.Database.URL)
+	}
+	if !cfg.MCP.AllowStdio {
+		t.Errorf("expected MCP.AllowStdio to be true")
+	}
+	if len(cfg.MCP.StdioAllowlist) != 2 || cfg.MCP.StdioAllowlist[0] != "/usr/bin/git" || cfg.MCP.StdioAllowlist[1] != "/usr/local/bin/curl" {
+		t.Errorf("unexpected MCP.StdioAllowlist: %v", cfg.MCP.StdioAllowlist)
+	}
+}

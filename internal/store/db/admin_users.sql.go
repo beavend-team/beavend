@@ -20,10 +20,22 @@ func (q *Queries) CountAdminUsers(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const countOwnerAdminUsers = `-- name: CountOwnerAdminUsers :one
+SELECT COUNT(*) FROM admin_users
+WHERE role = 'owner' AND is_disabled = FALSE
+`
+
+func (q *Queries) CountOwnerAdminUsers(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countOwnerAdminUsers)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAdminUser = `-- name: CreateAdminUser :one
 INSERT INTO admin_users (id, email, password_hash, role, created_at, updated_at)
 VALUES ($1, $2, $3, $4, NOW(), NOW())
-RETURNING id, email, password_hash, role, created_at, updated_at
+RETURNING id, email, password_hash, role, created_at, updated_at, is_disabled
 `
 
 type CreateAdminUserParams struct {
@@ -48,6 +60,7 @@ func (q *Queries) CreateAdminUser(ctx context.Context, arg CreateAdminUserParams
 		&i.Role,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsDisabled,
 	)
 	return i, err
 }
@@ -63,7 +76,7 @@ func (q *Queries) DeleteAdminUser(ctx context.Context, id string) error {
 }
 
 const getAdminUserByEmail = `-- name: GetAdminUserByEmail :one
-SELECT id, email, password_hash, role, created_at, updated_at FROM admin_users
+SELECT id, email, password_hash, role, created_at, updated_at, is_disabled FROM admin_users
 WHERE email = $1
 `
 
@@ -77,12 +90,13 @@ func (q *Queries) GetAdminUserByEmail(ctx context.Context, email string) (AdminU
 		&i.Role,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsDisabled,
 	)
 	return i, err
 }
 
 const getAdminUserByID = `-- name: GetAdminUserByID :one
-SELECT id, email, password_hash, role, created_at, updated_at FROM admin_users
+SELECT id, email, password_hash, role, created_at, updated_at, is_disabled FROM admin_users
 WHERE id = $1
 `
 
@@ -96,12 +110,13 @@ func (q *Queries) GetAdminUserByID(ctx context.Context, id string) (AdminUsers, 
 		&i.Role,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsDisabled,
 	)
 	return i, err
 }
 
 const listAdminUsers = `-- name: ListAdminUsers :many
-SELECT id, email, password_hash, role, created_at, updated_at FROM admin_users
+SELECT id, email, password_hash, role, created_at, updated_at, is_disabled FROM admin_users
 ORDER BY created_at ASC
 `
 
@@ -121,6 +136,7 @@ func (q *Queries) ListAdminUsers(ctx context.Context) ([]AdminUsers, error) {
 			&i.Role,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.IsDisabled,
 		); err != nil {
 			return nil, err
 		}
@@ -132,11 +148,38 @@ func (q *Queries) ListAdminUsers(ctx context.Context) ([]AdminUsers, error) {
 	return items, nil
 }
 
+const updateAdminUserDisabled = `-- name: UpdateAdminUserDisabled :one
+UPDATE admin_users
+SET is_disabled = $2, updated_at = NOW()
+WHERE id = $1
+RETURNING id, email, password_hash, role, created_at, updated_at, is_disabled
+`
+
+type UpdateAdminUserDisabledParams struct {
+	ID         string `json:"id"`
+	IsDisabled bool   `json:"is_disabled"`
+}
+
+func (q *Queries) UpdateAdminUserDisabled(ctx context.Context, arg UpdateAdminUserDisabledParams) (AdminUsers, error) {
+	row := q.db.QueryRow(ctx, updateAdminUserDisabled, arg.ID, arg.IsDisabled)
+	var i AdminUsers
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.Role,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.IsDisabled,
+	)
+	return i, err
+}
+
 const updateAdminUserPassword = `-- name: UpdateAdminUserPassword :one
 UPDATE admin_users
 SET password_hash = $2, updated_at = NOW()
 WHERE id = $1
-RETURNING id, email, password_hash, role, created_at, updated_at
+RETURNING id, email, password_hash, role, created_at, updated_at, is_disabled
 `
 
 type UpdateAdminUserPasswordParams struct {
@@ -154,6 +197,7 @@ func (q *Queries) UpdateAdminUserPassword(ctx context.Context, arg UpdateAdminUs
 		&i.Role,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsDisabled,
 	)
 	return i, err
 }
@@ -162,7 +206,7 @@ const updateAdminUserRole = `-- name: UpdateAdminUserRole :one
 UPDATE admin_users
 SET role = $2, updated_at = NOW()
 WHERE id = $1
-RETURNING id, email, password_hash, role, created_at, updated_at
+RETURNING id, email, password_hash, role, created_at, updated_at, is_disabled
 `
 
 type UpdateAdminUserRoleParams struct {
@@ -180,6 +224,7 @@ func (q *Queries) UpdateAdminUserRole(ctx context.Context, arg UpdateAdminUserRo
 		&i.Role,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IsDisabled,
 	)
 	return i, err
 }

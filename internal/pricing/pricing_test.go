@@ -201,3 +201,58 @@ func TestParseCatalogData_OpenRouterFormat(t *testing.T) {
 		t.Errorf("expected output 8.0, got %f", p.OutputCostPer1M)
 	}
 }
+
+func TestCatalog_CalculateCostWithSource_CachedTokens(t *testing.T) {
+	cat := DefaultCatalog()
+
+	t.Run("embedded model with cached input discount", func(t *testing.T) {
+		// gpt-4o: input 2.50, output 10.00. Default cached rate = 1.25 (50%)
+		// 1000 input tokens total, 400 cached (so 600 non-cached @ 2.50, 400 cached @ 1.25)
+		// 500 output tokens @ 10.00
+		// Cost = (600*2.50 + 400*1.25 + 500*10.00) / 1,000,000 = (1500 + 500 + 5000) / 1M = 7000 / 1M = 0.0070
+		cost, source := cat.CalculateCostWithSource(1000, 500, 400, "gpt-4o", nil)
+		if source != "catalog_embedded" {
+			t.Errorf("expected source 'catalog_embedded', got %q", source)
+		}
+		expectedCost := 0.0070
+		if math.Abs(cost-expectedCost) > 1e-6 {
+			t.Errorf("expected cost %f, got %f", expectedCost, cost)
+		}
+	})
+
+	t.Run("override with custom cached input rate", func(t *testing.T) {
+		cachedRate := 0.50
+		override := &core.ModelPrice{
+			InputCostPer1M:       2.00,
+			OutputCostPer1M:      8.00,
+			CachedInputCostPer1M: &cachedRate,
+			ContextWindow:        128000,
+			SupportsCache:        true,
+			SupportsTools:        true,
+			SupportsReasoning:    true,
+		}
+		// 1,000,000 input tokens, 500,000 cached:
+		// nonCached = 500k @ 2.00 = $1.00
+		// cached = 500k @ 0.50 = $0.25
+		// output = 100k @ 8.00 = $0.80
+		// Total = 1.00 + 0.25 + 0.80 = $2.05
+		cost, source := cat.CalculateCostWithSource(1000000, 100000, 500000, "custom-model", override)
+		if source != "override" {
+			t.Errorf("expected source 'override', got %q", source)
+		}
+		expectedCost := 2.05
+		if math.Abs(cost-expectedCost) > 1e-4 {
+			t.Errorf("expected cost %f, got %f", expectedCost, cost)
+		}
+	})
+
+	t.Run("unknown model returns source none", func(t *testing.T) {
+		cost, source := cat.CalculateCostWithSource(100, 100, 0, "nonexistent-model-xyz", nil)
+		if source != "none" {
+			t.Errorf("expected source 'none', got %q", source)
+		}
+		if cost != 0.0 {
+			t.Errorf("expected cost 0.0, got %f", cost)
+		}
+	})
+}

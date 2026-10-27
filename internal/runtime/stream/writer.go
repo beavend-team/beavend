@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/beavend/beavend/internal/core"
@@ -94,9 +95,54 @@ func (wr *Writer) WriteEvent(w io.Writer, event core.StreamEvent) error {
 	var payload any
 
 	switch event.Type {
-	case "delta", "thinking":
+	case "delta", "thinking", "reasoning":
+		text := event.Delta
+		if text == "" && event.Reasoning != "" {
+			text = event.Reasoning
+		}
 		payload = map[string]string{
-			"text": event.Delta,
+			"text": text,
+		}
+	case "tool_start":
+		if event.ToolCall != nil {
+			payload = map[string]any{
+				"call_id": event.ToolCall.ID,
+				"tool":    event.ToolCall.Name,
+			}
+		} else if event.Data != nil {
+			payload = event.Data
+		} else {
+			payload = map[string]any{}
+		}
+	case "tool_delta":
+		if event.Delta != "" {
+			payload = map[string]any{
+				"delta": event.Delta,
+			}
+		} else if event.Data != nil {
+			payload = event.Data
+		} else {
+			payload = map[string]any{}
+		}
+	case "tool_end":
+		if event.ToolEnd != nil {
+			payload = event.ToolEnd
+		} else if event.Data != nil {
+			payload = event.Data
+		} else {
+			payload = map[string]any{}
+		}
+	case "question":
+		if event.Data != nil {
+			payload = event.Data
+		} else {
+			payload = map[string]string{"question": event.Delta}
+		}
+	case "sub_agent_activity":
+		if event.Data != nil {
+			payload = event.Data
+		} else {
+			payload = map[string]string{"activity": event.Delta}
 		}
 	case "tool_call":
 		if event.ToolCall != nil {
@@ -169,8 +215,19 @@ func (wr *Writer) WriteEvent(w io.Writer, event core.StreamEvent) error {
 		eventType = "message"
 	}
 
-	frame := fmt.Sprintf("event: %s\ndata: %s\n\n", eventType, string(dataBytes))
-	_, err = io.WriteString(w, frame)
+	var sb strings.Builder
+	if event.ID != "" {
+		sb.WriteString("id: ")
+		sb.WriteString(event.ID)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("event: ")
+	sb.WriteString(eventType)
+	sb.WriteString("\ndata: ")
+	sb.Write(dataBytes)
+	sb.WriteString("\n\n")
+
+	_, err = io.WriteString(w, sb.String())
 	return err
 }
 
