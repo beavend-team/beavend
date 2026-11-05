@@ -2,6 +2,7 @@ package auth
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -45,7 +46,8 @@ type TokenManager struct {
 // NewTokenManager creates a new TokenManager with given secret and TTL.
 func NewTokenManager(secret []byte, ttl time.Duration) *TokenManager {
 	if len(secret) == 0 {
-		secret = []byte("default-beavend-admin-insecure-secret-key-change-me")
+		secret = make([]byte, 32)
+		_, _ = rand.Read(secret)
 	}
 	if ttl == 0 {
 		ttl = DefaultTokenTTL

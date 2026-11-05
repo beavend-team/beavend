@@ -66,6 +66,7 @@ func (s *OutputGuardrailStage) Handle(ctx context.Context, state *core.ReqState)
 	engine := guardrails.NewEngine(guardrails.Config{
 		MaxOutputBytes: cfg.MaxOutputBytes,
 		PIIRedaction:   cfg.PIIRedaction,
+		PIIBlock:       cfg.PIIBlock,
 	})
 
 	// Enforce structured JSON Schema if defined on AI App

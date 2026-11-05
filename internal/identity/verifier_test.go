@@ -123,6 +123,23 @@ func TestVerifier_ExpiredAndNotBefore(t *testing.T) {
 		require.Error(t, err)
 		assert.ErrorIs(t, err, ErrTokenNotYetValid)
 	})
+
+	t.Run("token missing expiration claim rejected", func(t *testing.T) {
+		tok, err := jwt.NewBuilder().
+			Issuer(cfg.Issuer).
+			Subject("user-no-exp").
+			Audience(cfg.Audience).
+			Build()
+		require.NoError(t, err)
+
+		signed, err := jwt.Sign(tok, jwt.WithKey(jwa.RS256, fixture.privJWK))
+		require.NoError(t, err)
+
+		_, err = verifier.Verify(ctx, string(signed), cfg)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, ErrTokenExpired)
+		assert.Contains(t, err.Error(), "missing required exp")
+	})
 }
 
 func TestVerifier_IssuerAndAudienceMismatch(t *testing.T) {

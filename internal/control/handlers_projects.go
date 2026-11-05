@@ -12,6 +12,7 @@ import (
 	"github.com/beavend/beavend/internal/core"
 	"github.com/beavend/beavend/internal/identity"
 	"github.com/beavend/beavend/internal/store/db"
+	"github.com/beavend/beavend/internal/tools"
 	chi "github.com/go-chi/chi/v5"
 )
 
@@ -353,7 +354,8 @@ func (h *Handler) HandleTestToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	verifier := identity.NewVerifier(identity.NewJWKSManager())
+	safeClient := tools.NewSafeHTTPClient(tools.SafeDialerConfig{DialTimeout: 5 * time.Second}, 5*time.Second)
+	verifier := identity.NewVerifier(identity.NewJWKSManager(identity.WithHTTPClient(safeClient)))
 	jwtToken, err := verifier.Verify(r.Context(), tokenStr, authCfg)
 	if err != nil {
 		writeJSON(w, http.StatusOK, TestTokenResponse{

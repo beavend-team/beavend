@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"reflect"
 	"strings"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/beavend/beavend/internal/secrets"
 	synckit "github.com/beavend/beavend/internal/snapshot/sync"
 	"github.com/beavend/beavend/internal/store/db"
+	"github.com/beavend/beavend/internal/tools"
 	pgx "github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -278,6 +280,27 @@ func (e *Engine) Export(ctx context.Context, projectID, env string) (*ProjectDoc
 			var executor core.ExecutorConfig
 			if len(t.Executor) > 0 {
 				_ = json.Unmarshal(t.Executor, &executor)
+				if executor.Headers != nil {
+					sanitized := make(map[string]string, len(executor.Headers))
+					for k, v := range executor.Headers {
+						kLower := strings.ToLower(k)
+						if strings.Contains(kLower, "auth") || strings.Contains(kLower, "key") ||
+							strings.Contains(kLower, "token") || strings.Contains(kLower, "secret") ||
+							strings.Contains(kLower, "cookie") || strings.Contains(kLower, "credential") ||
+							strings.Contains(kLower, "session") || strings.Contains(kLower, "proxy") {
+							sanitized[k] = MaskedSecretPlaceholder
+						} else {
+							sanitized[k] = v
+						}
+					}
+					executor.Headers = sanitized
+				}
+				if executor.URL != "" {
+					if u, err := url.Parse(executor.URL); err == nil && u.User != nil {
+						u.User = url.UserPassword("redacted", "redacted")
+						executor.URL = u.String()
+					}
+				}
 			}
 			var downstreamAuth *core.DownstreamAuthConfig
 			if len(t.DownstreamAuth) > 0 {
@@ -1192,6 +1215,31 @@ func (e *Engine) Apply(ctx context.Context, doc *ProjectDocument) (*DiffReport, 
 
 	// 6. Upsert Tools
 	for _, tSpec := range doc.Tools {
+		// Enforce tool sandboxing and security validation on declarative config imports
+		tDef := core.ToolDefinition{
+			ID:               tSpec.ID,
+			Name:             tSpec.Name,
+			Description:      tSpec.Description,
+			SideEffect:       tSpec.SideEffect,
+			InputSchema:      tSpec.InputSchema,
+			IdentityBindings: tSpec.IdentityBindings,
+			Executor:         tSpec.Executor,
+			Confirmation:     tSpec.Confirmation,
+			Authorization:    tSpec.Authorization,
+		}
+		if tSpec.DownstreamAuth != nil {
+			tDef.DownstreamAuth = *tSpec.DownstreamAuth
+		}
+		if tSpec.Result != nil {
+			tDef.Result = *tSpec.Result
+		}
+		if tSpec.Cache != nil {
+			tDef.Cache = *tSpec.Cache
+		}
+		if err := tools.ValidateToolDefinition(tDef); err != nil {
+			return nil, fmt.Errorf("tool %s validation failed: %w", tSpec.ID, err)
+		}
+
 		schemaBytes, _ := json.Marshal(tSpec.InputSchema)
 		bindingsBytes, _ := json.Marshal(tSpec.IdentityBindings)
 		execBytes, _ := json.Marshal(tSpec.Executor)
@@ -1272,8 +1320,9 @@ func (e *Engine) Apply(ctx context.Context, doc *ProjectDocument) (*DiffReport, 
 		// Provider config
 		if mSpec.ProviderConfig != nil {
 			apiKey := ResolveSecret(mSpec.ProviderConfig.APIKey)
-			if apiKey != "" && apiKey != MaskedSecretPlaceholder && len(e.masterKey) == 32 {
-				cipher, nonce, err := secrets.Encrypt(e.masterKey, []byte(apiKey))
+			if apiKey != "" && apiKey != MaskedSecretPlaceholder && len(e.masterKey) > 0 {
+				derivedKey := secrets.DeriveKey(string(e.masterKey))
+				cipher, nonce, err := secrets.Encrypt(derivedKey, []byte(apiKey))
 				if err == nil {
 					_, _ = e.queries.UpsertProviderConfig(ctx, db.UpsertProviderConfigParams{
 						ID:               fmt.Sprintf("%s_%s_%s", doc.Project.ID, doc.Environment, mSpec.ProviderConfig.ProviderName),

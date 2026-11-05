@@ -178,6 +178,10 @@ func (s *LimitsStage) Handle(ctx context.Context, state *core.ReqState) error {
 	// 1. Evaluate project-level rate limits if present
 	if len(projectRules) > 0 {
 		projKey := limits.ProjectKey(state.ProjectID, state.Environment)
+		if state.Metadata == nil {
+			state.Metadata = make(map[string]any)
+		}
+		state.Metadata["limit_project_key"] = projKey
 		pAllowed, pRetryAfter, pErr := s.store.CheckAndDebit(ctx, projKey, projectRules, estimatedTokens)
 		if pErr != nil {
 			span.RecordError(pErr)

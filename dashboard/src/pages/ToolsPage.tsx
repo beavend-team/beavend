@@ -527,29 +527,33 @@ export const ToolsPage: React.FC = () => {
                     <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
                         onClick={() => openEditModal(t.id)}
-                        className="p-1 text-neutral-600 hover:text-blue-400 hover:bg-neutral-800 rounded transition-colors"
+                        className="p-1 text-neutral-400 hover:text-blue-400 hover:bg-neutral-800 rounded transition-colors"
                         title="Edit tool & create new version"
+                        aria-label={`Edit ${t.name}`}
                       >
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
                       <button
                         onClick={() => { setSelectedToolForTest(t.id); setTestResult(null); setTestError(null); setShowTestModal(true); }}
-                        className="p-1 text-neutral-600 hover:text-emerald-400 hover:bg-neutral-800 rounded transition-colors"
+                        className="p-1 text-neutral-400 hover:text-emerald-400 hover:bg-neutral-800 rounded transition-colors"
                         title="Test tool execution"
+                        aria-label={`Test ${t.name}`}
                       >
                         <Play className="w-3.5 h-3.5" />
                       </button>
                       <button
                         onClick={() => { setSelectedToolForSecret(t.id); setShowSecretModal(true); }}
-                        className="p-1 text-neutral-600 hover:text-amber-400 hover:bg-neutral-800 rounded transition-colors"
+                        className="p-1 text-neutral-400 hover:text-amber-400 hover:bg-neutral-800 rounded transition-colors"
                         title="Manage secrets"
+                        aria-label={`Manage secrets for ${t.name}`}
                       >
                         <KeyRound className="w-3.5 h-3.5" />
                       </button>
                       <button
                         onClick={() => handleDelete(t.id)}
-                        className="p-1 text-neutral-600 hover:text-red-400 hover:bg-neutral-800 rounded transition-colors"
+                        className="p-1 text-neutral-400 hover:text-red-400 hover:bg-neutral-800 rounded transition-colors"
                         title="Delete tool"
+                        aria-label={`Delete ${t.name}`}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -557,8 +561,8 @@ export const ToolsPage: React.FC = () => {
                   </div>
 
                   <h3 className="text-sm font-semibold text-neutral-100 mb-0.5">{t.name}</h3>
-                  <p className="text-[11px] font-mono text-neutral-600 mb-2">{t.id}</p>
-                  <p className="text-xs text-neutral-500 line-clamp-2 mb-3">
+                  <p className="text-[11px] font-mono text-neutral-400 mb-2">{t.id}</p>
+                  <p className="text-xs text-neutral-400 line-clamp-2 mb-3 leading-relaxed">
                     {t.description || 'No description provided.'}
                   </p>
 
@@ -570,11 +574,11 @@ export const ToolsPage: React.FC = () => {
                     </Badge>
                   </div>
 
-                  <div className="pt-2.5 mt-2.5 border-t border-neutral-800/80 flex items-center justify-between text-[10px] text-neutral-700">
+                  <div className="pt-2.5 mt-2.5 border-t border-neutral-800/80 flex items-center justify-between text-[10px] text-neutral-400">
                     <button
                       type="button"
                       onClick={() => openHistory(t.id)}
-                      className="flex items-center gap-1 text-emerald-600 hover:text-emerald-400 transition-colors"
+                      className="flex items-center gap-1 text-emerald-400 hover:text-emerald-300 font-medium transition-colors"
                     >
                       <GitBranch className="w-3 h-3" />
                       View versions
@@ -1128,7 +1132,7 @@ export const ToolsPage: React.FC = () => {
             <div className="flex items-center justify-between p-5 border-b border-neutral-800">
               <div>
                 <h3 className="text-sm font-semibold text-neutral-100">Tool Version History</h3>
-                <p className="text-[11px] font-mono text-neutral-600 mt-0.5">{selectedToolForHistory}</p>
+                <p className="text-[11px] font-mono text-neutral-400 mt-0.5">{selectedToolForHistory}</p>
               </div>
               <Button
                 variant="secondary"
@@ -1140,7 +1144,7 @@ export const ToolsPage: React.FC = () => {
                   openEditModal(id);
                 }}
               >
-                Edit & Publish
+                Edit &amp; Publish
               </Button>
             </div>
 
@@ -1148,7 +1152,7 @@ export const ToolsPage: React.FC = () => {
               {loadingHistory ? (
                 <Loading text="Loading versions..." />
               ) : !toolDetail?.versions?.length ? (
-                <p className="text-xs text-neutral-600 text-center py-4">No version history available.</p>
+                <p className="text-xs text-neutral-400 text-center py-4">No version history available.</p>
               ) : (
                 toolDetail.versions.map((v: any) => {
                   const isActive = v.version === toolDetail.tool?.active_version || v.is_active;
@@ -1178,7 +1182,7 @@ export const ToolsPage: React.FC = () => {
                               setSelectedToolForHistory(null);
                               openEditModal(id, v);
                             }}
-                            className="text-xs text-neutral-500 hover:text-blue-400 flex items-center gap-1 transition-colors"
+                            className="text-xs text-neutral-400 hover:text-emerald-400 flex items-center gap-1 transition-colors"
                             title="Edit from this version"
                           >
                             <Pencil className="w-3 h-3" /> Fork
@@ -1190,7 +1194,7 @@ export const ToolsPage: React.FC = () => {
                         <span className="truncate max-w-[320px]">
                           {v.executor?.url || v.executor?.template || '(custom executor)'}
                         </span>
-                        <span className="text-[10px] text-neutral-600">{formatRelativeTime(v.created_at)}</span>
+                        <span className="text-[10px] text-neutral-400">{formatRelativeTime(v.created_at)}</span>
                       </div>
                     </div>
                   );

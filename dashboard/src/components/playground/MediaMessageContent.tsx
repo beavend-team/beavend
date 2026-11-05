@@ -187,7 +187,8 @@ export const MediaMessageContent: React.FC<MediaMessageContentProps> = ({
               type="button"
               onClick={() => setActiveModalSrc(null)}
               className="absolute top-3 right-3 p-1.5 rounded-full bg-black/60 text-white hover:bg-black/90 transition-colors z-10"
-              title="Close"
+              title="Close image preview"
+              aria-label="Close image preview"
             >
               <X className="w-4 h-4" />
             </button>

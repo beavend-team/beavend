@@ -108,7 +108,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </option>
               ))
             )}
-            <option disabled className="bg-neutral-900 text-neutral-600">──────────</option>
+            <option disabled className="bg-neutral-900 text-neutral-500">──────────</option>
             <option value="__new__" className="bg-neutral-900 text-emerald-400 font-medium">
               + New Project...
             </option>
@@ -116,14 +116,15 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             type="button"
             onClick={() => setShowNewProjModal(true)}
-            className="p-1 hover:bg-neutral-800 text-neutral-400 hover:text-emerald-400 rounded transition-colors"
+            aria-label="Create New Project"
+            className="p-1 hover:bg-neutral-800 text-neutral-400 hover:text-emerald-400 rounded transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/50"
             title="Create New Project"
           >
             <Plus className="w-3.5 h-3.5" />
           </button>
         </div>
 
-        <ChevronDown className="w-3.5 h-3.5 text-neutral-700 rotate-[-90deg]" />
+        <ChevronDown className="w-3.5 h-3.5 text-neutral-500 rotate-[-90deg]" />
 
         {/* Environment selector */}
         <div className={`flex items-center gap-1.5 border rounded-lg px-2.5 py-1.5 ${getEnvStyle(currentEnv)}`}>

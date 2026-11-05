@@ -48,7 +48,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 shadow-2xl shadow-black/50">
           <div className="mb-5">
             <h2 className="text-sm font-semibold text-neutral-200">Sign in to your workspace</h2>
-            <p className="text-xs text-neutral-600 mt-0.5">Enter your admin credentials below</p>
+            <p className="text-xs text-neutral-400 mt-0.5">Enter your admin credentials below</p>
           </div>
 
           {error && (
@@ -59,62 +59,52 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
           <form onSubmit={handleSubmit} className="space-y-3">
             <div className="space-y-1">
-              <label className="block text-xs font-medium text-neutral-400">Email address</label>
+              <label className="block text-xs font-medium text-neutral-300">Email address</label>
               <div className="relative">
-                <Mail className="w-4 h-4 text-neutral-600 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Mail className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="email"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="admin@yourorg.com"
-                  className="w-full bg-neutral-950 border border-neutral-800 rounded-lg pl-9 pr-4 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-neutral-600 transition-colors"
+                  className="w-full bg-neutral-950 border border-neutral-800 rounded-lg pl-9 pr-4 py-2.5 text-sm text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/20 transition-colors"
                 />
               </div>
             </div>
 
             <div className="space-y-1">
-              <label className="block text-xs font-medium text-neutral-400">Password</label>
+              <label className="block text-xs font-medium text-neutral-300">Password</label>
               <div className="relative">
-                <Lock className="w-4 h-4 text-neutral-600 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Lock className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••••••"
-                  className="w-full bg-neutral-950 border border-neutral-800 rounded-lg pl-9 pr-4 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-neutral-600 transition-colors"
+                  className="w-full bg-neutral-950 border border-neutral-800 rounded-lg pl-9 pr-4 py-2.5 text-sm text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/20 transition-colors"
                 />
               </div>
             </div>
 
-            <button
+            <Button
               type="submit"
-              disabled={loading}
-              className="w-full mt-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-medium py-2.5 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/30 text-sm"
+              variant="primary"
+              size="md"
+              loading={loading}
+              className="w-full mt-2 py-2.5 text-sm font-semibold shadow-lg shadow-emerald-950/40"
+              iconRight={<ArrowRight className="w-4 h-4" />}
             >
-              {loading ? (
-                <>
-                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Authenticating...
-                </>
-              ) : (
-                <>
-                  Sign In
-                  <ArrowRight className="w-4 h-4" />
-                </>
-              )}
-            </button>
+              Sign In
+            </Button>
           </form>
         </div>
 
         {/* Footer */}
         <div className="mt-6 text-center">
-          <p className="text-[11px] text-neutral-700 flex items-center justify-center gap-1.5">
-            <Shield className="w-3 h-3" />
+          <p className="text-[11px] text-neutral-400 flex items-center justify-center gap-1.5">
+            <Shield className="w-3.5 h-3.5 text-neutral-500" />
             Administrative access only. Sessions are JWT-secured.
           </p>
         </div>

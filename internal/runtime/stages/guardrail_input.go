@@ -70,6 +70,7 @@ func (s *InputGuardrailStage) Handle(ctx context.Context, state *core.ReqState) 
 	engine := guardrails.NewEngine(guardrails.Config{
 		MaxInputBytes:    cfg.MaxInputBytes,
 		PIIRedaction:     cfg.PIIRedaction,
+		PIIBlock:         cfg.PIIBlock,
 		InjectionDefense: cfg.InjectionDefense,
 	})
 
@@ -147,8 +148,8 @@ func (s *InputGuardrailStage) Handle(ctx context.Context, state *core.ReqState) 
 			}
 		}
 
-		// Check prompt injection only on user / untrusted turns
-		if cfg.InjectionDefense && (msg.Role == "user" || msg.Role == "system") {
+		// Check prompt injection across all client-provided input messages
+		if cfg.InjectionDefense {
 			if msg.Content != "" {
 				if err := engine.CheckInput(ctx, msg.Content); err != nil {
 					var v *guardrails.Violation
@@ -171,8 +172,8 @@ func (s *InputGuardrailStage) Handle(ctx context.Context, state *core.ReqState) 
 			}
 		}
 
-		// Redact PII in user/system input messages if enabled
-		if cfg.PIIRedaction && (msg.Role == "user" || msg.Role == "system") {
+		// Redact PII in all client-provided input messages if enabled
+		if cfg.PIIRedaction {
 			if msg.Content != "" {
 				redacted, _ := engine.RedactInput(msg.Content)
 				msg.Content = redacted

@@ -257,8 +257,8 @@ export const VariableReferenceModal: React.FC<VariableReferenceModalProps> = ({
                     <p className="text-[11px] text-neutral-400 leading-relaxed">
                       {item.description}
                     </p>
-                    <div className="text-[10px] text-neutral-600 font-mono">
-                      Example: <span className="text-neutral-400">{item.example}</span>
+                    <div className="text-[10px] text-neutral-400 font-mono">
+                      Example: <span className="text-neutral-300">{item.example}</span>
                     </div>
                   </div>
 

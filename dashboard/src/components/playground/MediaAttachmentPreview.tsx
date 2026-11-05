@@ -75,6 +75,7 @@ export const MediaAttachmentPreview: React.FC<MediaAttachmentPreviewProps> = ({
                 onClick={() => onRemove(idx)}
                 className="p-1 rounded-md text-neutral-400 hover:text-red-400 hover:bg-neutral-800 transition-colors"
                 title="Remove attachment"
+                aria-label={`Remove attachment ${att.filename || att.type}`}
               >
                 <X className="w-3.5 h-3.5" />
               </button>

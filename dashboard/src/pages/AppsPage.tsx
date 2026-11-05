@@ -169,8 +169,9 @@ export const AppsPage: React.FC = () => {
                 <button
                   onClick={(e) => handleDelete(app.id, e)}
                   disabled={deleting === app.id}
-                  className="p-1 text-neutral-600 hover:text-red-400 hover:bg-neutral-800 rounded transition-colors opacity-0 group-hover:opacity-100"
+                  className="p-1 text-neutral-500 hover:text-red-400 hover:bg-neutral-800 rounded transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
                   title="Delete app"
+                  aria-label={`Delete ${app.name}`}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -180,19 +181,19 @@ export const AppsPage: React.FC = () => {
                 <h3 className="text-sm font-semibold text-neutral-100 group-hover:text-emerald-400 transition-colors">
                   {app.name}
                 </h3>
-                <p className="text-[11px] font-mono text-neutral-600">{app.id}</p>
+                <p className="text-[11px] font-mono text-neutral-400">{app.id}</p>
               </div>
 
-              <p className="text-xs text-neutral-500 line-clamp-2 mb-4">
+              <p className="text-xs text-neutral-400 line-clamp-2 mb-4 leading-relaxed">
                 {app.description || 'No description. Click to configure this app.'}
               </p>
 
               <div className="pt-3 border-t border-neutral-800/80 flex items-center justify-between">
-                <div className="flex items-center gap-1 text-[10px] text-neutral-700">
-                  <Clock className="w-3 h-3" />
+                <div className="flex items-center gap-1.5 text-[10px] text-neutral-400">
+                  <Clock className="w-3 h-3 text-neutral-500" />
                   {formatRelativeTime(app.updated_at)}
                 </div>
-                <div className="flex items-center gap-1 text-[11px] text-neutral-500 group-hover:text-emerald-400 transition-colors font-medium">
+                <div className="flex items-center gap-1 text-[11px] text-neutral-400 group-hover:text-emerald-400 transition-colors font-medium">
                   Configure
                   <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
                 </div>

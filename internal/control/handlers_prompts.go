@@ -118,8 +118,9 @@ func (h *Handler) HandleGetPrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	promptID := chi.URLParam(r, "id")
+	projectID, env := getProjectAndEnv(r)
 	prompt, err := h.svc.queries.GetPrompt(r.Context(), promptID)
-	if err != nil {
+	if err != nil || prompt.ProjectID != projectID || prompt.Environment != env {
 		writeError(w, http.StatusNotFound, "not_found", "prompt not found")
 		return
 	}
@@ -158,7 +159,7 @@ func (h *Handler) HandleUpdatePrompt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	existing, err := h.svc.queries.GetPrompt(r.Context(), promptID)
-	if err != nil {
+	if err != nil || existing.ProjectID != projectID || existing.Environment != env {
 		writeError(w, http.StatusNotFound, "not_found", "prompt not found")
 		return
 	}
@@ -228,7 +229,7 @@ func (h *Handler) HandleCreatePromptVersion(w http.ResponseWriter, r *http.Reque
 	}
 
 	existing, err := h.svc.queries.GetPrompt(r.Context(), promptID)
-	if err != nil {
+	if err != nil || existing.ProjectID != projectID || existing.Environment != env {
 		writeError(w, http.StatusNotFound, "not_found", "prompt not found")
 		return
 	}
@@ -275,6 +276,12 @@ func (h *Handler) HandleDeletePrompt(w http.ResponseWriter, r *http.Request) {
 	promptID := chi.URLParam(r, "id")
 	projectID, env := getProjectAndEnv(r)
 
+	existing, err := h.svc.queries.GetPrompt(r.Context(), promptID)
+	if err != nil || existing.ProjectID != projectID || existing.Environment != env {
+		writeError(w, http.StatusNotFound, "not_found", "prompt not found")
+		return
+	}
+
 	if err := h.svc.queries.DeletePrompt(r.Context(), promptID); err != nil {
 		writeError(w, http.StatusInternalServerError, "database_error", err.Error())
 		return
@@ -303,7 +310,13 @@ func (h *Handler) HandleSetActivePromptVersion(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	_, err := h.svc.queries.GetPromptVersion(r.Context(), db.GetPromptVersionParams{
+	existing, err := h.svc.queries.GetPrompt(r.Context(), promptID)
+	if err != nil || existing.ProjectID != projectID || existing.Environment != env {
+		writeError(w, http.StatusNotFound, "not_found", "prompt not found")
+		return
+	}
+
+	_, err = h.svc.queries.GetPromptVersion(r.Context(), db.GetPromptVersionParams{
 		PromptID: promptID,
 		Version:  req.Version,
 	})

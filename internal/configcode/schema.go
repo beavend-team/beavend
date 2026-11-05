@@ -219,18 +219,56 @@ func IsEnvVarRef(val string) bool {
 	return envVarPattern.MatchString(strings.TrimSpace(val))
 }
 
+var restrictedEnvVars = map[string]bool{
+	"DATABASE_URL":                true,
+	"BEAVEND_SECURITY_MASTER_KEY": true,
+	"REDIS_URL":                   true,
+	"MASTER_KEY":                  true,
+	"POSTGRES_PASSWORD":           true,
+	"JWT_SECRET":                  true,
+	"ADMIN_PASSWORD":              true,
+}
+
+func isSensitiveEnvVar(name string) bool {
+	upper := strings.ToUpper(strings.TrimSpace(name))
+	if restrictedEnvVars[upper] {
+		return true
+	}
+	if strings.HasPrefix(upper, "AWS_") || strings.HasPrefix(upper, "AZURE_") ||
+		(strings.HasPrefix(upper, "GOOGLE_") && !strings.HasSuffix(upper, "_API_KEY")) ||
+		strings.HasPrefix(upper, "KUBERNETES_") || strings.HasPrefix(upper, "DOCKER_") ||
+		strings.HasPrefix(upper, "SSH_") || strings.HasPrefix(upper, "GH_") || strings.HasPrefix(upper, "GITHUB_") {
+		return true
+	}
+	if strings.HasPrefix(upper, "BEAVEND_") {
+		return true
+	}
+	if strings.Contains(upper, "PASS") || strings.Contains(upper, "SECRET") || strings.Contains(upper, "TOKEN") ||
+		strings.Contains(upper, "CREDENTIAL") || strings.Contains(upper, "PRIVATE") {
+		return true
+	}
+	return false
+}
+
 // ResolveSecret resolves an environment reference or placeholder.
 // If the value is "${VAR}" or "env:VAR", it resolves the environment variable.
 // If not found in the environment, it returns the raw value or empty string.
+// System-sensitive variables (such as master key, database url, redis url) are blocked.
 func ResolveSecret(val string) string {
 	trimmed := strings.TrimSpace(val)
 	if strings.HasPrefix(trimmed, "${") && strings.HasSuffix(trimmed, "}") {
 		envName := strings.TrimSuffix(strings.TrimPrefix(trimmed, "${"), "}")
+		if isSensitiveEnvVar(envName) {
+			return ""
+		}
 		if v, ok := os.LookupEnv(envName); ok {
 			return v
 		}
 	} else if strings.HasPrefix(trimmed, "env:") {
 		envName := strings.TrimPrefix(trimmed, "env:")
+		if isSensitiveEnvVar(envName) {
+			return ""
+		}
 		if v, ok := os.LookupEnv(envName); ok {
 			return v
 		}

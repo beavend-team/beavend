@@ -301,8 +301,9 @@ func (h *Handler) HandleGetAIApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	appID := chi.URLParam(r, "id")
+	projectID, env := getProjectAndEnv(r)
 	app, err := h.svc.queries.GetAIApp(r.Context(), appID)
-	if err != nil {
+	if err != nil || app.ProjectID != projectID || app.Environment != env {
 		writeError(w, http.StatusNotFound, "not_found", "ai app not found")
 		return
 	}
@@ -337,7 +338,7 @@ func (h *Handler) HandleUpdateAIApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	existing, err := h.svc.queries.GetAIApp(r.Context(), appID)
-	if err != nil {
+	if err != nil || existing.ProjectID != projectID || existing.Environment != env {
 		writeError(w, http.StatusNotFound, "not_found", "ai app not found")
 		return
 	}
@@ -495,6 +496,12 @@ func (h *Handler) HandleDeleteAIApp(w http.ResponseWriter, r *http.Request) {
 	}
 	appID := chi.URLParam(r, "id")
 	projectID, env := getProjectAndEnv(r)
+
+	existing, err := h.svc.queries.GetAIApp(r.Context(), appID)
+	if err != nil || existing.ProjectID != projectID || existing.Environment != env {
+		writeError(w, http.StatusNotFound, "not_found", "ai app not found")
+		return
+	}
 
 	if err := h.svc.queries.DeleteAIApp(r.Context(), appID); err != nil {
 		writeError(w, http.StatusInternalServerError, "database_error", err.Error())

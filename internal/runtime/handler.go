@@ -307,6 +307,18 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 				usageMu.Unlock()
 			}
 			if ev.Type == "delta" {
+				if fullTextBuilder.Len()+len(ev.Delta) > 5<<20 { // 5MB maximum stream buffer limit
+					capturedErr = &core.ErrorResponse{
+						Code:      "response_too_large",
+						Message:   "stream response buffer exceeded maximum allowed size (5MB)",
+						RequestID: state.RequestID,
+					}
+					select {
+					case monitoredChan <- core.StreamEvent{Type: "error", Error: capturedErr, RequestID: state.RequestID}:
+					case <-r.Context().Done():
+					}
+					return
+				}
 				fullTextBuilder.WriteString(ev.Delta)
 			}
 
@@ -373,6 +385,8 @@ func (h *Handler) HandleStream(w http.ResponseWriter, r *http.Request) {
 				}
 
 				if sanitized != fullTextBuilder.String() {
+					fullTextBuilder.Reset()
+					fullTextBuilder.WriteString(sanitized)
 					var nonDeltas []core.StreamEvent
 					for _, ev := range bufferedEvents {
 						if ev.Type != "delta" {
@@ -846,8 +860,9 @@ func (h *Handler) HandleConfirm(w http.ResponseWriter, r *http.Request) {
 				Messages: suspState.Messages,
 			},
 			Metadata: map[string]any{
-				"is_resumed_turn": true,
-				"boundary_nonce":  suspState.BoundaryNonce,
+				"is_resumed_turn":  true,
+				"boundary_nonce":   suspState.BoundaryNonce,
+				"agent_loop_depth": suspState.CurrentDepth,
 			},
 			StartTime: time.Now(),
 		}
@@ -1048,8 +1063,9 @@ func (h *Handler) advanceOrResume(w http.ResponseWriter, r *http.Request, suspSt
 				Messages: suspState.Messages,
 			},
 			Metadata: map[string]any{
-				"is_resumed_turn": true,
-				"boundary_nonce":  suspState.BoundaryNonce,
+				"is_resumed_turn":  true,
+				"boundary_nonce":   suspState.BoundaryNonce,
+				"agent_loop_depth": suspState.CurrentDepth,
 			},
 			StartTime: time.Now(),
 		}
@@ -1398,19 +1414,21 @@ func (h *Handler) buildRequestState(w http.ResponseWriter, r *http.Request, isSt
 		}
 	}
 
-	clientIP := r.Header.Get("X-Forwarded-For")
-	if clientIP != "" {
-		if idx := strings.Index(clientIP, ","); idx != -1 {
-			clientIP = strings.TrimSpace(clientIP[:idx])
-		}
-	}
-	if clientIP == "" {
-		clientIP = r.Header.Get("X-Real-IP")
-	}
-	if clientIP == "" {
+	var clientIP string
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		clientIP = host
+	} else {
 		clientIP = r.RemoteAddr
-		if host, _, err := net.SplitHostPort(clientIP); err == nil {
-			clientIP = host
+	}
+	if clientIP == "" || clientIP == "127.0.0.1" || clientIP == "::1" {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			if idx := strings.Index(xff, ","); idx != -1 {
+				clientIP = strings.TrimSpace(xff[:idx])
+			} else {
+				clientIP = strings.TrimSpace(xff)
+			}
+		} else if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
+			clientIP = strings.TrimSpace(xrip)
 		}
 	}
 
@@ -1645,6 +1663,7 @@ func (h *Handler) HandleCreateThread(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Body != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 

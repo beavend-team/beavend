@@ -83,7 +83,11 @@ func (c *Compiler) Compile(expr string) (cel.Program, error) {
 		return nil, fmt.Errorf("expression must evaluate to bool, got %v", ast.OutputType())
 	}
 
-	prg, err := c.env.Program(ast, cel.EvalOptions(cel.OptOptimize))
+	prg, err := c.env.Program(ast,
+		cel.EvalOptions(cel.OptOptimize),
+		cel.CostLimit(10000),
+		cel.InterruptCheckFrequency(100),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("build cel program: %w", err)
 	}

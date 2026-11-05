@@ -217,12 +217,14 @@ func (wr *Writer) WriteEvent(w io.Writer, event core.StreamEvent) error {
 
 	var sb strings.Builder
 	if event.ID != "" {
+		cleanID := strings.NewReplacer("\r", "", "\n", "").Replace(event.ID)
 		sb.WriteString("id: ")
-		sb.WriteString(event.ID)
+		sb.WriteString(cleanID)
 		sb.WriteString("\n")
 	}
+	cleanType := strings.NewReplacer("\r", "", "\n", "").Replace(eventType)
 	sb.WriteString("event: ")
-	sb.WriteString(eventType)
+	sb.WriteString(cleanType)
 	sb.WriteString("\ndata: ")
 	sb.Write(dataBytes)
 	sb.WriteString("\n\n")

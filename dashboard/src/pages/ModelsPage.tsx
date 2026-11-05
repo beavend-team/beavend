@@ -537,11 +537,11 @@ export const ModelsPage: React.FC = () => {
                               </Badge>
                             )}
                           </div>
-                          <p className="text-[11px] font-mono text-neutral-500 mt-0.5">{p.base_url || '(Default endpoint)'}</p>
+                          <p className="text-[11px] font-mono text-neutral-400 mt-0.5">{p.base_url || '(Default endpoint)'}</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-2.5">
-                        <span className="text-[11px] font-mono text-neutral-600 hidden sm:inline">Key: {p.masked_api_key}</span>
+                        <span className="text-[11px] font-mono text-neutral-400 hidden sm:inline">Key: {p.masked_api_key}</span>
                         <Button
                           size="xs"
                           variant="secondary"
@@ -553,15 +553,17 @@ export const ModelsPage: React.FC = () => {
                         </Button>
                         <button
                           onClick={() => openEditProviderModal(p)}
-                          className="p-1 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded transition-colors opacity-0 group-hover:opacity-100"
+                          className="p-1 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 rounded transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
                           title="Edit provider credentials"
+                          aria-label={`Edit provider ${p.provider_name}`}
                         >
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => handleDeleteProvider(p.provider_name)}
-                          className="p-1 text-neutral-500 hover:text-red-400 hover:bg-neutral-800 rounded transition-colors opacity-0 group-hover:opacity-100"
+                          className="p-1 text-neutral-400 hover:text-red-400 hover:bg-neutral-800 rounded transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
                           title="Delete provider"
+                          aria-label={`Delete provider ${p.provider_name}`}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -602,7 +604,7 @@ export const ModelsPage: React.FC = () => {
               <div className="py-8 px-4 text-center border border-dashed border-amber-500/20 bg-amber-500/5 rounded-xl">
                 <KeyRound className="w-8 h-8 text-amber-400/70 mx-auto mb-2.5" />
                 <h3 className="text-sm font-semibold text-neutral-200">No Providers Configured</h3>
-                <p className="text-xs text-neutral-500 max-w-md mx-auto mt-1 mb-4">
+                <p className="text-xs text-neutral-400 max-w-md mx-auto mt-1 mb-4 leading-relaxed">
                   You must add and configure upstream provider credentials in Step 1 before you can map logical model routings.
                 </p>
                 <Button
@@ -643,7 +645,7 @@ export const ModelsPage: React.FC = () => {
                           const fbs = normalizeFallbacks(m.fallback_deployments);
                           return fbs.length > 0 ? (
                             <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                              <span className="text-[10px] text-neutral-600 font-medium">Fallbacks:</span>
+                              <span className="text-[10px] text-neutral-400 font-medium">Fallbacks:</span>
                               {fbs.map((fb, idx) => {
                                 let prov = m.adapter;
                                 let dep = fb;
@@ -662,7 +664,7 @@ export const ModelsPage: React.FC = () => {
                                     className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-neutral-900 border border-neutral-800 text-neutral-300 flex items-center gap-1"
                                   >
                                     <span className="text-blue-400 font-semibold">{prov}</span>
-                                    <span className="text-neutral-600">/</span>
+                                    <span className="text-neutral-500">/</span>
                                     <span>{dep}</span>
                                   </span>
                                 );
@@ -673,9 +675,9 @@ export const ModelsPage: React.FC = () => {
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
-                      <div className="flex items-center gap-1.5 text-xs text-neutral-500">
-                        <ArrowRight className="w-3.5 h-3.5 text-neutral-700" />
-                        <span className="font-mono text-neutral-400">{m.deployment}</span>
+                      <div className="flex items-center gap-1.5 text-xs text-neutral-400">
+                        <ArrowRight className="w-3.5 h-3.5 text-neutral-500" />
+                        <span className="font-mono text-neutral-300">{m.deployment}</span>
                       </div>
                       {m.input_cost_per_1m !== undefined && m.input_cost_per_1m !== null && (
                         <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-300" title="Custom token rate per 1M (Input / Output)">
@@ -685,15 +687,17 @@ export const ModelsPage: React.FC = () => {
                       <div className="flex items-center gap-1">
                         <button
                           onClick={() => openEditModelModal(m)}
-                          className="p-1 text-neutral-600 hover:text-neutral-200 hover:bg-neutral-800 rounded transition-colors opacity-0 group-hover:opacity-100"
+                          className="p-1 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 rounded transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
                           title="Edit model routing"
+                          aria-label={`Edit ${m.logical_model}`}
                         >
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => handleDeleteModel(m.logical_model)}
-                          className="p-1 text-neutral-600 hover:text-red-400 hover:bg-neutral-800 rounded transition-colors opacity-0 group-hover:opacity-100"
+                          className="p-1 text-neutral-400 hover:text-red-400 hover:bg-neutral-800 rounded transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
                           title="Delete model routing"
+                          aria-label={`Delete ${m.logical_model}`}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -864,11 +868,11 @@ export const ModelsPage: React.FC = () => {
                     >
                       Text only
                     </button>
-                    <span className="text-neutral-700">•</span>
+                    <span className="text-neutral-500">•</span>
                     <button
                       type="button"
                       onClick={() => setInputModalities([...ALL_MODALITIES])}
-                      className="text-neutral-500 hover:text-neutral-300 px-1.5 py-0.5 rounded hover:bg-neutral-800 transition-colors"
+                      className="text-neutral-400 hover:text-neutral-200 px-1.5 py-0.5 rounded hover:bg-neutral-800 transition-colors"
                     >
                       All
                     </button>
@@ -914,11 +918,11 @@ export const ModelsPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setOutputModalities(['text'])}
-                      className="text-neutral-500 hover:text-neutral-300 px-1.5 py-0.5 rounded hover:bg-neutral-800 transition-colors"
+                      className="text-neutral-400 hover:text-neutral-200 px-1.5 py-0.5 rounded hover:bg-neutral-800 transition-colors"
                     >
                       Text only
                     </button>
-                    <span className="text-neutral-700">•</span>
+                    <span className="text-neutral-500">•</span>
                     <button
                       type="button"
                       onClick={() => setOutputModalities([...ALL_MODALITIES])}
@@ -1226,18 +1230,19 @@ export const ModelsPage: React.FC = () => {
                 placeholder={currentPreset?.placeholderKey || '••••••••••••••••'}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                className="w-full bg-neutral-950 border border-neutral-800 focus:border-neutral-600 rounded-lg px-3 py-2 pr-10 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none transition-colors font-mono"
+                className="w-full bg-neutral-950 border border-neutral-800 focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/20 rounded-lg px-3 py-2 pr-10 text-sm text-neutral-100 placeholder-neutral-500 focus:outline-none transition-colors font-mono"
               />
               <button
                 type="button"
                 onClick={() => setShowApiKey(!showApiKey)}
-                className="absolute inset-y-0 right-0 flex items-center pr-3 text-neutral-500 hover:text-neutral-300 transition-colors"
+                className="absolute inset-y-0 right-0 flex items-center pr-3 text-neutral-400 hover:text-neutral-200 transition-colors"
                 title={showApiKey ? 'Hide key' : 'Show key'}
+                aria-label={showApiKey ? 'Hide key' : 'Show key'}
               >
                 {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
-            <p className="text-[11px] text-neutral-600">
+            <p className="text-[11px] text-neutral-400">
               Keys are envelope-encrypted with AES-256-GCM before storage in the database.
             </p>
           </div>

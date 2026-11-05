@@ -77,6 +77,9 @@ func ResolveAuthConfig(cfg *core.AuthConfig) *core.AuthConfig {
 			if len(resolved.Audience) == 0 {
 				resolved.Audience = []string{resolved.ProjectID}
 			}
+		} else if resolved.Issuer == "" {
+			// Firebase configuration requires project_id or issuer to prevent cross-project token reuse
+			return nil
 		}
 	case "supabase":
 		if resolved.JWKSURL == "" && resolved.Issuer != "" {
@@ -189,7 +192,21 @@ func (v *Verifier) Verify(ctx context.Context, tokenStr string, cfg *core.AuthCo
 	if verifyKey != nil {
 		parseOptions = append(parseOptions, jwt.WithKey(alg, verifyKey))
 	} else {
-		parseOptions = append(parseOptions, jwt.WithKeySet(set))
+		sigSet := jwk.NewSet()
+		for iter := set.Keys(ctx); iter.Next(ctx); {
+			k := iter.Pair().Value.(jwk.Key)
+			if k.KeyUsage() != "" && k.KeyUsage() != "sig" {
+				continue
+			}
+			if keyAlg := k.Algorithm(); keyAlg != nil && keyAlg.String() != "" && keyAlg.String() != string(alg) {
+				continue
+			}
+			_ = sigSet.AddKey(k)
+		}
+		if sigSet.Len() == 0 {
+			return nil, fmt.Errorf("%w: no signing key matching algorithm %s found in JWKS", ErrKeyNotFound, alg)
+		}
+		parseOptions = append(parseOptions, jwt.WithKeySet(sigSet))
 	}
 	parseOptions = append(parseOptions, jwt.WithValidate(false)) // we perform explicit claims verification below
 
@@ -210,10 +227,11 @@ func (v *Verifier) Verify(ctx context.Context, tokenStr string, cfg *core.AuthCo
 	now := time.Now()
 	skew := resolvedCfg.ClockSkew
 
-	if !token.Expiration().IsZero() {
-		if now.Add(-skew).After(token.Expiration()) {
-			return nil, fmt.Errorf("%w: expired at %s", ErrTokenExpired, token.Expiration().UTC().Format(time.RFC3339))
-		}
+	if token.Expiration().IsZero() {
+		return nil, fmt.Errorf("%w: missing required exp (expiration) claim", ErrTokenExpired)
+	}
+	if now.Add(-skew).After(token.Expiration()) {
+		return nil, fmt.Errorf("%w: expired at %s", ErrTokenExpired, token.Expiration().UTC().Format(time.RFC3339))
 	}
 
 	if !token.NotBefore().IsZero() {

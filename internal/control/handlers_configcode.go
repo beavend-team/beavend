@@ -36,8 +36,21 @@ func (h *Handler) HandleExportConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cleanProject := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			return r
+		}
+		return '_'
+	}, projectID)
+	cleanEnv := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			return r
+		}
+		return '_'
+	}, env)
+
 	w.Header().Set("Content-Type", "application/x-yaml")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s-%s.yaml\"", projectID, env))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", fmt.Sprintf("%s-%s.yaml", cleanProject, cleanEnv)))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(yamlBytes)
 }
@@ -56,9 +69,14 @@ func (h *Handler) HandleImportConfig(w http.ResponseWriter, r *http.Request) {
 		env = chi.URLParam(r, "env")
 	}
 
-	bodyBytes, err := io.ReadAll(r.Body)
+	const maxConfigImportBytes = 10 << 20 // 10MB max
+	bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, maxConfigImportBytes+1))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "bad_request", "failed to read request body")
+		return
+	}
+	if len(bodyBytes) > maxConfigImportBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", "configuration document exceeds 10MB limit")
 		return
 	}
 

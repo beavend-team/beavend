@@ -24,17 +24,23 @@ func EstimateRequestTokens(req *core.ChatRequest) int64 {
 
 	var promptChars int
 	for _, msg := range req.Messages {
-		promptChars += len(msg.Role) + len(msg.Content) + 8 // message overhead
+		promptChars += len(msg.Role) + len(msg.TextContent()) + 8 // message overhead
 	}
 
 	promptEstimate := int64(float64(promptChars) / ApproxCharsPerToken)
 	if promptEstimate < 1 {
 		promptEstimate = 1
 	}
+	if promptEstimate > 1024*1024 {
+		promptEstimate = 1024 * 1024
+	}
 
 	outputEstimate := DefaultMaxOutputTokens
 	if req.MaxTokens != nil && *req.MaxTokens > 0 {
 		outputEstimate = int64(*req.MaxTokens)
+		if outputEstimate > 128*1024 {
+			outputEstimate = 128 * 1024
+		}
 	}
 
 	return promptEstimate + outputEstimate

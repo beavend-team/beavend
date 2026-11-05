@@ -46,7 +46,11 @@ func MountRoutes(
 		return
 	}
 
-	authMw := auth.Middleware(tokenManager)
+	var store auth.UserStore
+	if ctrlHandler != nil && ctrlHandler.svc != nil && ctrlHandler.svc.queries != nil {
+		store = ctrlHandler.svc.queries
+	}
+	authMw := auth.Middleware(tokenManager, store)
 	requireViewer := auth.RequireRole(auth.RoleViewer)
 	requireEditor := auth.RequireRole(auth.RoleEditor)
 	requireOwner := auth.RequireRole(auth.RoleOwner)
@@ -59,6 +63,7 @@ func MountRoutes(
 		// Current Admin Profile
 		if authHandler != nil {
 			admin.With(requireViewer).Get("/auth/me", authHandler.HandleMe)
+			admin.With(requireViewer).Post("/auth/logout", authHandler.HandleLogout)
 			admin.With(requireOwner).Get("/users", authHandler.HandleListUsers)
 			admin.With(requireOwner).Post("/users", authHandler.HandleCreateUser)
 			admin.With(requireOwner).Delete("/users/{id}", authHandler.HandleDeleteUser)
@@ -74,9 +79,9 @@ func MountRoutes(
 		admin.With(requireOwner).Post("/projects/{project_id}/environments", ctrlHandler.HandleCreateEnvironment)
 		admin.With(requireOwner).Delete("/projects/{project_id}/environments/{name}", ctrlHandler.HandleDeleteEnvironment)
 		admin.With(requireViewer).Get("/projects/{project_id}/environments/{name}/auth", ctrlHandler.HandleGetEnvironmentAuthConfig)
-		admin.With(requireEditor).Put("/projects/{project_id}/environments/{name}/auth", ctrlHandler.HandleUpdateEnvironmentAuthConfig)
+		admin.With(requireOwner).Put("/projects/{project_id}/environments/{name}/auth", ctrlHandler.HandleUpdateEnvironmentAuthConfig)
 		admin.With(requireViewer).Get("/projects/{project_id}/environments/{name}/export", ctrlHandler.HandleExportConfig)
-		admin.With(requireEditor).Post("/projects/{project_id}/environments/{name}/import", ctrlHandler.HandleImportConfig)
+		admin.With(requireOwner).Post("/projects/{project_id}/environments/{name}/import", ctrlHandler.HandleImportConfig)
 		admin.With(requireViewer).Post("/auth/test-token", ctrlHandler.HandleTestToken)
 
 		// AI Apps
@@ -114,7 +119,7 @@ func MountRoutes(
 		admin.With(requireEditor).Delete("/models/{logical_model}", ctrlHandler.HandleDeleteModelRouting)
 		admin.With(requireViewer).Get("/providers", ctrlHandler.HandleListProviderConfigs)
 		admin.With(requireViewer).Get("/providers/{provider_name}/models", ctrlHandler.HandleFetchProviderModels)
-		admin.With(requireViewer).Post("/providers/test-connection", ctrlHandler.HandleTestProviderConfig)
+		admin.With(requireEditor).Post("/providers/test-connection", ctrlHandler.HandleTestProviderConfig)
 		admin.With(requireOwner).Put("/providers/{provider_name}", ctrlHandler.HandleUpsertProviderConfig)
 		admin.With(requireOwner).Delete("/providers/{provider_name}", ctrlHandler.HandleDeleteProviderConfig)
 
@@ -126,7 +131,7 @@ func MountRoutes(
 		admin.With(requireEditor).Put("/tools/{id}/active-version", ctrlHandler.HandleSetActiveToolVersion)
 		admin.With(requireEditor).Delete("/tools/{id}", ctrlHandler.HandleDeleteTool)
 		admin.With(requireEditor).Put("/tools/{id}/secrets/{secret_ref}", ctrlHandler.HandleUpsertToolSecret)
-		admin.With(requireViewer).Post("/tools/{id}/test", ctrlHandler.HandleTestTool)
+		admin.With(requireEditor).Post("/tools/{id}/test", ctrlHandler.HandleTestTool)
 
 		// Search Engine (SearXNG)
 		admin.With(requireViewer).Get("/search/status", ctrlHandler.HandleGetSearchStatus)

@@ -274,10 +274,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                 <div key={p.id} className="flex items-center justify-between py-2.5 px-3 bg-neutral-950 border border-neutral-800 rounded-lg group hover:border-neutral-700 transition-colors">
                   <div>
                     <span className="text-sm font-semibold text-neutral-200">{p.name}</span>
-                    <span className="text-[11px] font-mono text-neutral-600 ml-2">{p.id}</span>
+                    <span className="text-[11px] font-mono text-neutral-400 ml-2">{p.id}</span>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="text-[11px] text-neutral-700">{new Date(p.created_at).toLocaleDateString()}</span>
+                    <span className="text-[11px] text-neutral-400">{new Date(p.created_at).toLocaleDateString()}</span>
                     {isOwner && (
                       <button
                         onClick={async () => {
@@ -285,8 +285,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                           try { await api.deleteProject(p.id); onRefreshProjects(); }
                           catch (err: any) { alert(`Failed: ${err.message}`); }
                         }}
-                        className="p-1 text-neutral-700 hover:text-red-400 hover:bg-neutral-800 rounded opacity-0 group-hover:opacity-100 transition-all"
+                        className="p-1 text-neutral-400 hover:text-red-400 hover:bg-neutral-800 rounded opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all"
                         title="Delete project"
+                        aria-label={`Delete project ${p.name}`}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -301,15 +302,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             <CardHeader title={`Environments in "${currentProject}"`} icon={<GitBranch className="w-4 h-4 text-emerald-400" />} />
             {isOwner && (
               <form onSubmit={handleCreateEnv} className="flex gap-2 mb-4">
-                <input type="text" required placeholder="New environment name (e.g. staging)" value={newEnvName} onChange={(e) => setNewEnvName(e.target.value)} className="flex-1 bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs font-mono text-neutral-100 focus:outline-none focus:border-neutral-600" />
+                <input type="text" required placeholder="New environment name (e.g. staging)" value={newEnvName} onChange={(e) => setNewEnvName(e.target.value)} className="flex-1 bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs font-mono text-neutral-100 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/20" />
                 <Button type="submit" variant="secondary" size="sm" icon={<Plus className="w-3.5 h-3.5" />}>Add Environment</Button>
               </form>
             )}
-            <p className="text-xs text-neutral-600 italic mb-3">Switch environments using the selector in the top navigation bar.</p>
+            <p className="text-xs text-neutral-400 italic mb-3">Switch environments using the selector in the top navigation bar.</p>
             <div className="space-y-1">
               {environments.map((env) => (
                 <div key={env.name} className="flex items-center justify-between py-2 px-3 bg-neutral-950 border border-neutral-800 rounded-lg group hover:border-neutral-700 transition-colors">
-                  <span className="text-xs font-mono text-neutral-400">{env.name}</span>
+                  <span className="text-xs font-mono text-neutral-300">{env.name}</span>
                   {isOwner && (
                     <button
                       onClick={async () => {
@@ -317,8 +318,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                         try { await api.deleteEnvironment(currentProject, env.name); onRefreshProjects(); }
                         catch (err: any) { alert(`Failed: ${err.message}`); }
                       }}
-                      className="p-1 text-neutral-700 hover:text-red-400 hover:bg-neutral-800 rounded opacity-0 group-hover:opacity-100 transition-all"
+                      className="p-1 text-neutral-400 hover:text-red-400 hover:bg-neutral-800 rounded opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all"
                       title="Delete environment"
+                      aria-label={`Delete environment ${env.name}`}
                     >
                       <Trash2 className="w-3 h-3" />
                     </button>
@@ -452,9 +454,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
 
           <div className="space-y-1">
             {loadingUsers ? (
-              <p className="text-xs text-neutral-600 py-4 text-center">Loading users...</p>
+              <p className="text-xs text-neutral-400 py-4 text-center">Loading users...</p>
             ) : users.length === 0 ? (
-              <p className="text-xs text-neutral-600 py-4 text-center italic">No admin users found.</p>
+              <p className="text-xs text-neutral-400 py-4 text-center italic">No admin users found.</p>
             ) : (
               users.map((u) => (
                 <div key={u.id} className="flex items-center justify-between py-2.5 px-3 bg-neutral-950 border border-neutral-800 rounded-lg group">
@@ -464,7 +466,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                     </div>
                     <div>
                       <p className="text-xs font-medium text-neutral-200">{u.email}</p>
-                      {u.id === currentUser?.id && <span className="text-[10px] text-neutral-600">(you)</span>}
+                      {u.id === currentUser?.id && <span className="text-[10px] text-neutral-400">(you)</span>}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -474,7 +476,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                     {u.id !== currentUser?.id && (
                       <button
                         onClick={() => handleDeleteUser(u.id)}
-                        className="p-1 text-neutral-600 hover:text-red-400 rounded transition-colors opacity-0 group-hover:opacity-100"
+                        className="p-1 text-neutral-400 hover:text-red-400 rounded transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                        title="Delete user"
+                        aria-label={`Delete user ${u.email}`}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>

@@ -23,6 +23,9 @@ func InjectIdentityBindings(args map[string]any, bindings map[string]string, id 
 		if id != nil {
 			val := resolveBindingValue(bindingPath, id)
 			if val != nil {
+				if s, ok := val.(string); ok && s == "" {
+					continue
+				}
 				args[argKey] = val
 			}
 		}

@@ -31,6 +31,7 @@ import (
 	"github.com/beavend/beavend/internal/runtime"
 	"github.com/beavend/beavend/internal/runtime/agent"
 	"github.com/beavend/beavend/internal/runtime/stages"
+	"github.com/beavend/beavend/internal/secrets"
 	"github.com/beavend/beavend/internal/snapshot"
 	synckit "github.com/beavend/beavend/internal/snapshot/sync"
 	"github.com/beavend/beavend/internal/store"
@@ -263,7 +264,11 @@ func run() error {
 		if cfg.Redis.URL != "" {
 			if rOpts, err := redis.ParseURL(cfg.Redis.URL); err == nil {
 				redisClient := redis.NewClient(rOpts)
-				continuationStore = tools.NewRedisSuspendedStateStore(redisClient)
+				var encKey []byte
+				if cfg.Security.MasterKey != "" {
+					encKey = secrets.DeriveKey(cfg.Security.MasterKey)
+				}
+				continuationStore = tools.NewRedisSuspendedStateStore(redisClient, encKey)
 				jobStore = media.NewRedisJobStore(redisClient)
 			}
 		}
@@ -295,7 +300,16 @@ func run() error {
 			CacheStore:       cacheStore,
 		})
 
-		limitStore := limits.NewMemoryLimitStore(nil)
+		var limitStore core.LimitStore
+		if cfg.Redis.URL != "" {
+			if rOpts, err := redis.ParseURL(cfg.Redis.URL); err == nil {
+				redisClient := redis.NewClient(rOpts)
+				limitStore = limits.NewRedisLimitStore(redisClient, &limits.RedisLimitStoreOptions{FailClosed: false})
+			}
+		}
+		if limitStore == nil {
+			limitStore = limits.NewMemoryLimitStore(nil)
+		}
 		authzStage, _ := stages.NewAuthZStage(policyEvaluator)
 		limitsStage, _ := stages.NewLimitsStage(limitStore, nil, nil)
 		inputGuardStage := stages.NewInputGuardrailStage()
@@ -342,7 +356,11 @@ func run() error {
 		})
 		routerOpts.RuntimeHandler = runtimeHandler
 
-		verifier := identity.NewVerifier(nil)
+		safeJWKSClient := tools.NewSafeHTTPClient(tools.SafeDialerConfig{
+			DialTimeout:  5 * time.Second,
+			AllowedPorts: []uint16{80, 443},
+		}, 10*time.Second)
+		verifier := identity.NewVerifier(identity.NewJWKSManager(identity.WithHTTPClient(safeJWKSClient)))
 		authOpts := []identity.MiddlewareOption{
 			identity.WithDefaultEnvironment(cfg.Env),
 		}

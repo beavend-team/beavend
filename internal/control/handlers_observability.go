@@ -139,6 +139,7 @@ func (h *Handler) HandleGetLogByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	projectID, env := getProjectAndEnv(r)
 	logEntry, err := h.svc.queries.GetRequestLogByID(r.Context(), requestID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -146,6 +147,10 @@ func (h *Handler) HandleGetLogByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "database_error", err.Error())
+		return
+	}
+	if logEntry.ProjectID != projectID || logEntry.Environment != env {
+		writeError(w, http.StatusNotFound, "not_found", "request log entry not found")
 		return
 	}
 

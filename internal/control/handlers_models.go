@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/beavend/beavend/internal/secrets"
 	"github.com/beavend/beavend/internal/store/db"
+	"github.com/beavend/beavend/internal/tools"
 	chi "github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -279,7 +281,8 @@ func (h *Handler) HandleUpsertProviderConfig(w http.ResponseWriter, r *http.Requ
 
 	key := h.svc.masterKey
 	if len(key) == 0 {
-		key = []byte("default-master-key-32-chars-long")
+		writeError(w, http.StatusInternalServerError, "server_configuration_error", "master key is not configured")
+		return
 	}
 	derivedKey := secrets.DeriveKey(string(key))
 
@@ -378,17 +381,18 @@ func (h *Handler) HandleTestProviderConfig(w http.ResponseWriter, r *http.Reques
 			ProviderName: providerName,
 		})
 		if err == nil {
-			if baseURL == "" {
-				baseURL = strings.TrimRight(strings.TrimSpace(stored.BaseUrl), "/")
+			storedBase := strings.TrimRight(strings.TrimSpace(stored.BaseUrl), "/")
+			if baseURL != "" && storedBase != "" && !strings.EqualFold(baseURL, storedBase) {
+				writeError(w, http.StatusBadRequest, "bad_request", "custom base_url cannot be used with stored credentials")
+				return
 			}
-			key := h.svc.masterKey
-			if len(key) == 0 {
-				key = []byte("default-master-key-32-chars-long")
-			}
-			derivedKey := secrets.DeriveKey(string(key))
-			decrypted, err := secrets.Decrypt(derivedKey, stored.EncryptedApiKey, stored.Nonce)
-			if err == nil {
-				apiKey = string(decrypted)
+			baseURL = storedBase
+			if len(h.svc.masterKey) > 0 {
+				derivedKey := secrets.DeriveKey(string(h.svc.masterKey))
+				decrypted, err := secrets.Decrypt(derivedKey, stored.EncryptedApiKey, stored.Nonce)
+				if err == nil {
+					apiKey = string(decrypted)
+				}
 			}
 		}
 	}
@@ -410,9 +414,20 @@ func (h *Handler) HandleTestProviderConfig(w http.ResponseWriter, r *http.Reques
 		candidateURLs = []string{baseURL + "/v1/models", baseURL + "/models", baseURL + "/api/tags"}
 	}
 
-	client := &http.Client{
-		Timeout: 5 * time.Second,
+	var allowPrivate bool
+	if u, err := url.Parse(baseURL); err == nil {
+		h := strings.ToLower(u.Hostname())
+		if h == "localhost" || h == "127.0.0.1" || h == "::1" {
+			allowPrivate = true
+		}
 	}
+	if providerName == "litellm" {
+		allowPrivate = true
+	}
+	client := tools.NewSafeHTTPClient(tools.SafeDialerConfig{
+		DialTimeout:  5 * time.Second,
+		AllowPrivate: allowPrivate,
+	}, 5*time.Second)
 
 	start := time.Now()
 	var lastErr error
@@ -587,7 +602,8 @@ func (h *Handler) HandleFetchProviderModels(w http.ResponseWriter, r *http.Reque
 	var apiKey string
 	key := h.svc.masterKey
 	if len(key) == 0 {
-		key = []byte("default-master-key-32-chars-long")
+		writeError(w, http.StatusInternalServerError, "server_configuration_error", "master key is not configured")
+		return
 	}
 	derivedKey := secrets.DeriveKey(string(key))
 	decrypted, err := secrets.Decrypt(derivedKey, stored.EncryptedApiKey, stored.Nonce)
@@ -602,9 +618,9 @@ func (h *Handler) HandleFetchProviderModels(w http.ResponseWriter, r *http.Reque
 		candidateURLs = append(candidateURLs, baseURL+"/v1/models", baseURL+"/models", baseURL+"/api/tags")
 	}
 
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
+	client := tools.NewSafeHTTPClient(tools.SafeDialerConfig{
+		DialTimeout: 5 * time.Second,
+	}, 10*time.Second)
 
 	var lastErr string
 	for _, targetURL := range candidateURLs {

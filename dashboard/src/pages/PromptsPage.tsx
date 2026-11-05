@@ -181,8 +181,9 @@ export const PromptsPage: React.FC = () => {
                 </div>
                 <button
                   onClick={(e) => handleDelete(p.id, e)}
-                  className="p-1 text-neutral-600 hover:text-red-400 hover:bg-neutral-800 rounded transition-colors opacity-0 group-hover:opacity-100"
+                  className="p-1 text-neutral-500 hover:text-red-400 hover:bg-neutral-800 rounded transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
                   title="Delete prompt"
+                  aria-label={`Delete prompt ${p.name}`}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -190,13 +191,13 @@ export const PromptsPage: React.FC = () => {
               <h3 className="text-sm font-semibold text-neutral-100 group-hover:text-emerald-400 transition-colors mb-0.5">
                 {p.name}
               </h3>
-              <p className="text-[11px] font-mono text-neutral-600 mb-2">{p.id}</p>
-              <p className="text-xs text-neutral-500 line-clamp-2 mb-3">
+              <p className="text-[11px] font-mono text-neutral-400 mb-2">{p.id}</p>
+              <p className="text-xs text-neutral-400 line-clamp-2 mb-3 leading-relaxed">
                 {p.description || 'No description provided.'}
               </p>
-              <div className="pt-2.5 border-t border-neutral-800/80 flex items-center justify-between text-[10px] text-neutral-600">
-                <span className="flex items-center gap-1">
-                  <Tag className="w-3 h-3 text-purple-400/80" />
+              <div className="pt-2.5 border-t border-neutral-800/80 flex items-center justify-between text-[10px] text-neutral-400">
+                <span className="flex items-center gap-1 font-medium">
+                  <Tag className="w-3 h-3 text-purple-400" />
                   Template
                 </span>
                 <span>{formatRelativeTime(p.updated_at)}</span>

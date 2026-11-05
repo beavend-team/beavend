@@ -82,7 +82,7 @@ export const LogsPage: React.FC = () => {
             { label: 'Total Tokens', value: stats.totalTokens.toLocaleString(), color: 'text-purple-400' },
           ].map((s) => (
             <div key={s.label} className="bg-neutral-900 border border-neutral-800 rounded-xl p-3.5">
-              <p className="text-[10px] text-neutral-600 font-medium uppercase tracking-wider">{s.label}</p>
+              <p className="text-[10px] text-neutral-400 font-semibold uppercase tracking-wider">{s.label}</p>
               <p className={`text-lg font-bold tracking-tight mt-0.5 ${s.color}`}>{s.value}</p>
             </div>
           ))}
@@ -91,23 +91,23 @@ export const LogsPage: React.FC = () => {
 
       {/* Date range filter */}
       <div className="flex items-center gap-2">
-        <Calendar className="w-3.5 h-3.5 text-neutral-600" />
-        <label className="text-xs text-neutral-500">From:</label>
+        <Calendar className="w-3.5 h-3.5 text-neutral-400" />
+        <label className="text-xs text-neutral-400">From:</label>
         <input
           type="datetime-local"
           value={dateFrom}
           onChange={(e) => setDateFrom(e.target.value)}
-          className="bg-neutral-900 border border-neutral-800 rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-neutral-600 transition-colors"
+          className="bg-neutral-900 border border-neutral-800 rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/20 transition-colors"
         />
-        <label className="text-xs text-neutral-500">To:</label>
+        <label className="text-xs text-neutral-400">To:</label>
         <input
           type="datetime-local"
           value={dateTo}
           onChange={(e) => setDateTo(e.target.value)}
-          className="bg-neutral-900 border border-neutral-800 rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-neutral-600 transition-colors"
+          className="bg-neutral-900 border border-neutral-800 rounded-lg px-2.5 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/20 transition-colors"
         />
         {(dateFrom || dateTo) && (
-          <button onClick={() => { setDateFrom(''); setDateTo(''); }} className="text-neutral-500 hover:text-neutral-300">
+          <button onClick={() => { setDateFrom(''); setDateTo(''); }} className="text-neutral-400 hover:text-neutral-200">
             <X className="w-3.5 h-3.5" />
           </button>
         )}
@@ -119,16 +119,16 @@ export const LogsPage: React.FC = () => {
       {/* Text Filter */}
       {!loading && logs.length > 0 && (
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-600" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
           <input
             type="text"
             placeholder="Filter by app ID, model, user subject, request ID, or status code..."
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="w-full bg-neutral-900 border border-neutral-800 rounded-xl pl-9 pr-4 py-2.5 text-sm text-neutral-200 placeholder-neutral-600 focus:outline-none focus:border-neutral-600 transition-colors"
+            className="w-full bg-neutral-900 border border-neutral-800 rounded-xl pl-9 pr-4 py-2.5 text-sm text-neutral-200 placeholder-neutral-500 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/20 transition-colors"
           />
           {filter && (
-            <button onClick={() => setFilter('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300">
+            <button onClick={() => setFilter('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-200">
               <X className="w-3.5 h-3.5" />
             </button>
           )}
@@ -140,7 +140,7 @@ export const LogsPage: React.FC = () => {
         <Loading text="Loading request logs..." />
       ) : filteredLogs.length === 0 ? (
         <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-12 text-center">
-          <p className="text-sm text-neutral-600">
+          <p className="text-sm text-neutral-400">
             {filter ? 'No logs matching your filter.' : 'No request logs recorded yet for this project and environment.'}
           </p>
         </div>
@@ -151,7 +151,7 @@ export const LogsPage: React.FC = () => {
               <thead>
                 <tr className="border-b border-neutral-800/80 bg-neutral-950/50">
                   {['Time', 'Status', 'App', 'Model', 'Latency', 'Tokens In/Out', 'Cost', 'User'].map((h) => (
-                    <th key={h} className="py-2.5 px-4 text-[10px] font-semibold uppercase tracking-wider text-neutral-600">
+                    <th key={h} className="py-2.5 px-4 text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
                       {h}
                     </th>
                   ))}
@@ -164,7 +164,7 @@ export const LogsPage: React.FC = () => {
                     onClick={() => setSelectedLog(log)}
                     className="hover:bg-neutral-800/40 cursor-pointer transition-colors group"
                   >
-                    <td className="py-2.5 px-4 text-[11px] font-mono text-neutral-600 whitespace-nowrap">
+                    <td className="py-2.5 px-4 text-[11px] font-mono text-neutral-400 whitespace-nowrap">
                       {new Date(log.created_at).toLocaleTimeString()}
                     </td>
                     <td className="py-2.5 px-4">
@@ -174,19 +174,19 @@ export const LogsPage: React.FC = () => {
                     <td className="py-2.5 px-4">
                       <span className="text-xs font-mono text-emerald-400">{log.logical_model}</span>
                       {log.model_deployment && (
-                        <span className="text-[10px] text-neutral-600 block">{log.model_deployment}</span>
+                        <span className="text-[10px] text-neutral-400 block">{log.model_deployment}</span>
                       )}
                     </td>
-                    <td className="py-2.5 px-4 text-xs font-mono text-neutral-400">
+                    <td className="py-2.5 px-4 text-xs font-mono text-neutral-300">
                       {log.latency_ms ? `${log.latency_ms}ms` : '-'}
                     </td>
-                    <td className="py-2.5 px-4 text-xs font-mono text-neutral-400">
+                    <td className="py-2.5 px-4 text-xs font-mono text-neutral-300">
                       {log.input_tokens ?? 0} / {log.output_tokens ?? 0}
                     </td>
-                    <td className="py-2.5 px-4 text-xs font-mono text-neutral-400">
+                    <td className="py-2.5 px-4 text-xs font-mono text-neutral-300">
                       {formatCost(log.cost_usd)}
                     </td>
-                    <td className="py-2.5 px-4 text-[11px] font-mono text-neutral-600 truncate max-w-[120px]">
+                    <td className="py-2.5 px-4 text-[11px] font-mono text-neutral-400 truncate max-w-[120px]">
                       {log.user_subject || '-'}
                     </td>
                   </tr>
@@ -195,7 +195,7 @@ export const LogsPage: React.FC = () => {
             </table>
           </div>
           {filteredLogs.length > 0 && (
-            <div className="px-4 py-2.5 border-t border-neutral-800/80 flex items-center justify-between text-[11px] text-neutral-600">
+            <div className="px-4 py-2.5 border-t border-neutral-800/80 flex items-center justify-between text-[11px] text-neutral-400">
               <span>Showing {filteredLogs.length} of {logs.length} requests</span>
               {filter && <span>{logs.length - filteredLogs.length} filtered out</span>}
             </div>
@@ -211,11 +211,11 @@ export const LogsPage: React.FC = () => {
             <div className="flex items-center justify-between p-5 border-b border-neutral-800">
               <div>
                 <h3 className="text-sm font-semibold text-neutral-100">Request Detail</h3>
-                <p className="text-[11px] font-mono text-neutral-600 mt-0.5">{selectedLog.request_id}</p>
+                <p className="text-[11px] font-mono text-neutral-400 mt-0.5">{selectedLog.request_id}</p>
               </div>
               <div className="flex items-center gap-2">
                 <StatusBadge status={selectedLog.status} code={selectedLog.status_code} />
-                <button onClick={() => setSelectedLog(null)} className="p-1 text-neutral-500 hover:text-neutral-200 rounded-lg hover:bg-neutral-800 transition-colors">
+                <button onClick={() => setSelectedLog(null)} aria-label="Close detail" className="p-1 text-neutral-400 hover:text-neutral-100 rounded-lg hover:bg-neutral-800 transition-colors">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -248,7 +248,7 @@ export const LogsPage: React.FC = () => {
                   { label: 'Cost', value: formatCost(selectedLog.cost_usd) },
                 ].map((item) => (
                   <div key={item.label} className="bg-neutral-950 border border-neutral-800 rounded-lg p-2.5">
-                    <p className="text-[10px] text-neutral-600 uppercase tracking-wider">{item.label}</p>
+                    <p className="text-[10px] text-neutral-400 uppercase tracking-wider font-semibold">{item.label}</p>
                     <p className="text-xs font-mono text-neutral-200 mt-0.5">{item.value}</p>
                   </div>
                 ))}
@@ -257,7 +257,7 @@ export const LogsPage: React.FC = () => {
               {/* Protocol & Identity */}
               <div className="grid grid-cols-3 gap-3">
                 <div className="bg-neutral-950 border border-neutral-800 rounded-lg p-2.5">
-                  <p className="text-[10px] text-neutral-600 uppercase tracking-wider">Protocol</p>
+                  <p className="text-[10px] text-neutral-400 uppercase tracking-wider font-semibold">Protocol</p>
                   <div className="flex items-center gap-1.5 mt-1">
                     {selectedLog.is_streaming ? (
                       <Badge variant="info">
@@ -270,13 +270,13 @@ export const LogsPage: React.FC = () => {
                   </div>
                 </div>
                 <div className="bg-neutral-950 border border-neutral-800 rounded-lg p-2.5">
-                  <p className="text-[10px] text-neutral-600 uppercase tracking-wider">Provider / Deployment</p>
+                  <p className="text-[10px] text-neutral-400 uppercase tracking-wider font-semibold">Provider / Deployment</p>
                   <p className="text-xs font-mono text-neutral-300 mt-0.5 truncate">
                     {selectedLog.provider || 'default'} / {selectedLog.model_deployment || '-'}
                   </p>
                 </div>
                 <div className="bg-neutral-950 border border-neutral-800 rounded-lg p-2.5">
-                  <p className="text-[10px] text-neutral-600 uppercase tracking-wider">User Subject</p>
+                  <p className="text-[10px] text-neutral-400 uppercase tracking-wider font-semibold">User Subject</p>
                   <p className="text-xs font-mono text-neutral-300 mt-0.5 truncate">
                     {selectedLog.user_subject || 'anonymous'}
                   </p>

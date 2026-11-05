@@ -9,12 +9,22 @@ import (
 	"github.com/beavend/beavend/internal/core"
 )
 
+func cleanTagPart(s string) string {
+	s = strings.TrimSpace(s)
+	return strings.Map(func(r rune) rune {
+		if r == '{' || r == '}' || r == ':' || r <= ' ' {
+			return '_'
+		}
+		return r
+	}, s)
+}
+
 // UserKey generates a Redis Cluster-compatible hash-tagged key for a user.
 // The hash tag `{lim:project:env:user_hash}` ensures all limit keys for a user
 // map to the same Redis Cluster hash slot.
 func UserKey(projectID, environment string, id *core.Identity) string {
-	projectID = strings.TrimSpace(projectID)
-	environment = strings.TrimSpace(environment)
+	projectID = cleanTagPart(projectID)
+	environment = cleanTagPart(environment)
 	if projectID == "" {
 		projectID = "default"
 	}
@@ -22,7 +32,13 @@ func UserKey(projectID, environment string, id *core.Identity) string {
 		environment = "default"
 	}
 
-	if id == nil || (id.Subject == "" && id.Issuer == "") {
+	if id == nil || (id.Subject == "" && id.Issuer == "") || (id.Subject == "anonymous" && id.Issuer == "anonymous") {
+		if id != nil && id.Claims != nil {
+			if ipVal, ok := id.Claims["client_ip"].(string); ok && ipVal != "" {
+				h := sha256.Sum256([]byte(ipVal))
+				return fmt.Sprintf("{lim:%s:%s:anon_%s}", projectID, environment, hex.EncodeToString(h[:8]))
+			}
+		}
 		return fmt.Sprintf("{lim:%s:%s:anonymous}", projectID, environment)
 	}
 
@@ -53,8 +69,8 @@ func TokenWindowsKey(userKey string) string {
 
 // ProjectKey generates a Redis Cluster-compatible hash-tagged key for project-level limits.
 func ProjectKey(projectID, environment string) string {
-	projectID = strings.TrimSpace(projectID)
-	environment = strings.TrimSpace(environment)
+	projectID = cleanTagPart(projectID)
+	environment = cleanTagPart(environment)
 	if projectID == "" {
 		projectID = "default"
 	}

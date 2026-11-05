@@ -70,7 +70,9 @@ func ComputeSearchCacheKey(p SearchParams) string {
 // Defaults to SearXNGBackend if name is unrecognized or empty.
 func NewSearchBackend(backendName string, client *http.Client) SearchBackend {
 	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
+		client = NewSafeHTTPClient(SafeDialerConfig{
+			AllowedPorts: []uint16{80, 443},
+		}, 15*time.Second)
 	}
 	switch strings.ToLower(strings.TrimSpace(backendName)) {
 	case "exa":

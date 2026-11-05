@@ -48,6 +48,7 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 
 // decodeJSON decodes JSON request bodies, gracefully returning 413 for oversized payloads or 400 for bad JSON.
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, 2<<20) // 2MB limit for standard control-plane JSON
 	err := json.NewDecoder(r.Body).Decode(dst)
 	if err != nil {
 		var maxBytesErr *http.MaxBytesError

@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -61,6 +62,16 @@ func TestWASMKVStore_QuotaAndLimits(t *testing.T) {
 	largeVal := make([]byte, MaxWASMKeyBytes+1)
 	err = store.Put(ctx, "tenant_1", "normal_key", largeVal)
 	require.ErrorIs(t, err, ErrWASMValTooLarge)
+
+	// 4. Max keys per tenant limit (1000 keys)
+	smallStore := NewMemoryWASMKVStore()
+	for i := 0; i < 1000; i++ {
+		e := smallStore.Put(ctx, "tenant_many", fmt.Sprintf("k_%d", i), []byte("v"))
+		require.NoError(t, e)
+	}
+	err = smallStore.Put(ctx, "tenant_many", "k_1001", []byte("v"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "max key limit reached")
 }
 
 func TestWASMExecutor_ExecutionAndSemaphore(t *testing.T) {
@@ -210,4 +221,37 @@ func TestWASMRuntime_DefaultClientPortRestriction(t *testing.T) {
 	_, err = rt.httpClient.Do(req)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not in allowed ports")
+}
+
+func TestWASMExecutor_SecurityHardening(t *testing.T) {
+	ctx := context.Background()
+
+	rt, err := NewWASMRuntime(ctx, nil, nil)
+	require.NoError(t, err)
+	defer rt.Close(ctx)
+
+	// 1. Invalid WASM header must be rejected immediately
+	invalidB64 := base64.StdEncoding.EncodeToString([]byte("not_a_wasm_binary_file"))
+	badDef := core.ToolDefinition{
+		ID:   "bad_wasm",
+		Name: "bad_wasm",
+		Executor: core.ExecutorConfig{
+			Type: "wasm",
+			WASM: core.WASMConfig{
+				BinaryBase64: invalidB64,
+			},
+		},
+	}
+	execBad := NewWASMExecutor(badDef, rt)
+	res, err := execBad.Execute(ctx, core.ToolCall{ID: "c_bad", Name: "bad_wasm", Arguments: `{}`}, core.Identity{})
+	require.Error(t, err)
+	assert.True(t, res.IsError)
+	assert.Contains(t, res.Content, "missing required \\x00asm header")
+
+	// 2. limitedBuffer must enforce max capacity and drop excess bytes safely
+	lb := &limitedBuffer{max: 100}
+	n, err := lb.Write([]byte(strings.Repeat("a", 150)))
+	require.NoError(t, err)
+	assert.Equal(t, 150, n)
+	assert.Equal(t, 100, len(lb.String()))
 }

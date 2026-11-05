@@ -24,7 +24,7 @@ var (
 	// ErrMCPProtocol indicates an issue with the MCP JSON-RPC protocol.
 	ErrMCPProtocol = errors.New("mcp protocol error")
 	// ErrMCPStdioDisabled indicates stdio transport is disabled by configuration.
-	ErrMCPStdioDisabled = errors.New("mcp stdio transport is disabled")
+	ErrMCPStdioDisabled = errors.New("mcp stdio transport is disabled to protect the host machine: use remote http or sse transport instead")
 	// ErrMCPStdioNotAllowed indicates the command is not in the operator allowlist.
 	ErrMCPStdioNotAllowed = errors.New("mcp stdio command not allowed")
 )
@@ -429,7 +429,7 @@ func (e *MCPExecutor) executeStdio(ctx context.Context, call core.ToolCall, rpcR
 		return core.ToolResult{
 			CallID:  call.ID,
 			ToolID:  e.def.ID,
-			Content: "mcp stdio transport is disabled by configuration",
+			Content: "mcp stdio transport is disabled to protect the host machine: use remote http or sse transport instead",
 			IsError: true,
 		}, ErrMCPStdioDisabled
 	}
@@ -476,6 +476,25 @@ func (e *MCPExecutor) executeStdio(ctx context.Context, call core.ToolCall, rpcR
 		}, ErrMCPStdioNotAllowed
 	}
 
+	for _, arg := range e.def.Executor.Args {
+		trimmedArg := strings.TrimSpace(arg)
+		lowerArg := strings.ToLower(trimmedArg)
+		if lowerArg == "-e" || lowerArg == "-c" || lowerArg == "--eval" ||
+			lowerArg == "-p" || lowerArg == "-s" || lowerArg == "-m" || lowerArg == "-i" ||
+			lowerArg == "--inspect" || lowerArg == "--inspect-brk" ||
+			strings.HasPrefix(lowerArg, "-c") || strings.HasPrefix(lowerArg, "-e") ||
+			strings.HasPrefix(lowerArg, "--eval") || strings.HasPrefix(lowerArg, "--require") ||
+			strings.HasPrefix(lowerArg, "--import") || strings.HasPrefix(lowerArg, "--input-type") ||
+			trimmedArg == "-E" {
+			return core.ToolResult{
+				CallID:  call.ID,
+				ToolID:  e.def.ID,
+				Content: fmt.Sprintf("stdio command argument %q is prohibited for security", trimmedArg),
+				IsError: true,
+			}, ErrMCPStdioNotAllowed
+		}
+	}
+
 	bodyBytes, err := json.Marshal(rpcReq)
 	if err != nil {
 		return core.ToolResult{
@@ -487,6 +506,8 @@ func (e *MCPExecutor) executeStdio(ctx context.Context, call core.ToolCall, rpcR
 	}
 
 	cmd := exec.CommandContext(ctx, cmdName, e.def.Executor.Args...)
+	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C.UTF-8", "HOME=" + os.TempDir()}
+	cmd.Dir = os.TempDir()
 	cmd.Stdin = bytes.NewReader(bodyBytes)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

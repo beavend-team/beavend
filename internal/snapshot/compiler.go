@@ -424,12 +424,10 @@ func (c *Compiler) Compile(ctx context.Context, projectID, env string) (*core.Sn
 			var derivedKey []byte
 			if len(c.masterKey) > 0 {
 				derivedKey = secrets.DeriveKey(string(c.masterKey))
-			} else {
-				derivedKey = secrets.DeriveKey("default-master-key-32-chars-long")
 			}
 			for _, pc := range provConfigs {
 				var apiKey string
-				if len(pc.EncryptedApiKey) > 0 && len(pc.Nonce) > 0 {
+				if len(derivedKey) > 0 && len(pc.EncryptedApiKey) > 0 && len(pc.Nonce) > 0 {
 					if pt, decErr := secrets.Decrypt(derivedKey, pc.EncryptedApiKey, pc.Nonce); decErr == nil {
 						apiKey = string(pt)
 					}

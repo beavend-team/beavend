@@ -3,14 +3,44 @@ package auth
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
 
 // Middleware creates an HTTP middleware that authenticates incoming admin requests.
-func Middleware(tm *TokenManager) func(http.Handler) http.Handler {
+func Middleware(tm *TokenManager, userStore ...UserStore) func(http.Handler) http.Handler {
+	var store UserStore
+	if len(userStore) > 0 {
+		store = userStore[0]
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// CSRF protection for cookie-authenticated state-changing requests
+			if r.Header.Get("Authorization") == "" && r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
+				fetchSite := r.Header.Get("Sec-Fetch-Site")
+				if fetchSite != "" {
+					if fetchSite != "same-origin" && fetchSite != "none" {
+						writeError(w, http.StatusForbidden, "forbidden", "cross-site cookie request rejected")
+						return
+					}
+				} else {
+					// Fallback CSRF verification for browsers that omit Sec-Fetch-Site
+					origin := r.Header.Get("Origin")
+					if origin == "" {
+						origin = r.Header.Get("Referer")
+					}
+					if origin != "" {
+						if u, err := url.Parse(origin); err == nil && u.Host != "" {
+							if !strings.EqualFold(u.Host, r.Host) {
+								writeError(w, http.StatusForbidden, "forbidden", "cross-origin cookie request rejected")
+								return
+							}
+						}
+					}
+				}
+			}
+
 			tokenStr := extractToken(r)
 			if tokenStr == "" {
 				writeError(w, http.StatusUnauthorized, "unauthenticated", "admin authentication required")
@@ -29,6 +59,20 @@ func Middleware(tm *TokenManager) func(http.Handler) http.Handler {
 				Role:      claims.Role,
 				CreatedAt: time.Unix(claims.IssuedAt, 0),
 				UpdatedAt: time.Unix(claims.IssuedAt, 0),
+			}
+
+			if store != nil {
+				dbUser, err := store.GetAdminUserByID(r.Context(), claims.UserID)
+				if err != nil {
+					writeError(w, http.StatusUnauthorized, "unauthenticated", "admin account not found or revoked")
+					return
+				}
+				if dbUser.IsDisabled {
+					writeError(w, http.StatusForbidden, "forbidden", "admin account is disabled")
+					return
+				}
+				adminUser.Role = Role(dbUser.Role)
+				adminUser.Email = dbUser.Email
 			}
 
 			ctx := WithAdminUser(r.Context(), adminUser)

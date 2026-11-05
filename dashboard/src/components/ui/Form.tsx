@@ -31,14 +31,14 @@ export const Input: React.FC<InputProps> = ({
           {...props}
           className={`
             w-full bg-neutral-950 border rounded-lg px-3 py-2 text-sm text-neutral-100
-            placeholder-neutral-600 focus:outline-none transition-colors
-            ${error ? 'border-red-500/50 focus:border-red-500' : 'border-neutral-800 focus:border-neutral-600'}
+            placeholder-neutral-500 focus:outline-none transition-colors
+            ${error ? 'border-red-500/50 focus:border-red-500 focus:ring-1 focus:ring-red-500/20' : 'border-neutral-800 focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/20'}
             ${prefix ? 'pl-9' : ''}
             ${className}
           `}
         />
       </div>
-      {hint && !error && <p className="text-[11px] text-neutral-600">{hint}</p>}
+      {hint && !error && <p className="text-[11px] text-neutral-400">{hint}</p>}
       {error && <p className="text-[11px] text-red-400">{error}</p>}
     </div>
   );
@@ -68,13 +68,13 @@ export const Textarea: React.FC<TextareaProps> = ({
         {...props}
         className={`
           w-full bg-neutral-950 border rounded-lg px-3 py-2 text-sm text-neutral-100
-          placeholder-neutral-600 focus:outline-none transition-colors resize-none
-          ${error ? 'border-red-500/50 focus:border-red-500' : 'border-neutral-800 focus:border-neutral-600'}
+          placeholder-neutral-500 focus:outline-none transition-colors resize-none
+          ${error ? 'border-red-500/50 focus:border-red-500 focus:ring-1 focus:ring-red-500/20' : 'border-neutral-800 focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/20'}
           ${mono ? 'font-mono text-xs' : ''}
           ${className}
         `}
       />
-      {hint && !error && <p className="text-[11px] text-neutral-600">{hint}</p>}
+      {hint && !error && <p className="text-[11px] text-neutral-400">{hint}</p>}
       {error && <p className="text-[11px] text-red-400">{error}</p>}
     </div>
   );
@@ -102,7 +102,7 @@ export const Select: React.FC<SelectProps> = ({
         {...props}
         className={`
           w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2
-          text-sm text-neutral-100 focus:outline-none focus:border-neutral-600
+          text-sm text-neutral-100 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/20
           transition-colors appearance-none cursor-pointer
           ${className}
         `}
@@ -113,7 +113,7 @@ export const Select: React.FC<SelectProps> = ({
           </option>
         ))}
       </select>
-      {hint && <p className="text-[11px] text-neutral-600">{hint}</p>}
+      {hint && <p className="text-[11px] text-neutral-400">{hint}</p>}
     </div>
   );
 };
@@ -335,12 +335,12 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
                     }}
                     className={`
                       flex items-start justify-between px-2.5 py-2 text-xs rounded cursor-pointer transition-colors
-                      ${isSelected ? 'bg-blue-500/15 text-blue-300' : 'text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100'}
+                      ${isSelected ? 'bg-emerald-500/15 text-emerald-300' : 'text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100'}
                     `}
                   >
                     <div className="min-w-0 flex-1 pr-2">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className={`font-medium ${isSelected ? 'text-blue-300 font-semibold' : 'text-neutral-200'}`}>
+                        <span className={`font-medium ${isSelected ? 'text-emerald-300 font-semibold' : 'text-neutral-200'}`}>
                           {opt.label}
                         </span>
                         {opt.badge && (
@@ -350,12 +350,12 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
                         )}
                       </div>
                       {opt.description && (
-                        <p className="text-[11px] text-neutral-500 font-mono mt-0.5 truncate">
+                        <p className="text-[11px] text-neutral-400 font-mono mt-0.5 truncate">
                           {opt.description}
                         </p>
                       )}
                     </div>
-                    {isSelected && <Check className="w-3.5 h-3.5 text-blue-400 shrink-0 mt-0.5" />}
+                    {isSelected && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />}
                   </div>
                 );
               })
@@ -364,7 +364,7 @@ export const SearchableSelect: React.FC<SearchableSelectProps> = ({
         </div>
       )}
 
-      {hint && !error && <p className="text-[11px] text-neutral-600">{hint}</p>}
+      {hint && !error && <p className="text-[11px] text-neutral-400">{hint}</p>}
       {error && <p className="text-[11px] text-red-400">{error}</p>}
     </div>
   );
@@ -555,16 +555,16 @@ export const MultiSearchableSelect: React.FC<MultiSearchableSelectProps> = ({
                     onClick={() => toggleOption(opt.value)}
                     className={`
                       flex items-center justify-between px-2.5 py-1.5 text-xs font-mono rounded cursor-pointer transition-colors
-                      ${isSelected ? 'bg-blue-500/15 text-blue-300 font-medium' : 'text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100'}
+                      ${isSelected ? 'bg-emerald-500/15 text-emerald-300 font-medium' : 'text-neutral-300 hover:bg-neutral-800 hover:text-neutral-100'}
                     `}
                   >
                     <span className="truncate">{opt.label}</span>
                     {isSelected && (
                       <div className="flex items-center gap-1.5 ml-2 shrink-0">
-                        <span className="text-[10px] px-1 py-0.2 rounded bg-blue-500/20 text-blue-300 font-bold">
+                        <span className="text-[10px] px-1 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-bold">
                           #{orderIndex + 1}
                         </span>
-                        <Check className="w-3.5 h-3.5 text-blue-400" />
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
                       </div>
                     )}
                   </div>
@@ -575,7 +575,7 @@ export const MultiSearchableSelect: React.FC<MultiSearchableSelectProps> = ({
         </div>
       )}
 
-      {hint && !error && <p className="text-[11px] text-neutral-600">{hint}</p>}
+      {hint && !error && <p className="text-[11px] text-neutral-400">{hint}</p>}
       {error && <p className="text-[11px] text-red-400">{error}</p>}
     </div>
   );

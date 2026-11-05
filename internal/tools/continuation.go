@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -54,6 +55,7 @@ type SuspendedState struct {
 	BoundaryNonce    string             `json:"boundary_nonce,omitempty"`
 	ToolDefinitionID string             `json:"tool_definition_id"`
 	SnapshotRevision int64              `json:"snapshot_revision"`
+	CurrentDepth     int                `json:"current_depth"`
 	CreatedAt        time.Time          `json:"created_at"`
 	IsStreaming      bool               `json:"is_streaming"`
 }
@@ -102,7 +104,8 @@ func NewRedisSuspendedStateStore(client redis.UniversalClient, encKey ...[]byte)
 	if len(encKey) > 0 && len(encKey[0]) > 0 {
 		key = encKey[0]
 	} else {
-		key = secrets.DeriveKey("beavend-continuation-aes256gcm-default-master-key")
+		key = make([]byte, 32)
+		_, _ = rand.Read(key)
 	}
 	return &RedisSuspendedStateStore{
 		client: client,
@@ -341,7 +344,8 @@ func NewContinuationManager(store SuspendedStateStore, hmacKey []byte) *Continua
 		store = NewInMemorySuspendedStateStore()
 	}
 	if len(hmacKey) == 0 {
-		hmacKey = []byte("default-beavend-hmac-continuation-secret")
+		hmacKey = make([]byte, 32)
+		_, _ = rand.Read(hmacKey)
 	}
 	return &ContinuationManager{
 		store:   store,

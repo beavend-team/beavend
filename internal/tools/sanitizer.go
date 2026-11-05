@@ -29,6 +29,7 @@ var (
 	}
 
 	closingToolResultRegex = regexp.MustCompile(`(?i)</\s*tool_result\b`)
+	openingToolResultRegex = regexp.MustCompile(`(?i)<\s*tool_result\b`)
 )
 
 // SanitizeOpt configures result sanitization options.
@@ -114,17 +115,7 @@ func (s *Sanitizer) Sanitize(res core.ToolResult, cfg core.ResultConfig, opts ..
 
 	content := res.Content
 
-	// 1. Scan for prompt injection attempts in tool results
-	for _, pat := range toolInjectionPatterns {
-		if pat.MatchString(content) {
-			res.IsError = true
-			options.Status = "error"
-			content = "[BLOCKED: tool result contained potential prompt injection]"
-			break
-		}
-	}
-
-	// 2. Truncate if exceeds max_bytes (bounded by HardMaxBytes)
+	// 1. Truncate first if exceeds max_bytes (bounded by HardMaxBytes) to prevent ReDoS on massive inputs
 	maxBytes := options.MaxBytes
 	if maxBytes <= 0 {
 		maxBytes = DefaultMaxBytes
@@ -134,6 +125,16 @@ func (s *Sanitizer) Sanitize(res core.ToolResult, cfg core.ResultConfig, opts ..
 
 	if len(content) > maxBytes {
 		content = content[:maxBytes] + "\n...[truncated]"
+	}
+
+	// 2. Scan for prompt injection attempts in bounded tool results
+	for _, pat := range toolInjectionPatterns {
+		if pat.MatchString(content) {
+			res.IsError = true
+			options.Status = "error"
+			content = "[BLOCKED: tool result contained potential prompt injection]"
+			break
+		}
 	}
 
 	// 3. Redaction
@@ -186,9 +187,10 @@ func (s *Sanitizer) SanitizeString(content string, opts ...SanitizeOpt) string {
 	return s.SanitizeContent(content, opts...)
 }
 
-// EscapeClosingToolResultTags replaces any closing </tool_result tags to prevent XML breakout attacks.
+// EscapeClosingToolResultTags replaces opening and closing <tool_result tags to prevent XML breakout attacks.
 func EscapeClosingToolResultTags(content string) string {
-	return closingToolResultRegex.ReplaceAllString(content, "&lt;/tool_result")
+	escaped := closingToolResultRegex.ReplaceAllString(content, "&lt;/tool_result")
+	return openingToolResultRegex.ReplaceAllString(escaped, "&lt;tool_result")
 }
 
 // WrapToolResult formats content with XML boundaries, optionally including a cryptographic nonce.

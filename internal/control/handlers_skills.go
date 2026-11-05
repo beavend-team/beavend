@@ -284,7 +284,7 @@ func (h *Handler) HandleUpdateSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	existing, err := h.svc.queries.GetSkill(r.Context(), skillID)
-	if err != nil {
+	if err != nil || existing.ProjectID != projectID || existing.Environment != env {
 		writeError(w, http.StatusNotFound, "not_found", "skill not found")
 		return
 	}
@@ -390,7 +390,7 @@ func (h *Handler) HandleCreateSkillVersion(w http.ResponseWriter, r *http.Reques
 	}
 
 	existing, err := h.svc.queries.GetSkill(r.Context(), skillID)
-	if err != nil {
+	if err != nil || existing.ProjectID != projectID || existing.Environment != env {
 		writeError(w, http.StatusNotFound, "not_found", "skill not found")
 		return
 	}
@@ -453,7 +453,13 @@ func (h *Handler) HandleSetActiveSkillVersion(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	_, err := h.svc.queries.GetSkillVersion(r.Context(), db.GetSkillVersionParams{
+	existing, err := h.svc.queries.GetSkill(r.Context(), skillID)
+	if err != nil || existing.ProjectID != projectID || existing.Environment != env {
+		writeError(w, http.StatusNotFound, "not_found", "skill not found")
+		return
+	}
+
+	_, err = h.svc.queries.GetSkillVersion(r.Context(), db.GetSkillVersionParams{
 		SkillID: skillID,
 		Version: req.Version,
 	})
@@ -484,6 +490,12 @@ func (h *Handler) HandleDeleteSkill(w http.ResponseWriter, r *http.Request) {
 	}
 	skillID := chi.URLParam(r, "id")
 	projectID, env := getProjectAndEnv(r)
+
+	existing, err := h.svc.queries.GetSkill(r.Context(), skillID)
+	if err != nil || existing.ProjectID != projectID || existing.Environment != env {
+		writeError(w, http.StatusNotFound, "not_found", "skill not found")
+		return
+	}
 
 	if err := h.svc.queries.DeleteSkill(r.Context(), skillID); err != nil {
 		writeError(w, http.StatusInternalServerError, "database_error", err.Error())

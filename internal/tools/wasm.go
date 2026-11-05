@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/beavend/beavend/internal/core"
@@ -33,7 +34,33 @@ const (
 
 	// MaxWASMAppKVBytes is the maximum aggregate storage per app in the KV store (10 MB).
 	MaxWASMAppKVBytes = 10 * 1024 * 1024
+
+	// MaxWASMOutputBytes is the maximum allowed stdout/stderr buffer size (5 MB).
+	MaxWASMOutputBytes = 5 * 1024 * 1024
 )
+
+var wasmInstanceCounter uint64
+
+type limitedBuffer struct {
+	buf bytes.Buffer
+	max int
+}
+
+func (b *limitedBuffer) Write(p []byte) (n int, err error) {
+	if b.buf.Len() >= b.max {
+		return len(p), nil // drop overflow
+	}
+	remaining := b.max - b.buf.Len()
+	if len(p) > remaining {
+		_, _ = b.buf.Write(p[:remaining])
+		return len(p), nil
+	}
+	return b.buf.Write(p)
+}
+
+func (b *limitedBuffer) String() string {
+	return b.buf.String()
+}
 
 var (
 	ErrWASMExecution  = errors.New("wasm execution error")
@@ -89,6 +116,8 @@ func (s *MemoryWASMKVStore) Put(_ context.Context, tenantKey, key string, val []
 		return ErrWASMValTooLarge
 	}
 
+	const MaxWASMKeysPerTenant = 1000
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -98,8 +127,15 @@ func (s *MemoryWASMKVStore) Put(_ context.Context, tenantKey, key string, val []
 		s.store[tenantKey] = tenant
 	}
 
-	oldLen := len(tenant[key])
-	newTotal := s.usage[tenantKey] - oldLen + len(val)
+	oldSize := 0
+	if existingVal, exists := tenant[key]; exists {
+		oldSize = len(key) + len(existingVal)
+	} else if len(tenant) >= MaxWASMKeysPerTenant {
+		return errors.New("wasm kv: max key limit reached for tenant")
+	}
+
+	newSize := len(key) + len(val)
+	newTotal := s.usage[tenantKey] - oldSize + newSize
 	if newTotal > MaxWASMAppKVBytes {
 		return ErrWASMQuotaExceeded
 	}
@@ -299,6 +335,16 @@ func (wr *WASMRuntime) Compile(ctx context.Context, wasmBytes []byte) (wazero.Co
 	if err != nil {
 		return nil, fmt.Errorf("compile wasm module: %w", err)
 	}
+
+	const maxCompiledModules = 128
+	if len(wr.compiled) >= maxCompiledModules {
+		for k, oldMod := range wr.compiled {
+			_ = oldMod.Close(ctx)
+			delete(wr.compiled, k)
+			break
+		}
+	}
+
 	wr.compiled[key] = compiled
 	return compiled, nil
 }
@@ -328,9 +374,12 @@ func (e *WASMExecutor) Execute(ctx context.Context, call core.ToolCall, id core.
 		}, err
 	}
 
+	const maxWASMTimeout = 30 * time.Second
 	timeout := time.Duration(e.def.Executor.TimeoutMS) * time.Millisecond
 	if timeout <= 0 {
 		timeout = 15 * time.Second
+	} else if timeout > maxWASMTimeout {
+		timeout = maxWASMTimeout
 	}
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -384,6 +433,15 @@ func (e *WASMExecutor) Execute(ctx context.Context, call core.ToolCall, id core.
 		}, fmt.Errorf("%w: missing wasm binary", ErrWASMExecution)
 	}
 
+	if len(wasmBytes) < 8 || string(wasmBytes[:4]) != "\x00asm" {
+		return core.ToolResult{
+			CallID:  call.ID,
+			ToolID:  e.def.ID,
+			Content: "invalid wasm binary: missing required \\x00asm header",
+			IsError: true,
+		}, fmt.Errorf("%w: invalid wasm header", ErrWASMExecution)
+	}
+
 	// 3. Compile or get cached module
 	compiled, err := e.runtime.Compile(execCtx, wasmBytes)
 	if err != nil {
@@ -401,16 +459,18 @@ func (e *WASMExecutor) Execute(ctx context.Context, call core.ToolCall, id core.
 		maxMemMB = DefaultWASMMaxMemoryMB
 	}
 
-	var stdout, stderr bytes.Buffer
+	stdout := &limitedBuffer{max: MaxWASMOutputBytes}
+	stderr := &limitedBuffer{max: MaxWASMOutputBytes}
 	argsData := []byte(call.Arguments)
 	if len(argsData) == 0 {
 		argsData = []byte("{}")
 	}
 
 	modConfig := wazero.NewModuleConfig().
+		WithName(fmt.Sprintf("%s-%s-%d", e.def.ID, call.ID, atomic.AddUint64(&wasmInstanceCounter, 1))).
 		WithStdin(bytes.NewReader(argsData)).
-		WithStdout(&stdout).
-		WithStderr(&stderr).
+		WithStdout(stdout).
+		WithStderr(stderr).
 		WithArgs(call.Name, call.Arguments)
 
 	// 5. Instantiate fresh module instance for this call
@@ -427,7 +487,7 @@ func (e *WASMExecutor) Execute(ctx context.Context, call core.ToolCall, id core.
 			IsError: true,
 		}, err
 	}
-	defer mod.Close(execCtx)
+	defer mod.Close(context.Background())
 
 	// Check if a specific custom entrypoint function is defined and exported
 	entrypoint := e.def.Executor.WASM.Entrypoint

@@ -184,7 +184,10 @@ func (m *MemoryTurnEventBuffer) Subscribe(ctx context.Context, projectID, env, r
 	entry.mu.Unlock()
 
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-time.After(10 * time.Minute):
+		}
 		entry.mu.Lock()
 		delete(entry.subscribers, ch)
 		entry.mu.Unlock()
@@ -195,17 +198,15 @@ func (m *MemoryTurnEventBuffer) Subscribe(ctx context.Context, projectID, env, r
 
 func (m *MemoryTurnEventBuffer) CloseBuffer(_ context.Context, projectID, env, reqID string) error {
 	key := bufferKey(projectID, env, reqID)
-	m.mu.RLock()
+	m.mu.Lock()
 	entry, exists := m.buffers[key]
-	m.mu.RUnlock()
+	m.mu.Unlock()
 
 	if !exists {
 		return nil
 	}
 
 	entry.mu.Lock()
-	defer entry.mu.Unlock()
-
 	if !entry.closed {
 		entry.closed = true
 		for ch := range entry.subscribers {
@@ -213,6 +214,13 @@ func (m *MemoryTurnEventBuffer) CloseBuffer(_ context.Context, projectID, env, r
 		}
 		entry.subscribers = make(map[chan core.StreamEvent]struct{})
 	}
+	entry.mu.Unlock()
+
+	time.AfterFunc(5*time.Minute, func() {
+		m.mu.Lock()
+		delete(m.buffers, key)
+		m.mu.Unlock()
+	})
 
 	return nil
 }

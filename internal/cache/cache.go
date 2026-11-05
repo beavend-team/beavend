@@ -157,6 +157,7 @@ func ComputeRequestHash(req *core.ChatRequest, app *core.AIApp, selectedModel ..
 	}
 
 	canonicalPayload := struct {
+		AppID            string                `json:"app_id,omitempty"`
 		Messages         []canonicalMessage    `json:"messages"`
 		Attachments      []canonicalAttachment `json:"attachments,omitempty"`
 		Model            string                `json:"model,omitempty"`
@@ -164,6 +165,7 @@ func ComputeRequestHash(req *core.ChatRequest, app *core.AIApp, selectedModel ..
 		Temperature      *float32              `json:"temperature,omitempty"`
 		MaxTokens        *int                  `json:"max_tokens,omitempty"`
 		ResponseSchema   string                `json:"response_schema,omitempty"`
+		PromptID         string                `json:"prompt_id,omitempty"`
 		PromptVersion    int                   `json:"prompt_version,omitempty"`
 		SkillIDs         []string              `json:"skill_ids,omitempty"`
 	}{
@@ -177,6 +179,8 @@ func ComputeRequestHash(req *core.ChatRequest, app *core.AIApp, selectedModel ..
 	}
 
 	if app != nil {
+		canonicalPayload.AppID = app.ID
+		canonicalPayload.PromptID = app.PromptID
 		canonicalPayload.PromptVersion = app.PromptVersion
 		if canonicalPayload.ResponseSchema == "" {
 			canonicalPayload.ResponseSchema = app.ResponseSchema
@@ -356,18 +360,36 @@ func (m *MemoryCacheStore) DeletePattern(_ context.Context, pattern string) erro
 	return nil
 }
 
+func escapeGlob(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case '*', '?', '[', ']':
+			b.WriteRune('\\')
+			b.WriteRune(r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // DeleteSubjectKeys removes all response and tool cache keys for a given subject.
 func (m *MemoryCacheStore) DeleteSubjectKeys(ctx context.Context, projectID, env, subject string) error {
 	if subject == "" {
 		return nil
 	}
+	cleanProj := escapeGlob(projectID)
+	cleanEnv := escapeGlob(env)
+	cleanSubj := escapeGlob(subject)
+
 	// Pattern 1: Response cache rc:{project}:{env}:user:{subject}:*
-	p1 := fmt.Sprintf("rc:%s:%s:user:%s:*", projectID, env, subject)
+	p1 := fmt.Sprintf("rc:%s:%s:user:%s:*", cleanProj, cleanEnv, cleanSubj)
 	if err := m.DeletePattern(ctx, p1); err != nil {
 		return err
 	}
 	// Pattern 2: Tool cache tc:{project}:{env}:{subject}:*
-	p2 := fmt.Sprintf("tc:%s:%s:%s:*", projectID, env, subject)
+	p2 := fmt.Sprintf("tc:%s:%s:%s:*", cleanProj, cleanEnv, cleanSubj)
 	return m.DeletePattern(ctx, p2)
 }
 
@@ -462,12 +484,16 @@ func (r *RedisCacheStore) DeleteSubjectKeys(ctx context.Context, projectID, env,
 		return nil
 	}
 
-	p1 := fmt.Sprintf("rc:%s:%s:user:%s:*", projectID, env, subject)
+	cleanProj := escapeGlob(projectID)
+	cleanEnv := escapeGlob(env)
+	cleanSubj := escapeGlob(subject)
+
+	p1 := fmt.Sprintf("rc:%s:%s:user:%s:*", cleanProj, cleanEnv, cleanSubj)
 	if err := r.DeletePattern(ctx, p1); err != nil {
 		return err
 	}
 
-	p2 := fmt.Sprintf("tc:%s:%s:%s:*", projectID, env, subject)
+	p2 := fmt.Sprintf("tc:%s:%s:%s:*", cleanProj, cleanEnv, cleanSubj)
 	return r.DeletePattern(ctx, p2)
 }
 

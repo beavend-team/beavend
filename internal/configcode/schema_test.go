@@ -174,4 +174,14 @@ func TestSchema_SecretResolution(t *testing.T) {
 	assert.Equal(t, "raw_secret", ResolveSecret("raw_secret"))
 	assert.Equal(t, "[SECRET_MASKED]", MaskSecret("raw_secret", ""))
 	assert.Equal(t, "${TEST_KEY}", MaskSecret("raw_secret", "TEST_KEY"))
+
+	// Verify sensitive host environment variables are strictly blocked from resolution
+	os.Setenv("DATABASE_URL", "postgres://user:pass@host/db")
+	defer os.Unsetenv("DATABASE_URL")
+	os.Setenv("BEAVEND_SECURITY_MASTER_KEY", "super-master-key")
+	defer os.Unsetenv("BEAVEND_SECURITY_MASTER_KEY")
+
+	assert.Equal(t, "", ResolveSecret("${DATABASE_URL}"))
+	assert.Equal(t, "", ResolveSecret("env:DATABASE_URL"))
+	assert.Equal(t, "", ResolveSecret("${BEAVEND_SECURITY_MASTER_KEY}"))
 }

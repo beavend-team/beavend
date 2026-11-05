@@ -51,6 +51,8 @@ var defaultDeniedPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("2002::/16"),       // 6to4
 	netip.MustParsePrefix("2001::/32"),       // Teredo
 	netip.MustParsePrefix("2001:db8::/32"),   // IPv6 Documentation
+	netip.MustParsePrefix("::/96"),           // IPv4-compatible IPv6 (RFC 4291)
+	netip.MustParsePrefix("fec0::/10"),       // IPv6 Site-Local (RFC 3879)
 }
 
 // SafeDialerConfig configures the SSRF-safe dialer.
@@ -91,20 +93,25 @@ func (d *SafeDialer) IsSafeIP(ip netip.Addr) bool {
 	// Unmap IPv4-mapped IPv6 (e.g., ::ffff:127.0.0.1 -> 127.0.0.1)
 	unmapped := ip.Unmap()
 
-	if d.cfg.AllowPrivate {
-		return true
-	}
-
-	// Check built-in properties
-	if unmapped.IsLoopback() || unmapped.IsLinkLocalUnicast() || unmapped.IsLinkLocalMulticast() || unmapped.IsPrivate() || unmapped.IsMulticast() || unmapped.IsUnspecified() {
+	// Link-local / cloud metadata (169.254.0.0/16, fe80::/10), multicast, and unspecified are NEVER safe
+	if unmapped.IsLinkLocalUnicast() || unmapped.IsLinkLocalMulticast() || unmapped.IsMulticast() || unmapped.IsUnspecified() {
 		return false
 	}
 
-	// Check against explicitly denied prefixes
+	// Check against explicitly denied prefixes (e.g. metadata.google.internal, RFC special blocks)
 	for _, prefix := range d.cfg.DeniedPrefixes {
 		if prefix.Contains(unmapped) {
 			return false
 		}
+	}
+
+	if d.cfg.AllowPrivate {
+		return true
+	}
+
+	// Check built-in loopback and RFC 1918 private properties
+	if unmapped.IsLoopback() || unmapped.IsPrivate() {
+		return false
 	}
 
 	// If explicit allowlist is configured, verify membership
@@ -149,7 +156,7 @@ func (d *SafeDialer) DialContext(ctx context.Context, network, addr string) (net
 		}
 	}
 
-	hostLower := strings.ToLower(host)
+	hostLower := strings.TrimSuffix(strings.ToLower(host), ".")
 	if !d.cfg.AllowPrivate {
 		if _, blocked := blockedHostnames[hostLower]; blocked {
 			return nil, fmt.Errorf("%w: %s", ErrBlockedHost, host)
@@ -232,9 +239,13 @@ func NewSafeHTTPClient(cfg SafeDialerConfig, timeout time.Duration) *http.Client
 			// If cross-origin, strip sensitive headers
 			if !strings.EqualFold(req.URL.Host, lastReq.URL.Host) {
 				req.Header.Del("Authorization")
+				req.Header.Del("Cookie")
+				req.Header.Del("Proxy-Authorization")
 				for h := range req.Header {
 					hLower := strings.ToLower(h)
-					if strings.HasPrefix(hLower, "x-beavend-") || strings.HasPrefix(hLower, "x-user-") {
+					if strings.HasPrefix(hLower, "x-beavend-") || strings.HasPrefix(hLower, "x-user-") ||
+						strings.Contains(hLower, "key") || strings.Contains(hLower, "token") ||
+						strings.Contains(hLower, "secret") || strings.Contains(hLower, "auth") {
 						req.Header.Del(h)
 					}
 				}

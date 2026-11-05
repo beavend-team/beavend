@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -111,6 +112,12 @@ func (m *JWKSManager) Refresh(ctx context.Context, jwksURL string) (jwk.Set, err
 	parsedURL, err := url.Parse(jwksURL)
 	if err != nil || (parsedURL.Scheme != "https" && parsedURL.Scheme != "http") {
 		return nil, fmt.Errorf("%w: invalid jwks url %q", ErrAuthConfigMissing, jwksURL)
+	}
+	if parsedURL.Scheme == "http" {
+		h := strings.ToLower(parsedURL.Hostname())
+		if h != "localhost" && h != "127.0.0.1" && h != "::1" {
+			return nil, fmt.Errorf("%w: remote jwks url must use https scheme %q", ErrAuthConfigMissing, jwksURL)
+		}
 	}
 
 	if err := ctx.Err(); err != nil {

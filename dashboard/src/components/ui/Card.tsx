@@ -56,7 +56,7 @@ export const CardHeader: React.FC<CardHeaderProps> = ({ title, description, acti
         )}
         <div>
           <h3 className="text-sm font-semibold text-neutral-100">{title}</h3>
-          {description && <p className="text-xs text-neutral-500 mt-0.5">{description}</p>}
+          {description && <p className="text-xs text-neutral-400 mt-0.5 leading-relaxed">{description}</p>}
         </div>
       </div>
       {action && <div className="flex-shrink-0">{action}</div>}

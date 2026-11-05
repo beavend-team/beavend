@@ -263,7 +263,7 @@ export const UsagePage: React.FC = () => {
                           <tr key={m.model} className="hover:bg-neutral-800/30">
                             <td className="py-2.5">
                               <span className="text-emerald-400 font-medium">{m.model}</span>
-                              <span className="text-[10px] text-neutral-600 block">{m.provider}</span>
+                              <span className="text-[10px] text-neutral-400 block">{m.provider}</span>
                             </td>
                             <td className="py-2.5 text-right text-neutral-300">{formatNumber(m.requests)}</td>
                             <td className="py-2.5 text-right text-neutral-400">{formatNumber(m.totalTokens)}</td>

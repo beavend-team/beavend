@@ -183,7 +183,7 @@ export function Markdown({ content }: { content: string }) {
       const buf: string[] = [];
       while (i < lines.length && /^>\s?/.test(lines[i])) buf.push(lines[i++].replace(/^>\s?/, ''));
       blocks.push(
-        <blockquote key={k++} className="border-l-2 border-neutral-600 pl-3 my-1.5 text-neutral-400">
+        <blockquote key={k++} className="border-l-2 border-emerald-500/50 pl-3 my-1.5 text-neutral-300 italic">
           {renderInline(buf.join(' '), `q${k}`)}
         </blockquote>,
       );

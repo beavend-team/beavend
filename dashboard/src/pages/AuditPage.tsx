@@ -65,16 +65,16 @@ export const AuditPage: React.FC = () => {
 
       {!loading && logs.length > 0 && (
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-600" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
           <input
             type="text"
             placeholder="Filter by action, resource type, resource ID, or admin user..."
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="w-full bg-neutral-900 border border-neutral-800 rounded-xl pl-9 pr-4 py-2.5 text-sm text-neutral-200 placeholder-neutral-600 focus:outline-none focus:border-neutral-600 transition-colors"
+            className="w-full bg-neutral-900 border border-neutral-800 rounded-xl pl-9 pr-4 py-2.5 text-sm text-neutral-200 placeholder-neutral-500 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/20 transition-colors"
           />
           {filter && (
-            <button onClick={() => setFilter('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300">
+            <button onClick={() => setFilter('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-200">
               <X className="w-3.5 h-3.5" />
             </button>
           )}
@@ -85,7 +85,7 @@ export const AuditPage: React.FC = () => {
         <Loading text="Loading audit events..." />
       ) : filteredLogs.length === 0 ? (
         <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-12 text-center">
-          <p className="text-sm text-neutral-600">
+          <p className="text-sm text-neutral-400">
             {filter ? 'No audit events matching your filter.' : 'No audit log entries recorded yet.'}
           </p>
         </div>
@@ -96,7 +96,7 @@ export const AuditPage: React.FC = () => {
               <thead>
                 <tr className="border-b border-neutral-800/80 bg-neutral-950/50">
                   {['Time', 'Admin User', 'Action', 'Resource', 'Identifier', 'Project / Env'].map((h) => (
-                    <th key={h} className="py-2.5 px-4 text-[10px] font-semibold uppercase tracking-wider text-neutral-600">
+                    <th key={h} className="py-2.5 px-4 text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
                       {h}
                     </th>
                   ))}
@@ -106,27 +106,27 @@ export const AuditPage: React.FC = () => {
                 {filteredLogs.map((log) => (
                   <tr key={log.id} className="hover:bg-neutral-800/40 transition-colors">
                     <td className="py-2.5 px-4">
-                      <p className="text-[11px] font-mono text-neutral-600 whitespace-nowrap">
+                      <p className="text-[11px] font-mono text-neutral-400 whitespace-nowrap">
                         {new Date(log.created_at).toLocaleTimeString()}
                       </p>
-                      <p className="text-[10px] text-neutral-700">
+                      <p className="text-[10px] text-neutral-400">
                         {new Date(log.created_at).toLocaleDateString()}
                       </p>
                     </td>
                     <td className="py-2.5 px-4">
                       <div className="flex items-center gap-1.5">
-                        <UserCheck className="w-3 h-3 text-neutral-600 flex-shrink-0" />
-                        <span className="text-[11px] font-mono text-neutral-300 truncate max-w-[140px]">{log.user_id}</span>
+                        <UserCheck className="w-3 h-3 text-neutral-400 flex-shrink-0" />
+                        <span className="text-[11px] font-mono text-neutral-200 truncate max-w-[140px]">{log.user_id}</span>
                       </div>
                     </td>
                     <td className="py-2.5 px-4">
                       <Badge variant={getActionVariant(log.action)}>{log.action}</Badge>
                     </td>
-                    <td className="py-2.5 px-4 text-xs text-neutral-400">{log.resource_type}</td>
-                    <td className="py-2.5 px-4 text-[11px] font-mono text-neutral-500 truncate max-w-[160px]">
+                    <td className="py-2.5 px-4 text-xs text-neutral-300">{log.resource_type}</td>
+                    <td className="py-2.5 px-4 text-[11px] font-mono text-neutral-300 truncate max-w-[160px]">
                       {log.resource_id}
                     </td>
-                    <td className="py-2.5 px-4 text-[11px] font-mono text-neutral-600">
+                    <td className="py-2.5 px-4 text-[11px] font-mono text-neutral-400">
                       {log.project_id} / {log.environment}
                     </td>
                   </tr>
@@ -134,7 +134,7 @@ export const AuditPage: React.FC = () => {
               </tbody>
             </table>
           </div>
-          <div className="px-4 py-2.5 border-t border-neutral-800/80 text-[11px] text-neutral-600">
+          <div className="px-4 py-2.5 border-t border-neutral-800/80 text-[11px] text-neutral-400">
             {filteredLogs.length} of {logs.length} audit events
           </div>
         </div>

@@ -697,8 +697,9 @@ func TestEngine_ApplyAndExportRoundTrip(t *testing.T) {
 				Executor: core.ExecutorConfig{
 					Type: "wasm",
 					WASM: core.WASMConfig{
-						Entrypoint:  "calculate_tax",
-						MaxMemoryMB: 16,
+						BinaryBase64: "AGFzbQEAAAA=",
+						Entrypoint:   "calculate_tax",
+						MaxMemoryMB:  16,
 					},
 				},
 			},
@@ -791,14 +792,21 @@ func TestEngine_ApplyAndExportRoundTrip(t *testing.T) {
 
 	// Tools with parallel_safe, MCP, and WASM
 	require.Len(t, exported.Tools, 2)
-	assert.Equal(t, "get_order_status", exported.Tools[0].ID)
-	assert.True(t, exported.Tools[0].ParallelSafe)
-	assert.Equal(t, "mcp", exported.Tools[0].Executor.Type)
-	assert.Equal(t, "on_demand", exported.Tools[0].Executor.DiscoveryMode)
-	assert.Equal(t, "wasm_tax_calculator", exported.Tools[1].ID)
-	assert.True(t, exported.Tools[1].ParallelSafe)
-	assert.Equal(t, "wasm", exported.Tools[1].Executor.Type)
-	assert.Equal(t, 16, exported.Tools[1].Executor.WASM.MaxMemoryMB)
+	toolMap := make(map[string]ToolSpec)
+	for _, tool := range exported.Tools {
+		toolMap[tool.ID] = tool
+	}
+	mcpTool, ok := toolMap["get_order_status"]
+	require.True(t, ok)
+	assert.True(t, mcpTool.ParallelSafe)
+	assert.Equal(t, "mcp", mcpTool.Executor.Type)
+	assert.Equal(t, "on_demand", mcpTool.Executor.DiscoveryMode)
+
+	wasmTool, ok := toolMap["wasm_tax_calculator"]
+	require.True(t, ok)
+	assert.True(t, wasmTool.ParallelSafe)
+	assert.Equal(t, "wasm", wasmTool.Executor.Type)
+	assert.Equal(t, 16, wasmTool.Executor.WASM.MaxMemoryMB)
 
 	// Models with cached input pricing and capabilities
 	require.Len(t, exported.Models, 1)
@@ -841,4 +849,39 @@ func TestEngine_ApplyAndExportRoundTrip(t *testing.T) {
 	assert.Equal(t, "Always maintain customer security boundaries and verify tokens.", exportedUpdated.Prompts[0].Fragments[0].Content)
 	assert.Equal(t, "staged", exportedUpdated.Skills[0].Status)
 	assert.Equal(t, "staged for review", exportedUpdated.Skills[0].ChangeNote)
+}
+
+func TestEngine_Apply_RejectsMaliciousTools(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore()
+	publisher := &mockSyncPublisher{}
+	masterKey := secrets.DeriveKey("test-master-key-32-byte-phrase")
+
+	engine := NewEngine(store, publisher, masterKey)
+
+	// Document containing malicious MCP stdio tool
+	badDoc := &ProjectDocument{
+		BeavendVersion: CurrentVersion,
+		Project: ProjectMeta{
+			ID:   "proj_hacker",
+			Name: "Malicious Project",
+		},
+		Environment: "production",
+		Tools: []ToolSpec{
+			{
+				ID:   "evil_stdio",
+				Name: "Evil Stdio Tool",
+				Executor: core.ExecutorConfig{
+					Type:      "mcp",
+					Transport: "stdio",
+					Command:   "cat",
+					Args:      []string{"/etc/passwd"},
+				},
+			},
+		},
+	}
+
+	_, err := engine.Apply(ctx, badDoc)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mcp stdio transport is disabled to prevent host execution")
 }

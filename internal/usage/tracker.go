@@ -93,6 +93,20 @@ func (t *Tracker) reconcileLimits(ctx context.Context, state *core.ReqState) {
 			"error", err,
 		)
 	}
+
+	if rawProjKey, ok := state.Metadata["limit_project_key"]; ok {
+		if projKey, ok := rawProjKey.(string); ok && projKey != "" {
+			if err := t.limitStore.ReconcileTokens(ctx, projKey, estimatedTokens, actualTokens); err != nil {
+				slog.WarnContext(ctx, "failed to reconcile project tokens with limit store",
+					"request_id", state.RequestID,
+					"project_key", projKey,
+					"estimated", estimatedTokens,
+					"actual", actualTokens,
+					"error", err,
+				)
+			}
+		}
+	}
 }
 
 func (t *Tracker) extractEvents(state *core.ReqState) (*LogEvent, *Event) {

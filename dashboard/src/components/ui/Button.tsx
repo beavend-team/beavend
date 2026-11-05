@@ -14,12 +14,15 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary:
-    'bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm shadow-emerald-900/30 border border-emerald-500',
+    'bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white shadow-sm shadow-emerald-950/40 border border-emerald-500 focus-visible:ring-2 focus-visible:ring-emerald-500/50',
   secondary:
-    'bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700',
-  ghost: 'text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800',
-  danger: 'bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30',
-  outline: 'border border-neutral-700 text-neutral-300 hover:border-neutral-600 hover:bg-neutral-800/50',
+    'bg-neutral-800 hover:bg-neutral-700 active:bg-neutral-750 text-neutral-200 border border-neutral-700 focus-visible:ring-2 focus-visible:ring-neutral-500/50',
+  ghost:
+    'text-neutral-400 hover:text-neutral-100 hover:bg-neutral-800 active:bg-neutral-800/80 focus-visible:ring-2 focus-visible:ring-neutral-500/50',
+  danger:
+    'bg-red-600/20 hover:bg-red-600/30 active:bg-red-600/40 text-red-400 border border-red-500/30 focus-visible:ring-2 focus-visible:ring-red-500/50',
+  outline:
+    'border border-neutral-700 text-neutral-300 hover:border-neutral-600 hover:bg-neutral-800/50 active:bg-neutral-800/70 focus-visible:ring-2 focus-visible:ring-neutral-500/50',
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
@@ -44,8 +47,8 @@ export const Button: React.FC<ButtonProps> = ({
       {...props}
       disabled={disabled || loading}
       className={`
-        inline-flex items-center justify-center font-medium whitespace-nowrap flex-shrink-0 select-none transition-all duration-150 focus:outline-none
-        disabled:opacity-50 disabled:cursor-not-allowed
+        inline-flex items-center justify-center font-medium whitespace-nowrap flex-shrink-0 select-none transition-all duration-150 focus:outline-none focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-950
+        disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]
         ${variantClasses[variant]}
         ${sizeClasses[size]}
         ${className}

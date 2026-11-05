@@ -46,6 +46,7 @@ type ExecutorRegistry interface {
 
 // DefaultExecutorRegistry creates standard tool executors (HTTP, Webhook, MCP, SQL template, media generation, etc.).
 type DefaultExecutorRegistry struct {
+	mu               sync.Mutex
 	authenticator    core.Authenticator
 	allowPrivate     bool
 	sqlPool          *tools.SQLConnectionPool
@@ -124,7 +125,7 @@ func (r *DefaultExecutorRegistry) GetExecutor(def core.ToolDefinition) (core.Exe
 		if pool == nil {
 			pool = tools.DefaultSQLConnectionPool()
 		}
-		return tools.NewSQLTemplateExecutor(def, pool), nil
+		return tools.NewSQLTemplateExecutorWithPrivate(def, pool, r.allowPrivate), nil
 	case "searxng":
 		var cfg core.SearchConfig
 		if def.Executor.Template != "" {
@@ -143,15 +144,18 @@ func (r *DefaultExecutorRegistry) GetExecutor(def core.ToolDefinition) (core.Exe
 	case "skill_loader":
 		return tools.NewSkillLoaderExecutor(def), nil
 	case "wasm":
+		r.mu.Lock()
 		rt := r.wasmRuntime
 		if rt == nil {
 			var err error
 			rt, err = tools.NewWASMRuntime(context.Background(), nil, nil)
 			if err != nil {
+				r.mu.Unlock()
 				return nil, fmt.Errorf("init wasm runtime: %w", err)
 			}
 			r.wasmRuntime = rt
 		}
+		r.mu.Unlock()
 		return tools.NewWASMExecutor(def, rt), nil
 	default:
 		return nil, fmt.Errorf("unsupported executor type: %s", def.Executor.Type)
@@ -224,7 +228,17 @@ func (l *Loop) Run(ctx context.Context, state *core.ReqState, adapter core.Provi
 		maxDepth = state.AIApp.Guardrails.MaxDepth
 	}
 
-	for depth := 0; depth < maxDepth; depth++ {
+	startDepth := 0
+	if state.Metadata != nil {
+		if d, ok := state.Metadata["agent_loop_depth"].(int); ok && d > 0 {
+			startDepth = d
+		}
+	}
+
+	for depth := startDepth; depth < maxDepth; depth++ {
+		if state.Metadata != nil {
+			state.Metadata["agent_loop_depth"] = depth + 1
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -265,22 +279,44 @@ func (l *Loop) Run(ctx context.Context, state *core.ReqState, adapter core.Provi
 	})
 
 	if state.IsStreaming {
-		_, hasToolCalls, err := l.runStreamingTurn(ctx, maxDepth, state, adapter)
+		streamEvents, err := adapter.Stream(ctx, *state.ChatRequest)
 		if err != nil {
 			return err
+		}
+		var hasToolCalls bool
+		for event := range streamEvents {
+			if event.RequestID == "" {
+				event.RequestID = state.RequestID
+			}
+			if event.Usage != nil {
+				state.Usage = *event.Usage
+			}
+			if event.Type == "tool_call" && event.ToolCall != nil {
+				hasToolCalls = true
+				continue
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case state.StreamChan <- event:
+			}
 		}
 		if hasToolCalls {
 			return ErrMaxDepthExceeded
 		}
 		return nil
 	}
-	_, hasToolCalls, err := l.runUnaryTurn(ctx, maxDepth, state, adapter)
+
+	resp, err := adapter.Chat(ctx, *state.ChatRequest)
 	if err != nil {
 		return err
 	}
-	if hasToolCalls {
+	state.Usage = resp.Usage
+	state.ChatResponse = resp
+	if len(resp.Message.ToolCalls) > 0 {
 		return ErrMaxDepthExceeded
 	}
+	state.ChatRequest.Messages = append(state.ChatRequest.Messages, resp.Message)
 	return nil
 }
 
@@ -906,6 +942,13 @@ func (l *Loop) createSuspendedState(state *core.ReqState, toolCall core.ToolCall
 
 	nonce := getOrGenerateBoundaryNonce(state)
 
+	currentDepth := 0
+	if state.Metadata != nil {
+		if d, ok := state.Metadata["agent_loop_depth"].(int); ok {
+			currentDepth = d
+		}
+	}
+
 	return &tools.SuspendedState{
 		ProjectID:        state.ProjectID,
 		Environment:      state.Environment,
@@ -919,6 +962,7 @@ func (l *Loop) createSuspendedState(state *core.ReqState, toolCall core.ToolCall
 		PendingToolCalls: []core.ToolCall{toolCall},
 		ToolDefinitionID: toolDefID,
 		SnapshotRevision: rev,
+		CurrentDepth:     currentDepth,
 		BoundaryNonce:    nonce,
 		CreatedAt:        time.Now().UTC(),
 		IsStreaming:      state.IsStreaming,
@@ -1227,6 +1271,33 @@ func (l *Loop) executeSubAgent(ctx context.Context, state *core.ReqState, toolDe
 				def, ok = toolDefMap[childTC.ID]
 			}
 			if ok && def != nil {
+				if def.Authorization != "" && l.cfg.PolicyEvaluator != nil {
+					evalMeta := map[string]any{
+						"tool": def.Name,
+						"app":  childState.AIAppID,
+					}
+					allowed, err := l.cfg.PolicyEvaluator.Evaluate(ctx, def.Authorization, childState.Identity, evalMeta)
+					if err != nil || !allowed {
+						childState.ChatRequest.Messages = append(childState.ChatRequest.Messages, l.createToolErrorMessage(childState, childTC.ID, fmt.Sprintf("tool %q authorization denied by policy", def.Name)))
+						continue
+					}
+				}
+
+				var childArgs map[string]any
+				if childTC.Arguments != "" {
+					_ = json.Unmarshal([]byte(childTC.Arguments), &childArgs)
+				}
+				if childArgs == nil {
+					childArgs = make(map[string]any)
+				}
+				childArgs = tools.InjectIdentityBindings(childArgs, def.IdentityBindings, childState.Identity)
+				if err := tools.ValidateArguments(childArgs, childState.Snapshot, def); err != nil {
+					childState.ChatRequest.Messages = append(childState.ChatRequest.Messages, l.createToolErrorMessage(childState, childTC.ID, fmt.Sprintf("arguments validation failed: %v", err)))
+					continue
+				}
+				boundBytes, _ := json.Marshal(childArgs)
+				childTC.Arguments = string(boundBytes)
+
 				var execErr error
 				toolMsg, execErr = l.executeServerTool(ctx, childState, def, childTC)
 				if execErr != nil {
@@ -1272,6 +1343,18 @@ func (l *Loop) executeSubAgent(ctx context.Context, state *core.ReqState, toolDe
 	childContent := ""
 	if childResp != nil {
 		childContent = childResp.Message.Content
+	}
+	if l.cfg.Sanitizer != nil {
+		sanitized := l.cfg.Sanitizer.Sanitize(core.ToolResult{
+			CallID:  toolCall.ID,
+			ToolID:  toolDef.ID,
+			Content: childContent,
+		}, toolDef.Result, tools.WithNonce(nonce))
+		return core.ChatMessage{
+			Role:       "tool",
+			ToolCallID: toolCall.ID,
+			Content:    sanitized.Content,
+		}, nil
 	}
 	escaped := tools.EscapeClosingToolResultTags(childContent)
 	wrapped := tools.WrapToolResult(escaped, nonce, toolDef.ID, toolCall.ID, "success")

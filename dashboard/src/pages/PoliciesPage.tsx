@@ -205,13 +205,13 @@ export const PoliciesPage: React.FC = () => {
                   <Badge variant="mono">v{p.active_version}</Badge>
                   <Badge variant="purple">CEL</Badge>
                 </div>
-                <p className="text-[11px] font-mono text-neutral-600 mb-1">{p.id}</p>
-                {p.description && <p className="text-xs text-neutral-500 mb-1">{p.description}</p>}
-                <p className="text-[11px] text-emerald-600 flex items-center gap-1">
+                <p className="text-[11px] font-mono text-neutral-400 mb-1">{p.id}</p>
+                {p.description && <p className="text-xs text-neutral-400 mb-1 leading-relaxed">{p.description}</p>}
+                <p className="text-[11px] text-emerald-400 flex items-center gap-1 font-medium">
                   <GitBranch className="w-3 h-3" /> View version history
                 </p>
               </div>
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                 <button
                   onClick={async (e) => {
                     e.stopPropagation();
@@ -221,15 +221,17 @@ export const PoliciesPage: React.FC = () => {
                     setShowTestModal(true);
                     setTestResult(null);
                   }}
-                  className="p-1.5 text-neutral-600 hover:text-emerald-400 hover:bg-neutral-800 rounded transition-colors"
+                  className="p-1.5 text-neutral-400 hover:text-emerald-400 hover:bg-neutral-800 rounded transition-colors"
                   title="Test in CEL Sandbox"
+                  aria-label={`Test policy ${p.name}`}
                 >
                   <Play className="w-3.5 h-3.5" />
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleDelete(p.id); }}
-                  className="p-1.5 text-neutral-600 hover:text-red-400 hover:bg-neutral-800 rounded transition-colors"
+                  className="p-1.5 text-neutral-400 hover:text-red-400 hover:bg-neutral-800 rounded transition-colors"
                   title="Delete Policy"
+                  aria-label={`Delete policy ${p.name}`}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
@@ -278,7 +280,7 @@ export const PoliciesPage: React.FC = () => {
             <div className="flex items-center justify-between p-5 border-b border-neutral-800">
               <div>
                 <h3 className="text-sm font-semibold text-neutral-100">Policy Version History</h3>
-                <p className="text-[11px] font-mono text-neutral-600 mt-0.5">{selectedPolicy}</p>
+                <p className="text-[11px] font-mono text-neutral-400 mt-0.5">{selectedPolicy}</p>
               </div>
               <Button variant="secondary" size="xs" icon={<Plus className="w-3.5 h-3.5" />} onClick={() => { setNewExpression(policyDetail?.versions?.[0]?.expression || ''); setShowVersionModal(true); }}>
                 New Version
@@ -287,9 +289,9 @@ export const PoliciesPage: React.FC = () => {
 
             <div className="overflow-y-auto p-5 space-y-2">
               {loadingDetail ? (
-                <p className="text-xs text-neutral-600 py-4 text-center">Loading versions...</p>
+                <p className="text-xs text-neutral-400 py-4 text-center">Loading versions...</p>
               ) : !policyDetail?.versions?.length ? (
-                <p className="text-xs text-neutral-600 text-center py-4">No version history available.</p>
+                <p className="text-xs text-neutral-400 text-center py-4">No version history available.</p>
               ) : (
                 policyDetail.versions.map((v: any) => {
                   const isActive = v.version === policyDetail.policy?.active_version || v.is_active;

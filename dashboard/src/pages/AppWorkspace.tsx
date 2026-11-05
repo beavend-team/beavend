@@ -139,7 +139,7 @@ const SectionTitle: React.FC<{ icon: React.ReactNode; title: string; description
     </div>
     <div>
       <p className="text-sm font-semibold text-neutral-200">{title}</p>
-      {description && <p className="text-[11px] text-neutral-600">{description}</p>}
+      {description && <p className="text-[11px] text-neutral-400">{description}</p>}
     </div>
   </div>
 );
@@ -1259,7 +1259,7 @@ export const AppWorkspace: React.FC<AppWorkspaceProps> = ({ appId, onBack, onRef
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20 text-neutral-600 text-sm gap-2">
+      <div className="flex items-center justify-center py-20 text-neutral-400 text-sm gap-2">
         <RefreshCw className="w-4 h-4 animate-spin" />
         Loading workspace...
       </div>
@@ -1348,24 +1348,24 @@ console.log(response.content);`;
             <p className="text-xs text-neutral-400 mb-4">{description || 'No description configured.'}</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
               <div className="bg-neutral-950 border border-neutral-800/80 p-3 rounded-lg">
-                <p className="text-[10px] uppercase tracking-wider text-neutral-600 font-semibold">Logical Model</p>
+                <p className="text-[10px] uppercase tracking-wider text-neutral-400 font-semibold">Logical Model</p>
                 <p className="text-sm text-neutral-200 mt-1 font-mono font-medium truncate">
                   {matchedModel ? `${defaultModel} (${matchedModel.deployment})` : (defaultModel || '(none)')}
                 </p>
               </div>
 
               <div className="bg-neutral-950 border border-neutral-800/80 p-3 rounded-lg">
-                <p className="text-[10px] uppercase tracking-wider text-neutral-600 font-semibold">System Prompt</p>
+                <p className="text-[10px] uppercase tracking-wider text-neutral-400 font-semibold">System Prompt</p>
                 <p className="text-sm text-neutral-200 mt-1 font-medium truncate">
                   {matchedPrompt ? matchedPrompt.name : (promptId ? promptId : 'None (Pass-through)')}
                 </p>
                 {matchedPrompt && (
-                  <p className="text-[10px] font-mono text-neutral-500 truncate mt-0.5">{matchedPrompt.id}</p>
+                  <p className="text-[10px] font-mono text-neutral-400 truncate mt-0.5">{matchedPrompt.id}</p>
                 )}
               </div>
 
               <div className="bg-neutral-950 border border-neutral-800/80 p-3 rounded-lg">
-                <p className="text-[10px] uppercase tracking-wider text-neutral-600 font-semibold">Active Tools</p>
+                <p className="text-[10px] uppercase tracking-wider text-neutral-400 font-semibold">Active Tools</p>
                 <p className="text-sm text-neutral-200 mt-1 font-medium truncate">
                   {selectedTools.length === 0
                     ? (searchConfig?.enabled ? 'Web Search only' : 'None attached')
@@ -1374,14 +1374,14 @@ console.log(response.content);`;
               </div>
 
               <div className="bg-neutral-950 border border-neutral-800/80 p-3 rounded-lg">
-                <p className="text-[10px] uppercase tracking-wider text-neutral-600 font-semibold">Active Skills</p>
+                <p className="text-[10px] uppercase tracking-wider text-neutral-400 font-semibold">Active Skills</p>
                 <p className="text-sm text-neutral-200 mt-1 font-medium truncate">
                   {selectedSkills.length === 0 ? 'None attached' : `${selectedSkills.length} attached`}
                 </p>
               </div>
 
               <div className="bg-neutral-950 border border-neutral-800/80 p-3 rounded-lg">
-                <p className="text-[10px] uppercase tracking-wider text-neutral-600 font-semibold">Rate Limit</p>
+                <p className="text-[10px] uppercase tracking-wider text-neutral-400 font-semibold">Rate Limit</p>
                 <p className="text-sm text-neutral-200 mt-1 font-mono font-medium truncate">
                   {rpmLimit} RPM
                 </p>
@@ -1790,7 +1790,7 @@ console.log(response.content);`;
               />
 
               <div className="flex items-center justify-between">
-                <p className="text-[11px] text-neutral-600">
+                <p className="text-[11px] text-neutral-400">
                   Tokens are verified locally against the active JWKS cache. No token data is stored.
                 </p>
                 <Button
@@ -1827,7 +1827,7 @@ console.log(response.content);`;
                       {tokenResult.valid ? 'Token Valid & Signature Verified' : 'Token Verification Failed'}
                     </span>
                     {tokenResult.expires_at && (
-                      <span className="text-[11px] text-neutral-500 ml-auto">
+                      <span className="text-[11px] text-neutral-400 ml-auto">
                         Expires: {new Date(tokenResult.expires_at).toLocaleString()}
                       </span>
                     )}
@@ -1848,7 +1848,7 @@ console.log(response.content);`;
                           { label: 'Audience (`aud`)', value: tokenResult.audience || '(none)' },
                         ].map((item) => (
                           <div key={item.label} className="bg-neutral-950 p-2.5 rounded-lg border border-neutral-800">
-                            <p className="text-[10px] uppercase text-neutral-600 font-bold">{item.label}</p>
+                            <p className="text-[10px] uppercase text-neutral-400 font-bold">{item.label}</p>
                             <p className="text-[11px] font-mono text-neutral-300 mt-0.5 truncate" title={item.value}>
                               {item.value}
                             </p>
@@ -1957,7 +1957,7 @@ console.log(response.content);`;
               description="Select which HTTP tools this app can call on behalf of users"
             />
             {availableTools.length === 0 ? (
-              <p className="text-xs text-neutral-600 italic">No tools registered. Add tools in Tools Registry.</p>
+              <p className="text-xs text-neutral-400 italic">No tools registered. Add tools in Tools Registry.</p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                 {availableTools.map((tool) => {
@@ -1970,7 +1970,7 @@ console.log(response.content);`;
                         cursor-pointer rounded-lg border p-3 flex items-start gap-2.5 transition-all
                         ${isChecked
                           ? 'bg-amber-500/8 border-amber-500/25 text-amber-300'
-                          : 'bg-neutral-950 border-neutral-800 hover:border-neutral-700 text-neutral-500'
+                          : 'bg-neutral-950 border-neutral-800 hover:border-neutral-700 text-neutral-400'
                         }
                       `}
                     >
@@ -1979,7 +1979,7 @@ console.log(response.content);`;
                       </div>
                       <div className="min-w-0">
                         <p className="text-xs font-semibold text-neutral-200">{tool.name}</p>
-                        <p className="text-[10px] font-mono text-neutral-600 truncate">{tool.id}</p>
+                        <p className="text-[10px] font-mono text-neutral-400 truncate">{tool.id}</p>
                       </div>
                     </div>
                   );
@@ -2009,9 +2009,9 @@ console.log(response.content);`;
             />
             {availableSkills.length === 0 ? (
               <div className="rounded-lg border border-neutral-800 bg-neutral-950 p-6 text-center">
-                <Sparkles className="w-6 h-6 text-neutral-600 mx-auto mb-2" />
+                <Sparkles className="w-6 h-6 text-neutral-400 mx-auto mb-2" />
                 <p className="text-xs text-neutral-400">No skills defined in this project.</p>
-                <p className="text-[11px] text-neutral-600 mt-1">
+                <p className="text-[11px] text-neutral-400 mt-1">
                   Create or import reusable skills in the Skills Studio.
                 </p>
               </div>
@@ -2043,12 +2043,12 @@ console.log(response.content);`;
                               {isAlways ? 'always' : 'on-demand'}
                             </Badge>
                           </div>
-                          <p className="text-[11px] text-neutral-500 line-clamp-2 leading-relaxed">
+                          <p className="text-[11px] text-neutral-400 line-clamp-2 leading-relaxed">
                             {skill.description || 'No description provided.'}
                           </p>
                         </div>
                       </div>
-                      <div className="mt-3 pt-2 border-t border-neutral-800/60 flex items-center justify-between text-[10px] text-neutral-600 font-mono">
+                      <div className="mt-3 pt-2 border-t border-neutral-800/60 flex items-center justify-between text-[10px] text-neutral-400 font-mono">
                         <span className="truncate">{skill.id}</span>
                         <span>v{skill.active_version || 1}</span>
                       </div>
@@ -2463,14 +2463,15 @@ console.log(response.content);`;
                         <td className="py-2.5 text-neutral-500 text-[11px] font-sans">
                           {k.last_used_at ? formatRelativeTime(k.last_used_at) : 'Never'}
                         </td>
-                        <td className="py-2.5 text-neutral-500 text-[11px] font-sans">
+                        <td className="py-2.5 text-neutral-400 text-[11px] font-sans">
                           {k.expires_at ? formatRelativeTime(k.expires_at) : 'Never'}
                         </td>
                         <td className="py-2.5 text-right font-sans">
                           <button
                             onClick={() => handleDeleteKey(k.id)}
-                            className="p-1 text-neutral-600 hover:text-red-400 hover:bg-neutral-800 rounded transition-colors"
+                            className="p-1 text-neutral-400 hover:text-red-400 hover:bg-neutral-800 rounded transition-colors"
                             title="Revoke key"
+                            aria-label={`Revoke API key ${k.name}`}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -2527,8 +2528,8 @@ console.log(response.content);`;
               {/* Row 1: Title & Telemetry */}
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <Terminal className="w-4 h-4 text-neutral-500" />
-                  <span className="text-xs font-semibold text-neutral-300">Interactive Test Playground</span>
+                  <Terminal className="w-4 h-4 text-neutral-400" />
+                  <span className="text-xs font-semibold text-neutral-200">Interactive Test Playground</span>
                   <Badge variant="mono" className="text-[10px]">
                     Context: ~{Math.round(chatMessages.reduce((sum, m) => sum + (m.content.length / 3.8), 0) + (userInput.length / 3.8))} tokens ({chatMessages.length} turns)
                   </Badge>
@@ -2540,7 +2541,7 @@ console.log(response.content);`;
                   )}
                 </div>
                 {chatLoading && (
-                  <span className="text-[10px] text-neutral-500 animate-pulse flex items-center gap-1">
+                  <span className="text-[10px] text-neutral-400 animate-pulse flex items-center gap-1">
                     <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping" />
                     {useStreaming ? 'Streaming tokens...' : 'Generating...'}
                   </span>
@@ -2551,7 +2552,7 @@ console.log(response.content);`;
               <div className="flex items-center justify-between gap-2 flex-wrap pt-0.5">
                 {/* Output Modality Selector - aligned left below title */}
                 <div className="flex items-center gap-1 bg-neutral-950 border border-neutral-800 rounded-lg p-0.5 px-2">
-                  <span className="text-[10px] text-neutral-500 font-medium flex items-center gap-1" title="Requested output modalities. 'Auto' delegates media generation to tools.">
+                  <span className="text-[10px] text-neutral-400 font-medium flex items-center gap-1" title="Requested output modalities. 'Auto' delegates media generation to tools.">
                     <Sparkles className="w-3 h-3 text-amber-400" />
                     Out:
                   </span>
@@ -2561,7 +2562,7 @@ console.log(response.content);`;
                     className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors ${
                       selectedOutputModalities.length === 1 && selectedOutputModalities[0] === 'text'
                         ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
-                        : 'text-neutral-500 hover:text-neutral-300'
+                        : 'text-neutral-400 hover:text-neutral-200'
                     }`}
                     title="Auto: Standard text chat, model calls media tools (image, audio, video) automatically from prompt"
                   >
@@ -2585,7 +2586,7 @@ console.log(response.content);`;
                         className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors ${
                           isSelected
                             ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
-                            : 'text-neutral-500 hover:text-neutral-300'
+                            : 'text-neutral-400 hover:text-neutral-200'
                         }`}
                         title={`Explicit override: Direct ${m} output requested for testing model_routes`}
                       >
@@ -2604,7 +2605,7 @@ console.log(response.content);`;
                   className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border transition-colors ${
                     useStreaming
                       ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                      : 'bg-neutral-800 border-neutral-700 text-neutral-400 hover:text-neutral-200'
+                      : 'bg-neutral-800 border-neutral-700 text-neutral-300 hover:text-neutral-100'
                   }`}
                   title="Toggle SSE Streaming vs Unary HTTP completion"
                 >
@@ -2614,7 +2615,7 @@ console.log(response.content);`;
 
                 {/* Thread Controls (Stateless vs Active Server Thread) */}
                 <div className="flex items-center gap-1.5 bg-neutral-950 border border-neutral-800 rounded-lg p-0.5 px-2">
-                  <span className="text-[10px] text-neutral-500">
+                  <span className="text-[10px] text-neutral-400">
                     {activeThreadId ? (
                       <span className="font-mono text-purple-400">th: {activeThreadId.slice(0, 10)}...</span>
                     ) : (
@@ -2640,8 +2641,9 @@ console.log(response.content);`;
                         setChatMessages([{ role: 'assistant', content: 'Detached from thread. Now in stateless mode.' }]);
                         setPendingConfirmation(null);
                       }}
-                      className="p-1 text-neutral-500 hover:text-red-400 rounded transition-colors"
+                      className="p-1 text-neutral-400 hover:text-red-400 rounded transition-colors"
                       title="Detach from thread and return to stateless mode"
+                      aria-label="Detach thread"
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -2676,7 +2678,7 @@ console.log(response.content);`;
             {showHistory && (
               <div className="border-b border-neutral-800 bg-neutral-950 max-h-48 overflow-y-auto">
                 {savedThreads.length === 0 ? (
-                  <div className="px-4 py-3 text-[11px] text-neutral-500">
+                  <div className="px-4 py-3 text-[11px] text-neutral-400">
                     No saved server threads yet. Chat and click <strong>&quot;Save to Thread&quot;</strong> to persist a conversation on the server.
                   </div>
                 ) : (
@@ -2685,18 +2687,19 @@ console.log(response.content);`;
                       key={t.id}
                       className={`flex items-center justify-between gap-2 px-4 py-2 text-xs hover:bg-neutral-900 ${t.id === activeThreadId ? 'bg-neutral-900' : ''}`}
                     >
-                      <button type="button" onClick={() => openThread(t)} className="flex-1 text-left truncate text-neutral-300">
+                      <button type="button" onClick={() => openThread(t)} className="flex-1 text-left truncate text-neutral-200">
                         <span className="font-mono text-purple-400 mr-2 text-[11px]">{t.id.slice(0, 14)}</span>
                         {t.title}
-                        <span className="ml-2 text-[10px] text-neutral-600">
+                        <span className="ml-2 text-[10px] text-neutral-400">
                           {new Date(t.updatedAt).toLocaleString()} · {t.messages.length} turns
                         </span>
                       </button>
                       <button
                         type="button"
                         onClick={() => deleteThreadItem(t.id)}
-                        className="p-1 text-neutral-600 hover:text-red-400"
+                        className="p-1 text-neutral-400 hover:text-red-400 rounded"
                         title="Delete thread from server and history"
+                        aria-label={`Delete thread ${t.title}`}
                       >
                         <X className="w-3 h-3" />
                       </button>

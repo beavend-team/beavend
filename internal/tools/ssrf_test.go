@@ -44,6 +44,8 @@ func TestSafeDialer_IsSafeIP(t *testing.T) {
 		{"Benchmarking RFC 2544", "198.18.0.1", false},
 		{"IPv6 Documentation", "2001:db8::1", false},
 		{"Carrier-Grade NAT", "100.64.0.1", false},
+		{"IPv4-Compatible IPv6", "::127.0.0.1", false},
+		{"IPv6 Site-Local", "fec0::1", false},
 	}
 
 	for _, tt := range tests {
@@ -65,7 +67,9 @@ func TestSafeDialer_BlockedHostnames(t *testing.T) {
 
 	blocked := []string{
 		"localhost:80",
+		"localhost.:80",
 		"metadata.google.internal:80",
+		"metadata.google.internal.:80",
 		"metadata.internal:443",
 		"instance-data:80",
 	}

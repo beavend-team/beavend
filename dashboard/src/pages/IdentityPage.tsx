@@ -242,8 +242,8 @@ export const IdentityPage: React.FC<IdentityPageProps> = ({
                       <p className="text-xs font-semibold text-neutral-100">{label}</p>
                       {isActive && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />}
                     </div>
-                    <p className="text-[11px] text-neutral-500">{desc}</p>
-                    <span className="inline-block mt-2 text-[9px] font-mono uppercase tracking-wider text-neutral-600 bg-neutral-900 px-1.5 py-0.5 rounded border border-neutral-800">
+                    <p className="text-[11px] text-neutral-400">{desc}</p>
+                    <span className="inline-block mt-2 text-[9px] font-mono uppercase tracking-wider text-neutral-400 bg-neutral-900 px-1.5 py-0.5 rounded border border-neutral-800">
                       {tag}
                     </span>
                   </button>
@@ -326,9 +326,9 @@ export const IdentityPage: React.FC<IdentityPageProps> = ({
                 max="300"
                 value={clockSkewSeconds}
                 onChange={(e) => setClockSkewSeconds(Number(e.target.value))}
-                className="w-16 bg-neutral-950 border border-neutral-800 rounded-lg px-2 py-1 text-xs font-mono text-neutral-200 focus:outline-none focus:border-neutral-600 text-center"
+                className="w-16 bg-neutral-950 border border-neutral-800 rounded-lg px-2 py-1 text-xs font-mono text-neutral-200 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/20 text-center"
               />
-              <span className="text-xs text-neutral-600">seconds</span>
+              <span className="text-xs text-neutral-400">seconds</span>
             </div>
             <Button
               type="submit"
@@ -360,7 +360,7 @@ export const IdentityPage: React.FC<IdentityPageProps> = ({
             mono
           />
           <div className="flex justify-between items-center">
-            <p className="text-[11px] text-neutral-600">
+            <p className="text-[11px] text-neutral-400">
               Tokens are verified locally against the active JWKS cache. No token data is stored.
             </p>
             <Button
@@ -422,8 +422,8 @@ export const IdentityPage: React.FC<IdentityPageProps> = ({
                     { label: 'Audience (`aud`)', value: tokenResult.audience || '(none)' },
                   ].map((item) => (
                     <div key={item.label} className="bg-neutral-950 p-2.5 rounded-lg border border-neutral-800">
-                      <p className="text-[10px] uppercase text-neutral-600 font-bold">{item.label}</p>
-                      <p className="text-[11px] font-mono text-neutral-300 mt-0.5 truncate" title={item.value}>
+                      <p className="text-[10px] uppercase text-neutral-400 font-bold">{item.label}</p>
+                      <p className="text-[11px] font-mono text-neutral-200 mt-0.5 truncate" title={item.value}>
                         {item.value}
                       </p>
                     </div>

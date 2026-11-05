@@ -74,15 +74,9 @@ func NewSearXNGClient(baseURL string, enabled bool, timeout time.Duration, custo
 
 	client := customClient
 	if client == nil {
-		client = &http.Client{
-			Timeout: timeout,
-			Transport: &http.Transport{
-				Proxy:                 http.ProxyFromEnvironment,
-				MaxIdleConns:          20,
-				IdleConnTimeout:       30 * time.Second,
-				ResponseHeaderTimeout: timeout,
-			},
-		}
+		client = NewSafeHTTPClient(SafeDialerConfig{
+			AllowedPorts: []uint16{80, 443},
+		}, timeout)
 	}
 
 	return &SearXNGClient{
@@ -126,15 +120,9 @@ func (c *SearXNGClient) UpdateConfig(baseURL string, enabled bool, timeout time.
 	c.baseURL = cleanURL
 	c.enabled = enabled
 	c.timeout = timeout
-	c.httpClient = &http.Client{
-		Timeout: timeout,
-		Transport: &http.Transport{
-			Proxy:                 http.ProxyFromEnvironment,
-			MaxIdleConns:          20,
-			IdleConnTimeout:       30 * time.Second,
-			ResponseHeaderTimeout: timeout,
-		},
-	}
+	c.httpClient = NewSafeHTTPClient(SafeDialerConfig{
+		AllowedPorts: []uint16{80, 443},
+	}, timeout)
 }
 
 // CheckHealth queries the SearXNG instance to verify its readiness and measuring round-trip latency.

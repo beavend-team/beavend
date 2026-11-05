@@ -190,7 +190,7 @@ func AuthMiddleware(resolver SnapshotResolver, verifier *Verifier, opts ...Middl
 					Environment: env,
 					Issuer:      "anonymous",
 					Subject:     "anonymous",
-					Claims:      map[string]any{"anonymous": true},
+					Claims:      map[string]any{"anonymous": true, "client_ip": r.RemoteAddr},
 				}
 				ctx := ContextWithIdentity(r.Context(), id)
 				if tokenStr != "" {
@@ -229,6 +229,11 @@ func AuthMiddleware(resolver SnapshotResolver, verifier *Verifier, opts ...Middl
 
 			// If authenticated as admin and no distinct end-user simulated token was passed, authorize as admin
 			if adminClaims != nil && (tokenStr == "" || tokenStr == adminHeaderToken || claimsMatchAdmin(cfg.adminTokenValidator, tokenStr)) {
+				isAdmin := adminClaims.Role == "owner" || adminClaims.Role == "editor"
+				roles := []string{adminClaims.Role}
+				if isAdmin {
+					roles = append(roles, "admin")
+				}
 				id := &core.Identity{
 					Project:     projectID,
 					Environment: env,
@@ -238,8 +243,8 @@ func AuthMiddleware(resolver SnapshotResolver, verifier *Verifier, opts ...Middl
 						"sub":        adminClaims.UserID,
 						"email":      adminClaims.Email,
 						"role":       adminClaims.Role,
-						"roles":      []string{adminClaims.Role, "admin"},
-						"admin":      true,
+						"roles":      roles,
+						"admin":      isAdmin,
 						"playground": true,
 					},
 				}
@@ -268,7 +273,7 @@ func AuthMiddleware(resolver SnapshotResolver, verifier *Verifier, opts ...Middl
 						Environment: env,
 						Issuer:      "anonymous",
 						Subject:     "anonymous",
-						Claims:      map[string]any{"anonymous": true},
+						Claims:      map[string]any{"anonymous": true, "client_ip": r.RemoteAddr},
 					}
 					ctx := ContextWithIdentity(r.Context(), id)
 					if snap != nil {
@@ -305,7 +310,12 @@ func AuthMiddleware(resolver SnapshotResolver, verifier *Verifier, opts ...Middl
 						id.Claims["sub"] = adminClaims.UserID
 						id.Claims["email"] = adminClaims.Email
 						id.Claims["role"] = adminClaims.Role
-						id.Claims["roles"] = []string{adminClaims.Role, "admin"}
+						roles := []string{adminClaims.Role}
+						if adminClaims.Role == "owner" || adminClaims.Role == "editor" {
+							roles = append(roles, "admin")
+						}
+						id.Claims["roles"] = roles
+						id.Claims["admin"] = adminClaims.Role == "owner" || adminClaims.Role == "editor"
 					}
 					ctx := ContextWithIdentity(r.Context(), id)
 					if snap != nil {

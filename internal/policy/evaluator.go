@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/google/cel-go/cel"
 
@@ -22,7 +23,8 @@ func SnapshotFromContext(ctx context.Context) (*core.Snapshot, bool) {
 
 // Evaluator evaluates compiled CEL programs and policy definitions.
 type Evaluator struct {
-	compiler *Compiler
+	compiler    *Compiler
+	inlineCache sync.Map
 }
 
 // NewEvaluator creates a new Evaluator. If compiler is nil, a default compiler is created.
@@ -148,11 +150,18 @@ func (e *Evaluator) EvaluatePolicy(ctx context.Context, snap *core.Snapshot, pol
 		}
 	}
 
-	// 3. If not found in snapshot, attempt to compile as inline expression
+	// 3. If not found in snapshot, attempt to evaluate from inline cache or compile
+	if raw, ok := e.inlineCache.Load(trimmed); ok {
+		if cachedPrg, ok := raw.(cel.Program); ok {
+			return e.EvaluateProgram(ctx, cachedPrg, id, meta)
+		}
+	}
+
 	prg, err := e.compiler.Compile(trimmed)
 	if err != nil {
 		return false, fmt.Errorf("policy %q not found or invalid: %w", trimmed, err)
 	}
+	e.inlineCache.Store(trimmed, prg)
 
 	return e.EvaluateProgram(ctx, prg, id, meta)
 }

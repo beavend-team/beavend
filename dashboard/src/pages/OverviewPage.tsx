@@ -47,7 +47,7 @@ const StatCard: React.FC<StatCardProps> = ({ label, value, loading, icon, color,
         )}
       </p>
       {trend && !loading && (
-        <p className="text-[11px] text-neutral-600 mt-1 flex items-center gap-1">
+        <p className="text-[11px] text-neutral-400 mt-1 flex items-center gap-1 font-medium">
           <TrendingUp className="w-3 h-3 text-emerald-500" />
           {trend}
         </p>
@@ -77,7 +77,7 @@ const InvariantItem: React.FC<InvariantItemProps> = ({ title, description, icon,
           {status}
         </Badge>
       </div>
-      <p className="text-[11px] text-neutral-600 mt-0.5 leading-relaxed">{description}</p>
+      <p className="text-[11px] text-neutral-400 mt-0.5 leading-relaxed">{description}</p>
     </div>
   </div>
 );
@@ -208,7 +208,7 @@ export const OverviewPage: React.FC = () => {
             </div>
             <div>
               <p className="text-xs font-medium text-neutral-300">Live usage data from <code className="text-emerald-400 text-[11px]">/v1/admin/usage</code></p>
-              <p className="text-[11px] text-neutral-600 mt-0.5">
+              <p className="text-[11px] text-neutral-400 mt-0.5">
                 Aggregated hourly rollups ({usageData.length} bucket{usageData.length !== 1 ? 's' : ''} in the last 24h)
               </p>
             </div>
@@ -275,20 +275,20 @@ export const OverviewPage: React.FC = () => {
 
           <Card padding="md">
             <div className="flex items-center gap-2 mb-2.5">
-              <span className="text-[11px] text-neutral-500">Target Env:</span>
+              <span className="text-[11px] text-neutral-400">Target Env:</span>
               <Badge variant="purple">{api.currentEnv}</Badge>
-              <span className="text-[11px] text-neutral-500 ml-1">Project:</span>
+              <span className="text-[11px] text-neutral-400 ml-1">Project:</span>
               <Badge variant="mono">{api.currentProject}</Badge>
             </div>
-            <p className="text-xs text-neutral-500 mb-3">
-              Pass your authenticated end-user JWT or scoped App API Key (<code className="text-neutral-400">bv_app_sec_...</code>) in the Authorization header.
-              Requests are dynamically routed to the active <b className="text-neutral-300 font-mono text-[11px]">{api.currentEnv}</b> environment.
+            <p className="text-xs text-neutral-400 mb-3 leading-relaxed">
+              Pass your authenticated end-user JWT or scoped App API Key (<code className="text-neutral-300">bv_app_sec_...</code>) in the Authorization header.
+              Requests are dynamically routed to the active <b className="text-neutral-200 font-mono text-[11px]">{api.currentEnv}</b> environment.
             </p>
-            <div className="bg-neutral-950 border border-neutral-800 rounded-lg p-3 font-mono text-[11px] text-neutral-400 overflow-x-auto">
+            <div className="bg-neutral-950 border border-neutral-800 rounded-lg p-3 font-mono text-[11px] text-neutral-300 overflow-x-auto">
               <pre className="whitespace-pre">{curlExample}</pre>
             </div>
-            <p className="text-[11px] text-neutral-600 mt-2">
-              Stream responses via <code className="text-neutral-400 font-mono">POST /v1/apps/{'{id}'}/stream</code>
+            <p className="text-[11px] text-neutral-400 mt-2">
+              Stream responses via <code className="text-emerald-400 font-mono">POST /v1/apps/{'{id}'}/stream</code>
             </p>
           </Card>
 
@@ -309,8 +309,8 @@ export const OverviewPage: React.FC = () => {
                 { key: 'Secrets', val: 'AES-256-GCM envelope' },
               ].map((item) => (
                 <div key={item.key} className="flex items-center justify-between text-[11px]">
-                  <span className="text-neutral-600">{item.key}</span>
-                  <span className="text-neutral-400 font-mono">{item.val}</span>
+                  <span className="text-neutral-400">{item.key}</span>
+                  <span className="text-neutral-300 font-mono">{item.val}</span>
                 </div>
               ))}
             </div>

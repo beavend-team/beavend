@@ -115,8 +115,9 @@ func (h *Handler) HandleGetPolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	policyID := chi.URLParam(r, "id")
+	projectID, env := getProjectAndEnv(r)
 	policy, err := h.svc.queries.GetPolicy(r.Context(), policyID)
-	if err != nil {
+	if err != nil || policy.ProjectID != projectID || policy.Environment != env {
 		writeError(w, http.StatusNotFound, "not_found", "policy not found")
 		return
 	}
@@ -146,6 +147,10 @@ func (h *Handler) HandleCreatePolicyVersion(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, "bad_request", "expression is required")
 		return
 	}
+	if len(req.Expression) > 8192 {
+		writeError(w, http.StatusBadRequest, "bad_request", "policy expression exceeds maximum length (8KB)")
+		return
+	}
 
 	// Validate CEL expression syntax & type-checking
 	if h.svc.policyCompiler != nil {
@@ -161,7 +166,7 @@ func (h *Handler) HandleCreatePolicyVersion(w http.ResponseWriter, r *http.Reque
 	}
 
 	existing, err := h.svc.queries.GetPolicy(r.Context(), policyID)
-	if err != nil {
+	if err != nil || existing.ProjectID != projectID || existing.Environment != env {
 		writeError(w, http.StatusNotFound, "not_found", "policy not found")
 		return
 	}
@@ -204,6 +209,12 @@ func (h *Handler) HandleDeletePolicy(w http.ResponseWriter, r *http.Request) {
 	policyID := chi.URLParam(r, "id")
 	projectID, env := getProjectAndEnv(r)
 
+	existing, err := h.svc.queries.GetPolicy(r.Context(), policyID)
+	if err != nil || existing.ProjectID != projectID || existing.Environment != env {
+		writeError(w, http.StatusNotFound, "not_found", "policy not found")
+		return
+	}
+
 	if err := h.svc.queries.DeletePolicy(r.Context(), policyID); err != nil {
 		writeError(w, http.StatusInternalServerError, "database_error", err.Error())
 		return
@@ -236,6 +247,10 @@ func (h *Handler) HandleTestPolicy(w http.ResponseWriter, r *http.Request) {
 	req.Expression = strings.TrimSpace(req.Expression)
 	if req.Expression == "" {
 		writeError(w, http.StatusBadRequest, "bad_request", "expression is required")
+		return
+	}
+	if len(req.Expression) > 8192 {
+		writeError(w, http.StatusBadRequest, "bad_request", "policy expression exceeds maximum length (8KB)")
 		return
 	}
 
@@ -323,7 +338,13 @@ func (h *Handler) HandleSetActivePolicyVersion(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	_, err := h.svc.queries.GetPolicyVersion(r.Context(), db.GetPolicyVersionParams{
+	existing, err := h.svc.queries.GetPolicy(r.Context(), policyID)
+	if err != nil || existing.ProjectID != projectID || existing.Environment != env {
+		writeError(w, http.StatusNotFound, "not_found", "policy not found")
+		return
+	}
+
+	_, err = h.svc.queries.GetPolicyVersion(r.Context(), db.GetPolicyVersionParams{
 		PolicyID: policyID,
 		Version:  req.Version,
 	})

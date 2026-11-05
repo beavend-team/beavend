@@ -198,6 +198,7 @@ type GuardrailConfig struct {
 	MaxInputBytes    int      `json:"max_input_bytes" yaml:"max_input_bytes"`
 	MaxOutputBytes   int      `json:"max_output_bytes" yaml:"max_output_bytes"`
 	PIIRedaction     bool     `json:"pii_redaction" yaml:"pii_redaction"`
+	PIIBlock         bool     `json:"pii_block,omitempty" yaml:"pii_block,omitempty"`
 	InjectionDefense bool     `json:"injection_defense" yaml:"injection_defense"`
 	Rules            []string `json:"rules,omitempty" yaml:"rules,omitempty"`
 	MaxDepth         int      `json:"max_depth,omitempty" yaml:"max_depth,omitempty"` // Max agent loop iterations (default: 5)

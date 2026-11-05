@@ -185,4 +185,20 @@ func TestStreamWriter_WriteEventTypes(t *testing.T) {
 		require.NoError(t, err)
 		assert.Contains(t, buf.String(), "event: thinking\ndata: {\"text\":\"Let me analyze step by step.\"}\n\n")
 	})
+
+	t.Run("newlines stripped from ID and Type to prevent SSE frame injection", func(t *testing.T) {
+		var buf bytes.Buffer
+		evt := core.StreamEvent{
+			ID:    "123\nevent: forged\ndata: pwned",
+			Type:  "delta\r\nevent: admin",
+			Delta: "clean",
+		}
+
+		err := wr.WriteEvent(&buf, evt)
+		require.NoError(t, err)
+		assert.NotContains(t, buf.String(), "\nevent: forged")
+		assert.NotContains(t, buf.String(), "\nevent: admin")
+		assert.Contains(t, buf.String(), "id: 123event: forgeddata: pwned\n")
+		assert.Contains(t, buf.String(), "event: deltaevent: admin\n")
+	})
 }

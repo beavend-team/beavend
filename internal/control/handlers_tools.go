@@ -7,12 +7,12 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/beavend/beavend/internal/control/auth"
 	"github.com/beavend/beavend/internal/core"
 	"github.com/beavend/beavend/internal/secrets"
 	"github.com/beavend/beavend/internal/store/db"
 	"github.com/beavend/beavend/internal/tools"
 	chi "github.com/go-chi/chi/v5"
-	jsonschema "github.com/santhosh-tekuri/jsonschema/v5"
 )
 
 type CreateToolRequest struct {
@@ -146,8 +146,9 @@ func (h *Handler) HandleGetTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	toolID := chi.URLParam(r, "id")
+	projectID, env := getProjectAndEnv(r)
 	tool, err := h.svc.queries.GetTool(r.Context(), toolID)
-	if err != nil {
+	if err != nil || tool.ProjectID != projectID || tool.Environment != env {
 		writeError(w, http.StatusNotFound, "not_found", "tool not found")
 		return
 	}
@@ -164,10 +165,6 @@ func (h *Handler) HandleGetTool(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) HandleUpdateTool(w http.ResponseWriter, r *http.Request) {
-	if h.svc.queries == nil {
-		writeError(w, http.StatusInternalServerError, "database_unavailable", "database not configured")
-		return
-	}
 	toolID := chi.URLParam(r, "id")
 	projectID, env := getProjectAndEnv(r)
 
@@ -175,15 +172,6 @@ func (h *Handler) HandleUpdateTool(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-
-	existing, err := h.svc.queries.GetTool(r.Context(), toolID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "tool not found")
-		return
-	}
-
-	newVersion := existing.ActiveVersion + 1
-	versionID := fmt.Sprintf("%s_v%d", toolID, newVersion)
 
 	if req.SideEffect == "" {
 		req.SideEffect = "read"
@@ -194,6 +182,20 @@ func (h *Handler) HandleUpdateTool(w http.ResponseWriter, r *http.Request) {
 	if !validateToolPayload(w, &req) {
 		return
 	}
+
+	if h.svc.queries == nil {
+		writeError(w, http.StatusInternalServerError, "database_unavailable", "database not configured")
+		return
+	}
+
+	existing, err := h.svc.queries.GetTool(r.Context(), toolID)
+	if err != nil || existing.ProjectID != projectID || existing.Environment != env {
+		writeError(w, http.StatusNotFound, "not_found", "tool not found")
+		return
+	}
+
+	newVersion := existing.ActiveVersion + 1
+	versionID := fmt.Sprintf("%s_v%d", toolID, newVersion)
 	if len(req.IdentityBindings) == 0 {
 		req.IdentityBindings = []byte("{}")
 	}
@@ -255,6 +257,12 @@ func (h *Handler) HandleDeleteTool(w http.ResponseWriter, r *http.Request) {
 	toolID := chi.URLParam(r, "id")
 	projectID, env := getProjectAndEnv(r)
 
+	existingTool, err := h.svc.queries.GetTool(r.Context(), toolID)
+	if err != nil || existingTool.ProjectID != projectID || existingTool.Environment != env {
+		writeError(w, http.StatusNotFound, "not_found", "tool not found")
+		return
+	}
+
 	if err := h.svc.queries.DeleteTool(r.Context(), toolID); err != nil {
 		writeError(w, http.StatusInternalServerError, "database_error", err.Error())
 		return
@@ -291,9 +299,16 @@ func (h *Handler) HandleUpsertToolSecret(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	tool, err := h.svc.queries.GetTool(r.Context(), toolID)
+	if err != nil || tool.ProjectID != projectID || tool.Environment != env {
+		writeError(w, http.StatusNotFound, "not_found", "tool not found")
+		return
+	}
+
 	key := h.svc.masterKey
 	if len(key) == 0 {
-		key = []byte("default-master-key-32-chars-long")
+		writeError(w, http.StatusInternalServerError, "server_configuration_error", "master key is not configured")
+		return
 	}
 	derivedKey := secrets.DeriveKey(string(key))
 
@@ -335,41 +350,42 @@ func (h *Handler) HandleUpsertToolSecret(w http.ResponseWriter, r *http.Request)
 }
 
 func validateToolPayload(w http.ResponseWriter, req *CreateToolRequest) bool {
+	var inputSchema map[string]any
 	trimmedSchema := strings.TrimSpace(string(req.InputSchema))
-	if len(req.InputSchema) == 0 || trimmedSchema == "" || trimmedSchema == "null" || trimmedSchema == "{}" {
-		req.InputSchema = []byte("{}")
-	} else {
-		compiler := jsonschema.NewCompiler()
-		if err := compiler.AddResource("schema.json", strings.NewReader(trimmedSchema)); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_schema", fmt.Sprintf("invalid input_schema: %v", err))
+	if len(req.InputSchema) > 0 && trimmedSchema != "" && trimmedSchema != "null" && trimmedSchema != "{}" {
+		if err := json.Unmarshal(req.InputSchema, &inputSchema); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_schema", fmt.Sprintf("invalid input_schema json: %v", err))
 			return false
 		}
-		if _, err := compiler.Compile("schema.json"); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_schema", fmt.Sprintf("failed to compile input_schema: %v", err))
+	} else {
+		req.InputSchema = []byte("{}")
+	}
+
+	var execCfg core.ExecutorConfig
+	if len(req.Executor) > 0 && string(req.Executor) != "{}" {
+		if err := json.Unmarshal(req.Executor, &execCfg); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_executor", fmt.Sprintf("invalid executor json: %v", err))
 			return false
 		}
 	}
 
-	if len(req.Executor) > 0 && string(req.Executor) != "{}" {
-		var execCfg core.ExecutorConfig
-		if err := json.Unmarshal(req.Executor, &execCfg); err == nil {
-			switch execCfg.Type {
-			case "mcp":
-				if strings.TrimSpace(execCfg.URL) == "" {
-					writeError(w, http.StatusBadRequest, "invalid_executor", "mcp executor requires a non-empty url")
-					return false
-				}
-			case "sql_template":
-				if strings.TrimSpace(execCfg.Template) == "" {
-					writeError(w, http.StatusBadRequest, "invalid_executor", "sql_template executor requires a non-empty template")
-					return false
-				}
-				if err := tools.ValidateReadOnlySQL(execCfg.Template); err != nil {
-					writeError(w, http.StatusBadRequest, "invalid_sql_template", err.Error())
-					return false
-				}
-			}
+	tDef := core.ToolDefinition{
+		ID:          req.ID,
+		Name:        req.Name,
+		InputSchema: inputSchema,
+		Executor:    execCfg,
+	}
+
+	if err := tools.ValidateToolDefinition(tDef); err != nil {
+		errStr := err.Error()
+		if strings.Contains(errStr, "input schema") {
+			writeError(w, http.StatusBadRequest, "invalid_schema", errStr)
+		} else if strings.Contains(errStr, "sql template") || strings.Contains(errStr, "not permitted in read-only") || strings.Contains(errStr, "statement must start with") {
+			writeError(w, http.StatusBadRequest, "invalid_sql_template", errStr)
+		} else {
+			writeError(w, http.StatusBadRequest, "invalid_executor", errStr)
 		}
+		return false
 	}
 	return true
 }
@@ -385,6 +401,7 @@ func (h *Handler) HandleTestTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	toolID := chi.URLParam(r, "id")
+	projectID, env := getProjectAndEnv(r)
 
 	var req TestToolRequest
 	if !decodeJSON(w, r, &req) {
@@ -392,7 +409,7 @@ func (h *Handler) HandleTestTool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tool, err := h.svc.queries.GetTool(r.Context(), toolID)
-	if err != nil {
+	if err != nil || tool.ProjectID != projectID || tool.Environment != env {
 		writeError(w, http.StatusNotFound, "not_found", "tool not found")
 		return
 	}
@@ -434,9 +451,20 @@ func (h *Handler) HandleTestTool(w http.ResponseWriter, r *http.Request) {
 		Authorization:    tv.Authorization,
 	}
 
+	if tv.SideEffect == "write" {
+		writeError(w, http.StatusForbidden, "write_tool_test_prohibited", "testing tools with side_effect=write via admin API is prohibited")
+		return
+	}
+
 	var id core.Identity
 	if req.Identity != nil {
 		id = *req.Identity
+	}
+	if adminUser, ok := auth.GetAdminUser(r.Context()); ok && adminUser != nil {
+		if id.Subject == "" || adminUser.Role != auth.RoleOwner {
+			id.Subject = adminUser.ID
+			id.Issuer = "beavend:admin"
+		}
 	}
 
 	args := req.Arguments
@@ -459,9 +487,21 @@ func (h *Handler) HandleTestTool(w http.ResponseWriter, r *http.Request) {
 	case "http", "webhook", "":
 		exec = tools.NewHTTPExecutor(tDef, nil, nil)
 	case "mcp":
+		if strings.EqualFold(execCfg.Transport, "stdio") || strings.TrimSpace(execCfg.Command) != "" {
+			writeError(w, http.StatusBadRequest, "invalid_executor", "mcp stdio transport is disabled to prevent host execution")
+			return
+		}
 		exec = tools.NewMCPExecutor(tDef, nil, nil)
 	case "sql_template":
 		exec = tools.NewSQLTemplateExecutor(tDef, nil)
+	case "wasm":
+		rt, err := tools.NewWASMRuntime(r.Context(), nil, nil)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "wasm_init_error", err.Error())
+			return
+		}
+		defer rt.Close(r.Context())
+		exec = tools.NewWASMExecutor(tDef, rt)
 	default:
 		writeError(w, http.StatusBadRequest, "unsupported_executor", fmt.Sprintf("unsupported executor type: %s", execCfg.Type))
 		return
@@ -493,7 +533,13 @@ func (h *Handler) HandleSetActiveToolVersion(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	_, err := h.svc.queries.GetToolVersion(r.Context(), db.GetToolVersionParams{
+	tool, err := h.svc.queries.GetTool(r.Context(), toolID)
+	if err != nil || tool.ProjectID != projectID || tool.Environment != env {
+		writeError(w, http.StatusNotFound, "not_found", "tool not found")
+		return
+	}
+
+	_, err = h.svc.queries.GetToolVersion(r.Context(), db.GetToolVersionParams{
 		ToolID:  toolID,
 		Version: req.Version,
 	})

@@ -132,6 +132,78 @@ func TestHandler_ToolJSONSchemaValidation(t *testing.T) {
 	handler.HandleCreateTool(recMCP, reqMCP)
 	assert.Equal(t, http.StatusBadRequest, recMCP.Code)
 	assert.Contains(t, recMCP.Body.String(), "invalid_executor")
+
+	// MCP stdio transport must be rejected to prevent host execution
+	badMCPStdioReq := CreateToolRequest{
+		ID:       "tool_bad_mcp_stdio",
+		Name:     "Bad MCP Stdio Tool",
+		Executor: json.RawMessage(`{"type": "mcp", "transport": "stdio", "command": "cat"}`),
+	}
+	bodyMCPStdio, _ := json.Marshal(badMCPStdioReq)
+	reqMCPStdio := httptest.NewRequest("POST", "/v1/admin/tools", bytes.NewReader(bodyMCPStdio))
+	recMCPStdio := httptest.NewRecorder()
+	handler.HandleCreateTool(recMCPStdio, reqMCPStdio)
+	assert.Equal(t, http.StatusBadRequest, recMCPStdio.Code)
+	assert.Contains(t, recMCPStdio.Body.String(), "mcp stdio transport is disabled to prevent host execution")
+
+	// SQL template targeting localhost must be rejected
+	badSQLLocalhostReq := CreateToolRequest{
+		ID:       "tool_bad_sql_localhost",
+		Name:     "Bad SQL Localhost",
+		Executor: json.RawMessage(`{"type": "sql_template", "template": "SELECT 1;", "url": "postgres://user:pass@localhost:5432/db"}`),
+	}
+	bodySQLLocalhost, _ := json.Marshal(badSQLLocalhostReq)
+	reqSQLLocalhost := httptest.NewRequest("POST", "/v1/admin/tools", bytes.NewReader(bodySQLLocalhost))
+	recSQLLocalhost := httptest.NewRecorder()
+	handler.HandleCreateTool(recSQLLocalhost, reqSQLLocalhost)
+	assert.Equal(t, http.StatusBadRequest, recSQLLocalhost.Code)
+	assert.Contains(t, recSQLLocalhost.Body.String(), "database connection blocked by security policy")
+
+	// WASM missing both binary_base64 and binary_url must fail validation
+	badWASMEmptyReq := CreateToolRequest{
+		ID:       "tool_bad_wasm_empty",
+		Name:     "Bad WASM Empty",
+		Executor: json.RawMessage(`{"type": "wasm", "wasm": {}}`),
+	}
+	bodyWASMEmpty, _ := json.Marshal(badWASMEmptyReq)
+	reqWASMEmpty := httptest.NewRequest("POST", "/v1/admin/tools", bytes.NewReader(bodyWASMEmpty))
+	recWASMEmpty := httptest.NewRecorder()
+	handler.HandleCreateTool(recWASMEmpty, reqWASMEmpty)
+	assert.Equal(t, http.StatusBadRequest, recWASMEmpty.Code)
+	assert.Contains(t, recWASMEmpty.Body.String(), "wasm executor requires binary_base64 or binary_url")
+
+	// WASM with invalid magic header must fail validation
+	badWASMHeaderReq := CreateToolRequest{
+		ID:       "tool_bad_wasm_header",
+		Name:     "Bad WASM Header",
+		Executor: json.RawMessage(`{"type": "wasm", "wasm": {"binary_base64": "bm90X3dhc21fZGF0YQ=="}}`),
+	}
+	bodyWASMHeader, _ := json.Marshal(badWASMHeaderReq)
+	reqWASMHeader := httptest.NewRequest("POST", "/v1/admin/tools", bytes.NewReader(bodyWASMHeader))
+	recWASMHeader := httptest.NewRecorder()
+	handler.HandleCreateTool(recWASMHeader, reqWASMHeader)
+	assert.Equal(t, http.StatusBadRequest, recWASMHeader.Code)
+	assert.Contains(t, recWASMHeader.Body.String(), "missing required")
+
+	// WASM with memory limit exceeding 64MB must fail validation
+	badWASMMemReq := CreateToolRequest{
+		ID:       "tool_bad_wasm_mem",
+		Name:     "Bad WASM Memory",
+		Executor: json.RawMessage(`{"type": "wasm", "wasm": {"binary_base64": "AGFzbQEAAAA=", "max_memory_mb": 128}}`),
+	}
+	bodyWASMMem, _ := json.Marshal(badWASMMemReq)
+	reqWASMMem := httptest.NewRequest("POST", "/v1/admin/tools", bytes.NewReader(bodyWASMMem))
+	recWASMMem := httptest.NewRecorder()
+	handler.HandleCreateTool(recWASMMem, reqWASMMem)
+	assert.Equal(t, http.StatusBadRequest, recWASMMem.Code)
+	assert.Contains(t, recWASMMem.Body.String(), "max_memory_mb cannot exceed 64MB")
+
+	// HandleUpdateTool must also enforce validation and reject malicious tools
+	reqUpdateBad := httptest.NewRequest("PUT", "/v1/admin/tools/tool_bad_mcp_stdio", bytes.NewReader(bodyMCPStdio))
+	recUpdateBad := httptest.NewRecorder()
+	handler.HandleUpdateTool(recUpdateBad, reqUpdateBad)
+	assert.Equal(t, http.StatusBadRequest, recUpdateBad.Code)
+	assert.Contains(t, recUpdateBad.Body.String(), "mcp stdio transport is disabled to prevent host execution")
 }
 
 func TestMountRoutes_RBAC(t *testing.T) {
@@ -195,6 +267,13 @@ func TestMountRoutes_RBAC(t *testing.T) {
 	r.ServeHTTP(recOwnerUsers, reqOwnerUsers)
 	assert.NotEqual(t, http.StatusForbidden, recOwnerUsers.Code)
 	assert.NotEqual(t, http.StatusUnauthorized, recOwnerUsers.Code)
+
+	// 7. Editor cannot access Environment Auth update (returns 403 Forbidden)
+	reqEditorAuth := httptest.NewRequest("PUT", "/v1/admin/projects/p1/environments/e1/auth", bytes.NewReader([]byte("{}")))
+	reqEditorAuth.Header.Set("Authorization", "Bearer "+editorToken)
+	recEditorAuth := httptest.NewRecorder()
+	r.ServeHTTP(recEditorAuth, reqEditorAuth)
+	assert.Equal(t, http.StatusForbidden, recEditorAuth.Code)
 }
 
 func TestControlService_PurgeSubjectCache(t *testing.T) {

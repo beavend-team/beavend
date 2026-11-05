@@ -50,11 +50,12 @@ export function validateRoutes(routes: ModelRoutes, models: ModelRouting[]): str
 const ModalityChips: React.FC<{ value: Modality[]; onChange: (v: Modality[]) => void }> = ({ value, onChange }) => (
   <div className="flex flex-wrap gap-2">
     {ALL_MODALITIES.map((m) => (
-      <label key={m} className="flex items-center gap-1 text-[11px] text-neutral-300 cursor-pointer">
+      <label key={m} className="flex items-center gap-1.5 text-[11px] text-neutral-300 cursor-pointer select-none">
         <input
           type="checkbox"
           checked={value.includes(m)}
           onChange={() => onChange(value.includes(m) ? value.filter((x) => x !== m) : [...value, m])}
+          className="rounded border-neutral-700 bg-neutral-900 text-emerald-500 focus:ring-emerald-500/30 accent-emerald-500"
         />
         {m}
       </label>
@@ -98,7 +99,7 @@ export const RoutingEditor: React.FC<RoutingEditorProps> = ({ models, value, onC
       />
 
       <div className="space-y-3">
-        <p className="text-[11px] text-neutral-500">
+        <p className="text-[11px] text-neutral-400">
           Rules are evaluated top to bottom; the first match wins, otherwise the default model is used. Pickers only list
           models whose declared capabilities satisfy the rule.
         </p>
@@ -110,9 +111,9 @@ export const RoutingEditor: React.FC<RoutingEditorProps> = ({ models, value, onC
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-neutral-300">Rule {i + 1}</span>
                 <div className="flex gap-1">
-                  <Button type="button" variant="ghost" size="xs" onClick={() => move(i, -1)} icon={<ArrowUp className="w-3 h-3" />} />
-                  <Button type="button" variant="ghost" size="xs" onClick={() => move(i, 1)} icon={<ArrowDown className="w-3 h-3" />} />
-                  <Button type="button" variant="ghost" size="xs" onClick={() => setRules(rules.filter((_, idx) => idx !== i))} icon={<Trash2 className="w-3 h-3" />} />
+                  <Button type="button" variant="ghost" size="xs" onClick={() => move(i, -1)} icon={<ArrowUp className="w-3 h-3" />} title="Move rule up" aria-label="Move rule up" />
+                  <Button type="button" variant="ghost" size="xs" onClick={() => move(i, 1)} icon={<ArrowDown className="w-3 h-3" />} title="Move rule down" aria-label="Move rule down" />
+                  <Button type="button" variant="ghost" size="xs" onClick={() => setRules(rules.filter((_, idx) => idx !== i))} icon={<Trash2 className="w-3 h-3" />} title="Delete rule" aria-label="Delete rule" />
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

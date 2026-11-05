@@ -73,6 +73,26 @@ func TestValidateReadOnlySQL(t *testing.T) {
 			query:     "   \n\t  ",
 			shouldErr: true,
 		},
+		{
+			name:      "reject pg_read_file server side function",
+			query:     "SELECT pg_read_file('/etc/passwd')",
+			shouldErr: true,
+		},
+		{
+			name:      "reject pg_terminate_backend server side function",
+			query:     "SELECT pg_terminate_backend(123)",
+			shouldErr: true,
+		},
+		{
+			name:      "reject schema-qualified pg_catalog.pg_read_file",
+			query:     "SELECT pg_catalog.pg_read_file('/etc/passwd')",
+			shouldErr: true,
+		},
+		{
+			name:      "reject schema-qualified pg_catalog.pg_terminate_backend",
+			query:     "SELECT pg_catalog.pg_terminate_backend(pid) FROM pg_stat_activity",
+			shouldErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -83,6 +103,112 @@ func TestValidateReadOnlySQL(t *testing.T) {
 			}
 			if !tt.shouldErr && err != nil {
 				t.Errorf("unexpected error for query %q: %v", tt.query, err)
+			}
+		})
+	}
+}
+
+func TestValidateConnectionTarget(t *testing.T) {
+	tests := []struct {
+		name         string
+		dsn          string
+		allowPrivate bool
+		shouldErr    bool
+	}{
+		{
+			name:         "empty dsn",
+			dsn:          "",
+			allowPrivate: false,
+			shouldErr:    true,
+		},
+		{
+			name:         "postgres localhost url",
+			dsn:          "postgres://user:pass@localhost:5432/mydb",
+			allowPrivate: false,
+			shouldErr:    true,
+		},
+		{
+			name:         "postgres 127.0.0.1 url",
+			dsn:          "postgresql://user:pass@127.0.0.1:5432/mydb",
+			allowPrivate: false,
+			shouldErr:    true,
+		},
+		{
+			name:         "postgres metadata url",
+			dsn:          "postgres://user:pass@169.254.169.254:5432/mydb",
+			allowPrivate: false,
+			shouldErr:    true,
+		},
+		{
+			name:         "postgres key-value localhost",
+			dsn:          "host=localhost port=5432 user=app dbname=mydb",
+			allowPrivate: false,
+			shouldErr:    true,
+		},
+		{
+			name:         "postgres key-value 10.x.x.x private",
+			dsn:          "host=10.0.0.15 port=5432 user=app dbname=mydb",
+			allowPrivate: false,
+			shouldErr:    true,
+		},
+		{
+			name:         "postgres key-value private allowed",
+			dsn:          "host=10.0.0.15 port=5432 user=app dbname=mydb",
+			allowPrivate: true,
+			shouldErr:    false,
+		},
+		{
+			name:         "direct local sqlite file path rejected",
+			dsn:          "/etc/passwd",
+			allowPrivate: false,
+			shouldErr:    true,
+		},
+		{
+			name:         "empty host postgresql uri rejected (prevents local socket default)",
+			dsn:          "postgresql:///dbname",
+			allowPrivate: false,
+			shouldErr:    true,
+		},
+		{
+			name:         "keyword dsn without host rejected",
+			dsn:          "user=postgres dbname=beavend",
+			allowPrivate: false,
+			shouldErr:    true,
+		},
+		{
+			name:         "query parameter unix domain socket override rejected",
+			dsn:          "postgresql://remote-db.example.com:5432/dbname?host=/var/run/postgresql",
+			allowPrivate: false,
+			shouldErr:    true,
+		},
+		{
+			name:         "unix socket path in keyword dsn rejected",
+			dsn:          "host=/var/run/postgresql port=5432 dbname=mydb",
+			allowPrivate: false,
+			shouldErr:    true,
+		},
+		{
+			name:         "relative sqlite path rejected",
+			dsn:          "../app.db",
+			allowPrivate: false,
+			shouldErr:    true,
+		},
+		{
+			name:         "schemeless relative sqlite path rejected",
+			dsn:          "data/mydb.sqlite",
+			allowPrivate: false,
+			shouldErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateConnectionTarget(tt.dsn, tt.allowPrivate)
+			if tt.shouldErr && err == nil {
+				t.Errorf("expected error for dsn %q, got nil", tt.dsn)
+			}
+			if !tt.shouldErr && err != nil {
+				t.Errorf("unexpected error for dsn %q: %v", tt.dsn, err)
 			}
 		})
 	}
@@ -119,6 +245,23 @@ func TestPrepareParameterizedQuery(t *testing.T) {
 		}
 		if params[2] != 10 {
 			t.Errorf("expected param 2 to be 10, got %v", params[2])
+		}
+	})
+
+	t.Run("confused deputy defense: caller-supplied user_id is overwritten by identity", func(t *testing.T) {
+		args := map[string]any{
+			"user_id": "malicious_spoofed_user",
+			"status":  "completed",
+			"limit":   10,
+		}
+		id := core.Identity{Subject: "legitimate_usr_42"}
+
+		_, params, err := PrepareParameterizedQuery(template, "postgres", args, id)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if params[0] != "legitimate_usr_42" {
+			t.Errorf("expected caller-supplied user_id to be overwritten by 'legitimate_usr_42', got %v", params[0])
 		}
 	})
 
@@ -265,5 +408,30 @@ func TestSQLTemplateExecutor_Execution(t *testing.T) {
 
 	if result.Metadata["row_count"] != 2 {
 		t.Errorf("expected row_count 2, got %v", result.Metadata["row_count"])
+	}
+}
+
+func TestSQLTemplate_PostgresTypecastsAndParameters(t *testing.T) {
+	template := "SELECT created_at::text, amount::numeric FROM transactions WHERE user_id = :user_id AND status = :status"
+	args := map[string]any{
+		"user_id": "usr_123",
+		"status":  "completed",
+	}
+
+	query, params, err := PrepareParameterizedQuery(template, "postgres", args, core.Identity{})
+	if err != nil {
+		t.Fatalf("unexpected transform error: %v", err)
+	}
+
+	expectedQuery := "SELECT created_at::text, amount::numeric FROM transactions WHERE user_id = $1 AND status = $2"
+	if query != expectedQuery {
+		t.Errorf("expected query:\n%s\ngot:\n%s", expectedQuery, query)
+	}
+
+	if len(params) != 2 {
+		t.Fatalf("expected 2 parameters, got %d", len(params))
+	}
+	if params[0] != "usr_123" || params[1] != "completed" {
+		t.Errorf("unexpected params: %v", params)
 	}
 }
